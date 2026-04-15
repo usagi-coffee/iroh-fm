@@ -35,9 +35,8 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
 
     let cache_started = Instant::now();
     let mut cache = ScanCache::open(root)?;
-    let mut cache_miss_tracks = Vec::new();
+    let mut scanned_tracks = Vec::with_capacity(library_files.audio_files.len());
     let mut seen_audio_paths = Vec::with_capacity(library_files.audio_files.len());
-    let mut builder = LibraryBuilder::new(library_files.sidecar_by_dir);
     let mut cache_hits = 0;
     let mut cache_misses = 0;
 
@@ -52,14 +51,13 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
             Some(tags) => {
                 cache_hits += 1;
                 scanned_track.tags = Some(tags);
-                builder.add_track(root, scanned_track)?;
             }
             None => {
                 cache_misses += 1;
                 scanned_track.needs_cache_store = true;
-                cache_miss_tracks.push(scanned_track);
             }
         }
+        scanned_tracks.push(scanned_track);
 
         let scanned = index + 1;
         if scanned % SCAN_PROGRESS_BATCH_SIZE == 0 || scanned == library_files.audio_files.len() {
@@ -81,7 +79,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     );
 
     let extraction_started = Instant::now();
-    fill_missing_tags_parallel(&mut cache_miss_tracks, cache_misses);
+    fill_missing_tags_parallel(&mut scanned_tracks, cache_misses);
     if cache_misses > 0 {
         eprintln!(
             "[scanner] tag extraction complete misses={} elapsed_ms={}",
@@ -91,7 +89,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     }
 
     let store_started = Instant::now();
-    cache.store_track_tags_batch(&cache_miss_tracks)?;
+    cache.store_track_tags_batch(&scanned_tracks)?;
     eprintln!(
         "[scanner] cache store complete elapsed_ms={}",
         store_started.elapsed().as_millis()
@@ -109,9 +107,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     }
 
     let index_started = Instant::now();
-    for scanned_track in cache_miss_tracks {
-        builder.add_track(root, scanned_track)?;
-    }
+    let builder = build_index_parallel(root, &scanned_tracks, library_files.sidecar_by_dir)?;
     eprintln!(
         "[scanner] index build complete elapsed_ms={}",
         index_started.elapsed().as_millis()
@@ -354,6 +350,101 @@ impl LibraryBuilder {
             cover_arts: self.cover_arts,
         }
     }
+
+    fn merge(&mut self, other: LibraryBuilder) {
+        for (path, cover_art_id) in other.cover_art_by_path {
+            self.cover_art_by_path.entry(path).or_insert(cover_art_id);
+        }
+        for (cover_art_id, source) in other.cover_arts {
+            self.cover_arts.entry(cover_art_id).or_insert(source);
+        }
+
+        for (artist_id, artist) in other.artists {
+            let target = self
+                .artists
+                .entry(artist_id.clone())
+                .or_insert_with(|| Artist {
+                    id: artist_id.clone(),
+                    name: artist.name,
+                    album_ids: Vec::new(),
+                });
+            for album_id in artist.album_ids {
+                if !target.album_ids.contains(&album_id) {
+                    target.album_ids.push(album_id);
+                }
+            }
+        }
+
+        for (key, album_id) in other.albums_by_key {
+            self.albums_by_key.entry(key).or_insert(album_id);
+        }
+        for (name, artist_id) in other.artists_by_name {
+            self.artists_by_name.entry(name).or_insert(artist_id);
+        }
+
+        for (album_id, album) in other.albums {
+            if !self.albums.contains_key(&album_id) {
+                self.albums.insert(album_id, album);
+                continue;
+            }
+
+            let target = self.albums.get_mut(&album_id).expect("album exists");
+            for track_id in album.track_ids {
+                let Some(track) = other.tracks.get(&track_id) else {
+                    continue;
+                };
+                if !target.track_ids.contains(&track_id) {
+                    target.track_ids.push(track_id.clone());
+                    merge_album_track_metadata(
+                        target,
+                        track,
+                        track.file_size,
+                        track.cover_art_id.clone(),
+                    );
+                }
+            }
+        }
+
+        for (track_id, track) in other.tracks {
+            self.tracks.entry(track_id).or_insert(track);
+        }
+    }
+}
+
+fn build_index_parallel(
+    root: &Path,
+    scanned_tracks: &[ScannedTrack],
+    sidecar_by_dir: BTreeMap<PathBuf, Option<PathBuf>>,
+) -> Result<LibraryBuilder> {
+    if scanned_tracks.is_empty() {
+        return Ok(LibraryBuilder::new(sidecar_by_dir));
+    }
+
+    let threads = rayon::current_num_threads().max(1);
+    let chunk_size = (scanned_tracks.len() / threads).max(256);
+    eprintln!(
+        "[scanner] index build start tracks={} threads={} chunk_size={}",
+        scanned_tracks.len(),
+        threads,
+        chunk_size
+    );
+
+    let partials = scanned_tracks
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            let mut builder = LibraryBuilder::new(sidecar_by_dir.clone());
+            for scanned_track in chunk {
+                builder.add_track(root, scanned_track.clone())?;
+            }
+            Ok(builder)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut merged = LibraryBuilder::new(sidecar_by_dir);
+    for partial in partials {
+        merged.merge(partial);
+    }
+    Ok(merged)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,7 +468,7 @@ struct TrackTags {
     musicbrainz_release_group_id: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ScannedTrack {
     path: PathBuf,
     relative_path: PathBuf,
