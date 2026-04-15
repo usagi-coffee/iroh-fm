@@ -35,6 +35,8 @@ pub enum Error {
     ReadToEnd(#[from] iroh::endpoint::ReadToEndError),
     #[error("iroh write error: {0}")]
     Write(#[from] iroh::endpoint::WriteError),
+    #[error("timeout: {0}")]
+    Timeout(String),
     #[error("invalid music dir: {0}")]
     InvalidMusicDir(PathBuf),
     #[error("{0} not found: {1}")]

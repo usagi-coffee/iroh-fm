@@ -46,6 +46,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
             }
             None => {
                 cache_misses += 1;
+                scanned_track.needs_cache_store = true;
             }
         }
         scanned_tracks.push(scanned_track);
@@ -330,6 +331,7 @@ struct ScannedTrack {
     fallback_album: String,
     fallback_title: String,
     fallback_track_number: Option<u32>,
+    needs_cache_store: bool,
     tags: Option<TrackTags>,
 }
 
@@ -360,6 +362,7 @@ impl ScannedTrack {
             fallback_album,
             fallback_title,
             fallback_track_number,
+            needs_cache_store: false,
             tags: None,
         })
     }
@@ -471,6 +474,15 @@ impl ScanCache {
     }
 
     fn store_track_tags_batch(&mut self, scanned_tracks: &[ScannedTrack]) -> Result<()> {
+        let tracks_to_store = scanned_tracks
+            .iter()
+            .filter(|track| track.needs_cache_store)
+            .collect::<Vec<_>>();
+        if tracks_to_store.is_empty() {
+            eprintln!("[scanner] cache store skipped rows=0");
+            return Ok(());
+        }
+
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
@@ -484,7 +496,7 @@ impl ScanCache {
                     updated_unix = excluded.updated_unix
                 "#,
             )?;
-            for scanned_track in scanned_tracks {
+            for scanned_track in &tracks_to_store {
                 let Some(tags) = &scanned_track.tags else {
                     continue;
                 };
@@ -497,6 +509,7 @@ impl ScanCache {
             }
         }
         tx.commit()?;
+        eprintln!("[scanner] cache store rows={}", tracks_to_store.len());
         Ok(())
     }
 

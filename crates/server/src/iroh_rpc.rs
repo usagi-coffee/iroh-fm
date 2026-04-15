@@ -10,9 +10,13 @@ use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, Tra
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio::time::{Duration, timeout};
 
 use crate::error::{Error, Result};
 use crate::server::MusicServer;
+
+const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default)]
 pub struct IrohConfig {
@@ -67,7 +71,10 @@ impl RemoteClient {
             request_name(&request)
         );
         let conn = self.connection().await?;
-        match self.request_on_connection(&conn, &request).await {
+        match self
+            .request_on_connection_with_timeout(&conn, &request)
+            .await
+        {
             Ok(BackendResponse::Error { message }) => Err(Error::InvalidRequest(message)),
             Ok(response) => {
                 eprintln!(
@@ -83,7 +90,10 @@ impl RemoteClient {
                 );
                 self.clear_connection().await;
                 let conn = self.connection().await?;
-                let response = match self.request_on_connection(&conn, &request).await? {
+                let response = match self
+                    .request_on_connection_with_timeout(&conn, &request)
+                    .await?
+                {
                     BackendResponse::Error { message } => {
                         return Err(Error::InvalidRequest(message));
                     }
@@ -109,10 +119,23 @@ impl RemoteClient {
         read_json(&mut recv).await
     }
 
+    async fn request_on_connection_with_timeout(
+        &self,
+        conn: &Connection,
+        request: &BackendRequest,
+    ) -> Result<BackendResponse> {
+        timeout(RPC_TIMEOUT, self.request_on_connection(conn, request))
+            .await
+            .map_err(|_| Error::Timeout(format!("rpc {}", request_name(request))))?
+    }
+
     pub async fn stream(&self, track_id: TrackId) -> Result<(StreamDescriptor, Vec<u8>)> {
         eprintln!("[server-rpc-client] stream start track_id={}", track_id.0);
         let conn = self.connection().await?;
-        match self.stream_on_connection(&conn, track_id.clone()).await {
+        match self
+            .stream_on_connection_with_timeout(&conn, track_id.clone())
+            .await
+        {
             Ok(stream) => Ok(stream),
             Err(error) => {
                 eprintln!(
@@ -121,7 +144,8 @@ impl RemoteClient {
                 );
                 self.clear_connection().await;
                 let conn = self.connection().await?;
-                self.stream_on_connection(&conn, track_id).await
+                self.stream_on_connection_with_timeout(&conn, track_id)
+                    .await
             }
         }
     }
@@ -147,6 +171,19 @@ impl RemoteClient {
         Ok((descriptor, bytes))
     }
 
+    async fn stream_on_connection_with_timeout(
+        &self,
+        conn: &Connection,
+        track_id: TrackId,
+    ) -> Result<(StreamDescriptor, Vec<u8>)> {
+        timeout(
+            RPC_TIMEOUT,
+            self.stream_on_connection(conn, track_id.clone()),
+        )
+        .await
+        .map_err(|_| Error::Timeout(format!("stream {}", track_id.0)))?
+    }
+
     async fn connection(&self) -> Result<Connection> {
         let mut guard = self.conn.lock().await;
         if let Some(conn) = guard.as_ref() {
@@ -154,7 +191,12 @@ impl RemoteClient {
         }
 
         eprintln!("[server-rpc-client] connecting backend transport");
-        let conn = self.endpoint.connect(self.addr.clone(), IROH_ALPN).await?;
+        let conn = timeout(
+            CONNECT_TIMEOUT,
+            self.endpoint.connect(self.addr.clone(), IROH_ALPN),
+        )
+        .await
+        .map_err(|_| Error::Timeout("connect backend transport".to_string()))??;
         eprintln!(
             "[server-rpc-client] backend transport connected remote_endpoint={}",
             conn.remote_id()
