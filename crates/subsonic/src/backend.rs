@@ -10,6 +10,7 @@ pub trait Backend {
     async fn artists(&self) -> Result<BackendResponse>;
     async fn artist(&self, artist_id: &str) -> Result<BackendResponse>;
     async fn album(&self, album_id: &str) -> Result<BackendResponse>;
+    async fn album_tracks(&self, album_id: &str) -> Result<BackendResponse>;
     async fn track(&self, track_id: &str) -> Result<BackendResponse>;
     async fn cover_art(&self, cover_art_id: &str) -> Result<BackendResponse>;
     async fn search(&self, term: &str, limit: usize) -> Result<BackendResponse>;
@@ -48,6 +49,14 @@ impl Backend for RemoteBackend {
     async fn album(&self, album_id: &str) -> Result<BackendResponse> {
         self.client
             .request(BackendRequest::GetAlbum {
+                album_id: protocol::AlbumId(album_id.to_string()),
+            })
+            .await
+    }
+
+    async fn album_tracks(&self, album_id: &str) -> Result<BackendResponse> {
+        self.client
+            .request(BackendRequest::GetAlbumTracks {
                 album_id: protocol::AlbumId(album_id.to_string()),
             })
             .await

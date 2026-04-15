@@ -63,17 +63,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     }
 
     fill_missing_tags_parallel(&mut scanned_tracks, cache_misses);
-    for scanned_track in &scanned_tracks {
-        let Some(tags) = &scanned_track.tags else {
-            continue;
-        };
-        cache.store_track_tags(
-            &scanned_track.relative_path_string,
-            scanned_track.file_size,
-            scanned_track.modified_unix,
-            tags,
-        )?;
-    }
+    cache.store_track_tags_batch(&scanned_tracks)?;
 
     let seen_audio_paths = scanned_tracks
         .iter()
@@ -480,30 +470,33 @@ impl ScanCache {
         Ok(Some(serde_json::from_str(&tags_json)?))
     }
 
-    fn store_track_tags(
-        &self,
-        relative_path: &str,
-        file_size: u64,
-        modified_unix: i64,
-        tags: &TrackTags,
-    ) -> Result<()> {
-        self.conn.execute(
-            r#"
-            INSERT INTO track_tags (relative_path, file_size, modified_unix, tags_json, updated_unix)
-            VALUES (?1, ?2, ?3, ?4, unixepoch())
-            ON CONFLICT(relative_path) DO UPDATE SET
-                file_size = excluded.file_size,
-                modified_unix = excluded.modified_unix,
-                tags_json = excluded.tags_json,
-                updated_unix = excluded.updated_unix
-            "#,
-            params![
-                relative_path,
-                i64::try_from(file_size).unwrap_or(i64::MAX),
-                modified_unix,
-                serde_json::to_string(tags)?,
-            ],
-        )?;
+    fn store_track_tags_batch(&mut self, scanned_tracks: &[ScannedTrack]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT INTO track_tags (relative_path, file_size, modified_unix, tags_json, updated_unix)
+                VALUES (?1, ?2, ?3, ?4, unixepoch())
+                ON CONFLICT(relative_path) DO UPDATE SET
+                    file_size = excluded.file_size,
+                    modified_unix = excluded.modified_unix,
+                    tags_json = excluded.tags_json,
+                    updated_unix = excluded.updated_unix
+                "#,
+            )?;
+            for scanned_track in scanned_tracks {
+                let Some(tags) = &scanned_track.tags else {
+                    continue;
+                };
+                stmt.execute(params![
+                    scanned_track.relative_path_string.as_str(),
+                    i64::try_from(scanned_track.file_size).unwrap_or(i64::MAX),
+                    scanned_track.modified_unix,
+                    serde_json::to_string(tags)?,
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 

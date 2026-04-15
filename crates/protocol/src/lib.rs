@@ -113,6 +113,7 @@ pub enum BackendRequest {
     ListArtists,
     GetArtist { artist_id: ArtistId },
     GetAlbum { album_id: AlbumId },
+    GetAlbumTracks { album_id: AlbumId },
     GetTrack { track_id: TrackId },
     GetCoverArt { cover_art_id: CoverArtId },
     Search { query: SearchQuery },
@@ -132,6 +133,7 @@ pub enum BackendResponse {
     Artists(Vec<Artist>),
     Artist(Artist),
     Album(Album),
+    Tracks(Vec<Track>),
     Track(Track),
     CoverArt(CoverArtBytes),
     SearchResults {

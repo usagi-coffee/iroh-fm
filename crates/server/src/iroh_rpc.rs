@@ -2,9 +2,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, endpoint::presets};
+use iroh::{
+    Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
+    endpoint::{Connection, RecvStream, SendStream, presets},
+};
 use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, TrackId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::error::{Error, Result};
@@ -26,6 +30,7 @@ pub struct ServerHandle {
 pub struct RemoteClient {
     endpoint: Endpoint,
     addr: EndpointAddr,
+    conn: Arc<Mutex<Option<Connection>>>,
 }
 
 impl RemoteClient {
@@ -47,7 +52,13 @@ impl RemoteClient {
             "[server-rpc-client] local endpoint ready local_endpoint={}",
             endpoint.id()
         );
-        Ok(Self { endpoint, addr })
+        let client = Self {
+            endpoint,
+            addr,
+            conn: Arc::new(Mutex::new(None)),
+        };
+        let _ = client.connection().await?;
+        Ok(client)
     }
 
     pub async fn request(&self, request: BackendRequest) -> Result<BackendResponse> {
@@ -55,22 +66,71 @@ impl RemoteClient {
             "[server-rpc-client] request start kind={}",
             request_name(&request)
         );
-        let conn = self.endpoint.connect(self.addr.clone(), IROH_ALPN).await?;
+        let conn = self.connection().await?;
+        match self.request_on_connection(&conn, &request).await {
+            Ok(BackendResponse::Error { message }) => Err(Error::InvalidRequest(message)),
+            Ok(response) => {
+                eprintln!(
+                    "[server-rpc-client] request ok kind={}",
+                    request_name(&request)
+                );
+                Ok(response)
+            }
+            Err(error) => {
+                eprintln!(
+                    "[server-rpc-client] request failed kind={} error={error}; reconnecting once",
+                    request_name(&request)
+                );
+                self.clear_connection().await;
+                let conn = self.connection().await?;
+                let response = match self.request_on_connection(&conn, &request).await? {
+                    BackendResponse::Error { message } => {
+                        return Err(Error::InvalidRequest(message));
+                    }
+                    response => response,
+                };
+                eprintln!(
+                    "[server-rpc-client] request ok kind={}",
+                    request_name(&request)
+                );
+                Ok(response)
+            }
+        }
+    }
+
+    async fn request_on_connection(
+        &self,
+        conn: &Connection,
+        request: &BackendRequest,
+    ) -> Result<BackendResponse> {
         let (mut send, mut recv) = conn.open_bi().await?;
         write_json(&mut send, &request).await?;
         send.finish()?;
-        let response = read_response(&mut recv).await?;
-        conn.close(0u32.into(), b"done");
-        eprintln!(
-            "[server-rpc-client] request ok kind={}",
-            request_name(&request)
-        );
-        Ok(response)
+        read_json(&mut recv).await
     }
 
     pub async fn stream(&self, track_id: TrackId) -> Result<(StreamDescriptor, Vec<u8>)> {
         eprintln!("[server-rpc-client] stream start track_id={}", track_id.0);
-        let conn = self.endpoint.connect(self.addr.clone(), IROH_ALPN).await?;
+        let conn = self.connection().await?;
+        match self.stream_on_connection(&conn, track_id.clone()).await {
+            Ok(stream) => Ok(stream),
+            Err(error) => {
+                eprintln!(
+                    "[server-rpc-client] stream failed track_id={} error={error}; reconnecting once",
+                    track_id.0
+                );
+                self.clear_connection().await;
+                let conn = self.connection().await?;
+                self.stream_on_connection(&conn, track_id).await
+            }
+        }
+    }
+
+    async fn stream_on_connection(
+        &self,
+        conn: &Connection,
+        track_id: TrackId,
+    ) -> Result<(StreamDescriptor, Vec<u8>)> {
         let (mut send, mut recv) = conn.open_bi().await?;
         write_json(&mut send, &BackendRequest::OpenStream { track_id }).await?;
         send.finish()?;
@@ -83,9 +143,31 @@ impl RemoteClient {
             }
         };
         let bytes = recv.read_to_end(usize::MAX).await?;
-        conn.close(0u32.into(), b"done");
         eprintln!("[server-rpc-client] stream ok bytes={}", bytes.len());
         Ok((descriptor, bytes))
+    }
+
+    async fn connection(&self) -> Result<Connection> {
+        let mut guard = self.conn.lock().await;
+        if let Some(conn) = guard.as_ref() {
+            return Ok(conn.clone());
+        }
+
+        eprintln!("[server-rpc-client] connecting backend transport");
+        let conn = self.endpoint.connect(self.addr.clone(), IROH_ALPN).await?;
+        eprintln!(
+            "[server-rpc-client] backend transport connected remote_endpoint={}",
+            conn.remote_id()
+        );
+        *guard = Some(conn.clone());
+        Ok(conn)
+    }
+
+    async fn clear_connection(&self) {
+        let mut guard = self.conn.lock().await;
+        if let Some(conn) = guard.take() {
+            conn.close(1u32.into(), b"reconnect");
+        }
     }
 }
 
@@ -115,86 +197,31 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
                 match incoming.accept() {
                     Ok(accepting) => match accepting.await {
                         Ok(conn) => {
+                            let remote_id = conn.remote_id();
                             eprintln!(
                                 "[server-rpc] accepted connection remote_endpoint={}",
-                                conn.remote_id()
+                                remote_id
                             );
-                            let result = async {
-                            let (mut send, mut recv) = conn.accept_bi().await?;
-                            let request: BackendRequest = read_json(&mut recv).await?;
-                            eprintln!("[server-rpc] request kind={}", request_name(&request));
-                            match request {
-                                BackendRequest::OpenStream { track_id } => {
-                                    let response = match server.handle(BackendRequest::OpenStream { track_id }) {
-                                        Ok(response) => response,
-                                        Err(error) => {
-                                            eprintln!("[server-rpc] stream request failed: {error}");
-                                            write_json(
-                                                &mut send,
-                                                &BackendResponse::Error {
-                                                    message: error.to_string(),
-                                                },
-                                            )
-                                            .await?;
-                                            send.finish()?;
-                                            return Ok(());
-                                        }
-                                    };
-                                    let BackendResponse::Stream(stream) = response else {
-                                        eprintln!("[server-rpc] stream request returned non-stream response");
-                                        write_json(
-                                            &mut send,
-                                            &BackendResponse::Error {
-                                                message: "unexpected stream response".to_string(),
-                                            },
-                                        )
-                                        .await?;
-                                        send.finish()?;
-                                        return Ok(());
-                                    };
-                                    write_json(
-                                        &mut send,
-                                        &BackendResponse::Stream(stream.clone()),
-                                    )
-                                    .await?;
-                                    let full_path = PathBuf::from(&stream.path);
-                                    let bytes = tokio::fs::read(&full_path).await?;
-                                    eprintln!(
-                                        "[server-rpc] stream sending path={} bytes={}",
-                                        full_path.display(),
-                                        bytes.len()
-                                    );
-                                    send.write_all(&bytes).await?;
-                                    send.finish()?;
-                                }
-                                other => {
-                                    let response = match server.handle(other) {
-                                        Ok(response) => response,
-                                        Err(error) => {
-                                            eprintln!("[server-rpc] request failed: {error}");
-                                            BackendResponse::Error {
-                                                message: error.to_string(),
+                            loop {
+                                match conn.accept_bi().await {
+                                    Ok((send, recv)) => {
+                                        let server = Arc::clone(&server);
+                                        tokio::spawn(async move {
+                                            if let Err(error) =
+                                                handle_rpc_stream(server, send, recv).await
+                                            {
+                                                eprintln!("iroh rpc stream failed: {error}");
                                             }
-                                        }
-                                    };
-                                    write_json(&mut send, &response).await?;
-                                    send.finish()?;
+                                        });
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "[server-rpc] connection closed remote_endpoint={} error={error}",
+                                            remote_id
+                                        );
+                                        break;
+                                    }
                                 }
-                            }
-                            Ok::<(), Error>(())
-                        }
-                        .await;
-                            if result.is_err() {
-                                if let Err(error) = &result {
-                                    eprintln!("iroh rpc connection failed: {error}");
-                                }
-                                conn.close(1u32.into(), b"error");
-                            } else {
-                                eprintln!(
-                                    "[server-rpc] connection complete remote_endpoint={}",
-                                    conn.remote_id()
-                                );
-                                conn.closed().await;
                             }
                         }
                         Err(error) => {
@@ -207,6 +234,70 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
         }
     });
     Ok(ServerHandle { endpoint, task })
+}
+
+async fn handle_rpc_stream(
+    server: Arc<MusicServer>,
+    mut send: SendStream,
+    mut recv: RecvStream,
+) -> Result<()> {
+    let request: BackendRequest = read_json(&mut recv).await?;
+    eprintln!("[server-rpc] request kind={}", request_name(&request));
+    match request {
+        BackendRequest::OpenStream { track_id } => {
+            let response = match server.handle(BackendRequest::OpenStream { track_id }) {
+                Ok(response) => response,
+                Err(error) => {
+                    eprintln!("[server-rpc] stream request failed: {error}");
+                    write_json(
+                        &mut send,
+                        &BackendResponse::Error {
+                            message: error.to_string(),
+                        },
+                    )
+                    .await?;
+                    send.finish()?;
+                    return Ok(());
+                }
+            };
+            let BackendResponse::Stream(stream) = response else {
+                eprintln!("[server-rpc] stream request returned non-stream response");
+                write_json(
+                    &mut send,
+                    &BackendResponse::Error {
+                        message: "unexpected stream response".to_string(),
+                    },
+                )
+                .await?;
+                send.finish()?;
+                return Ok(());
+            };
+            write_json(&mut send, &BackendResponse::Stream(stream.clone())).await?;
+            let full_path = PathBuf::from(&stream.path);
+            let bytes = tokio::fs::read(&full_path).await?;
+            eprintln!(
+                "[server-rpc] stream sending path={} bytes={}",
+                full_path.display(),
+                bytes.len()
+            );
+            send.write_all(&bytes).await?;
+            send.finish()?;
+        }
+        other => {
+            let response = match server.handle(other) {
+                Ok(response) => response,
+                Err(error) => {
+                    eprintln!("[server-rpc] request failed: {error}");
+                    BackendResponse::Error {
+                        message: error.to_string(),
+                    }
+                }
+            };
+            write_json(&mut send, &response).await?;
+            send.finish()?;
+        }
+    }
+    Ok(())
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
@@ -261,6 +352,7 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::ListArtists => "ListArtists",
         BackendRequest::GetArtist { .. } => "GetArtist",
         BackendRequest::GetAlbum { .. } => "GetAlbum",
+        BackendRequest::GetAlbumTracks { .. } => "GetAlbumTracks",
         BackendRequest::GetTrack { .. } => "GetTrack",
         BackendRequest::GetCoverArt { .. } => "GetCoverArt",
         BackendRequest::Search { .. } => "Search",

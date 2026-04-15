@@ -63,6 +63,9 @@ impl MusicServer {
             )),
             BackendRequest::GetArtist { artist_id } => Self::get_artist(&library, artist_id),
             BackendRequest::GetAlbum { album_id } => Self::get_album(&library, album_id),
+            BackendRequest::GetAlbumTracks { album_id } => {
+                Self::get_album_tracks(&library, album_id)
+            }
             BackendRequest::GetTrack { track_id } => Self::get_track(&library, track_id),
             BackendRequest::GetCoverArt { cover_art_id } => {
                 self.get_cover_art(&library, cover_art_id)
@@ -88,6 +91,23 @@ impl MusicServer {
             .cloned()
             .ok_or_else(|| Error::NotFound("album", album_id.0))?;
         Ok(BackendResponse::Album(album))
+    }
+
+    fn get_album_tracks(library: &LibraryIndex, album_id: AlbumId) -> Result<BackendResponse> {
+        let album = library
+            .albums
+            .get(&album_id)
+            .ok_or_else(|| Error::NotFound("album", album_id.0))?;
+        let mut tracks = Vec::with_capacity(album.track_ids.len());
+        for track_id in &album.track_ids {
+            let track = library
+                .tracks
+                .get(track_id)
+                .cloned()
+                .ok_or_else(|| Error::NotFound("track", track_id.0.clone()))?;
+            tracks.push(track);
+        }
+        Ok(BackendResponse::Tracks(tracks))
     }
 
     fn get_track(library: &LibraryIndex, track_id: TrackId) -> Result<BackendResponse> {
