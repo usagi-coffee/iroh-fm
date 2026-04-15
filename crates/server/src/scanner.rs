@@ -35,12 +35,15 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
 
     let cache_started = Instant::now();
     let mut cache = ScanCache::open(root)?;
-    let mut scanned_tracks = Vec::with_capacity(library_files.audio_files.len());
+    let mut cache_miss_tracks = Vec::new();
+    let mut seen_audio_paths = Vec::with_capacity(library_files.audio_files.len());
+    let mut builder = LibraryBuilder::new(library_files.sidecar_by_dir);
     let mut cache_hits = 0;
     let mut cache_misses = 0;
 
     for (index, path) in library_files.audio_files.iter().enumerate() {
         let mut scanned_track = ScannedTrack::from_path(root, path)?;
+        seen_audio_paths.push(scanned_track.relative_path_string.clone());
         match cache.load_track_tags(
             &scanned_track.relative_path_string,
             scanned_track.file_size,
@@ -49,13 +52,14 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
             Some(tags) => {
                 cache_hits += 1;
                 scanned_track.tags = Some(tags);
+                builder.add_track(root, scanned_track)?;
             }
             None => {
                 cache_misses += 1;
                 scanned_track.needs_cache_store = true;
+                cache_miss_tracks.push(scanned_track);
             }
         }
-        scanned_tracks.push(scanned_track);
 
         let scanned = index + 1;
         if scanned % SCAN_PROGRESS_BATCH_SIZE == 0 || scanned == library_files.audio_files.len() {
@@ -77,7 +81,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     );
 
     let extraction_started = Instant::now();
-    fill_missing_tags_parallel(&mut scanned_tracks, cache_misses);
+    fill_missing_tags_parallel(&mut cache_miss_tracks, cache_misses);
     if cache_misses > 0 {
         eprintln!(
             "[scanner] tag extraction complete misses={} elapsed_ms={}",
@@ -87,7 +91,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     }
 
     let store_started = Instant::now();
-    cache.store_track_tags_batch(&scanned_tracks)?;
+    cache.store_track_tags_batch(&cache_miss_tracks)?;
     eprintln!(
         "[scanner] cache store complete elapsed_ms={}",
         store_started.elapsed().as_millis()
@@ -97,10 +101,6 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     if cache_misses == 0 {
         eprintln!("[scanner] cache prune skipped reason=warm-cache");
     } else {
-        let seen_audio_paths = scanned_tracks
-            .iter()
-            .map(|track| track.relative_path_string.clone())
-            .collect::<Vec<_>>();
         cache.prune_missing(&seen_audio_paths)?;
         eprintln!(
             "[scanner] cache prune complete elapsed_ms={}",
@@ -109,8 +109,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     }
 
     let index_started = Instant::now();
-    let mut builder = LibraryBuilder::new(library_files.sidecar_by_dir);
-    for scanned_track in scanned_tracks {
+    for scanned_track in cache_miss_tracks {
         builder.add_track(root, scanned_track)?;
     }
     eprintln!(
