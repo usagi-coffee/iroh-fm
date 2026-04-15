@@ -18,6 +18,7 @@ const SCAN_PROGRESS_BATCH_SIZE: usize = 100;
 
 pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
     let scan_started = Instant::now();
+    eprintln!("[scanner] trace scanner_build=post-progress-diagnostics-v1");
     if !root.is_dir() {
         return Err(Error::InvalidMusicDir(root.to_path_buf()));
     }
@@ -62,14 +63,18 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
         let scanned = index + 1;
         if scanned % SCAN_PROGRESS_BATCH_SIZE == 0 || scanned == library_files.audio_files.len() {
             eprintln!(
-                "[scanner] scan progress tracks={}/{} cache_hits={} cache_misses={}",
+                "[scanner] scan progress tracks={}/{} cache_hits={} cache_misses={} last_path={}",
                 scanned,
                 library_files.audio_files.len(),
                 cache_hits,
-                cache_misses
+                cache_misses,
+                path.strip_prefix(root)
+                    .unwrap_or(path)
+                    .display()
             );
         }
     }
+    eprintln!("[scanner] scan loop exited");
     eprintln!(
         "[scanner] cache lookup complete tracks={} cache_hits={} cache_misses={} elapsed_ms={}",
         library_files.audio_files.len(),
@@ -721,7 +726,10 @@ impl ScanCache {
     }
 
     fn prune_missing(&mut self, seen_audio_paths: &[String]) -> Result<()> {
-        eprintln!("[scanner] cache prune start seen={}", seen_audio_paths.len());
+        eprintln!(
+            "[scanner] cache prune start seen={}",
+            seen_audio_paths.len()
+        );
         let tx = self.conn.transaction()?;
         tx.execute("CREATE TEMP TABLE IF NOT EXISTS seen_audio_paths (relative_path TEXT PRIMARY KEY NOT NULL)", [])?;
         tx.execute("DELETE FROM seen_audio_paths", [])?;
