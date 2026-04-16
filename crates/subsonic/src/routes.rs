@@ -39,7 +39,7 @@ pub async fn handle_request(
         }
         "/rest/getAlbum" => {
             let album_id = query_value(&request, "id").unwrap_or_default();
-            map_album(format, backend.album(album_id).await?)
+            map_album(format, backend, album_id).await
         }
         "/rest/getSong" => {
             let track_id = query_value(&request, "id").unwrap_or_default();
@@ -395,10 +395,19 @@ fn map_track(format: ResponseFormat, response: BackendResponse) -> Result<Subson
     }
 }
 
-fn map_album(format: ResponseFormat, response: BackendResponse) -> Result<SubsonicResponse> {
-    let BackendResponse::Album(album) = response else {
+async fn map_album(
+    format: ResponseFormat,
+    backend: &impl Backend,
+    album_id: &str,
+) -> Result<SubsonicResponse> {
+    let BackendResponse::Album(album) = backend.album(album_id).await? else {
         return Err(Error::InvalidRequest(
             "backend returned unexpected response for getAlbum".to_string(),
+        ));
+    };
+    let BackendResponse::Tracks(tracks) = backend.album_tracks(album_id).await? else {
+        return Err(Error::InvalidRequest(
+            "backend returned unexpected response for getAlbum tracks".to_string(),
         ));
     };
     eprintln!(
@@ -413,22 +422,14 @@ fn map_album(format: ResponseFormat, response: BackendResponse) -> Result<Subson
     );
 
     match format {
-        ResponseFormat::Xml => Ok(SubsonicResponse::Xml(wrap_xml(&format!(
-            "<album id=\"{}\" name=\"{}\" artist=\"{}\" songCount=\"{}\"{}{}{}{}{}{} />",
-            xml_escape(&album.id.0),
-            xml_escape(&album.title),
-            xml_escape(&album.artist),
-            album.track_ids.len(),
-            optional_attr("albumArtist", album.album_artist.as_deref()),
-            optional_attr("genre", album.genres.first().map(String::as_str)),
-            optional_attr("year", album.year.map(|year| year.to_string()).as_deref()),
-            optional_attr(
-                "coverArt",
-                album.cover_art_id.as_ref().map(|id| id.0.as_str())
-            ),
-            optional_number_attr("duration", album.duration_seconds),
-            optional_number_attr("size", Some(album.size_bytes))
-        )))),
+        ResponseFormat::Xml => {
+            let mut body = render_album_xml_open(&album);
+            for track in tracks {
+                body.push_str(&render_song_xml(&track));
+            }
+            body.push_str("</album>");
+            Ok(SubsonicResponse::Xml(wrap_xml(&body)))
+        }
         ResponseFormat::Json => Ok(SubsonicResponse::Json(wrap_json(json!({
             "album": {
                 "id": album.id.0,
@@ -440,7 +441,8 @@ fn map_album(format: ResponseFormat, response: BackendResponse) -> Result<Subson
                 "year": album.year.map(|year| year.to_string()),
                 "coverArt": album.cover_art_id.map(|id| id.0),
                 "duration": album.duration_seconds,
-                "size": album.size_bytes
+                "size": album.size_bytes,
+                "song": tracks.into_iter().map(|track| render_song_json(&track)).collect::<Vec<_>>()
             }
         })))),
     }
@@ -888,6 +890,25 @@ fn render_album_xml(album: &protocol::Album) -> String {
     )
 }
 
+fn render_album_xml_open(album: &protocol::Album) -> String {
+    format!(
+        "<album id=\"{}\" name=\"{}\" artist=\"{}\" songCount=\"{}\"{}{}{}{}{}{}>",
+        xml_escape(&album.id.0),
+        xml_escape(&album.title),
+        xml_escape(&album.artist),
+        album.track_ids.len(),
+        optional_attr("albumArtist", album.album_artist.as_deref()),
+        optional_attr("genre", album.genres.first().map(String::as_str)),
+        optional_attr("year", album.year.map(|year| year.to_string()).as_deref()),
+        optional_attr(
+            "coverArt",
+            album.cover_art_id.as_ref().map(|id| id.0.as_str())
+        ),
+        optional_number_attr("duration", album.duration_seconds),
+        optional_number_attr("size", Some(album.size_bytes))
+    )
+}
+
 fn render_album_json(album: protocol::Album) -> serde_json::Value {
     json!({
         "id": album.id.0,
@@ -903,6 +924,43 @@ fn render_album_json(album: protocol::Album) -> serde_json::Value {
     })
 }
 
+fn render_song_xml(track: &protocol::Track) -> String {
+    format!(
+        "<song id=\"{}\" title=\"{}\" artist=\"{}\" album=\"{}\" contentType=\"{}\"{}{}{}{} />",
+        xml_escape(&track.id.0),
+        xml_escape(&track.title),
+        xml_escape(&track.artist),
+        xml_escape(&track.album),
+        xml_escape(&track.content_type),
+        optional_attr(
+            "coverArt",
+            track.cover_art_id.as_ref().map(|id| id.0.as_str())
+        ),
+        optional_number_attr("track", track.track_number),
+        optional_number_attr("discNumber", track.disc_number),
+        optional_number_attr("duration", track.duration_seconds)
+    )
+}
+
+fn render_song_json(track: &protocol::Track) -> serde_json::Value {
+    json!({
+        "id": track.id.0,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "albumArtist": track.album_artist,
+        "contentType": track.content_type,
+        "coverArt": track.cover_art_id.as_ref().map(|id| id.0.clone()),
+        "track": track.track_number,
+        "discNumber": track.disc_number,
+        "duration": track.duration_seconds,
+        "bitRate": track.bitrate,
+        "size": track.file_size,
+        "suffix": track.suffix,
+        "genre": track.genres.first().cloned()
+    })
+}
+
 fn xml_escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -915,15 +973,18 @@ fn xml_escape(input: &str) -> String {
 mod tests {
     use super::*;
     use client::Result;
-    use protocol::{Album, AlbumId, BackendResponse, CoverArtId, TrackId};
+    use protocol::{Album, AlbumId, BackendResponse, CoverArtId, StreamDescriptor, Track, TrackId};
+    use std::path::PathBuf;
+    use std::time::SystemTime;
 
     struct MockBackend {
         albums: Vec<Album>,
+        tracks: Vec<Track>,
     }
 
     impl MockBackend {
-        fn new(albums: Vec<Album>) -> Self {
-            Self { albums }
+        fn new(albums: Vec<Album>, tracks: Vec<Track>) -> Self {
+            Self { albums, tracks }
         }
     }
 
@@ -953,11 +1014,13 @@ mod tests {
         }
 
         async fn album(&self, _album_id: &str) -> Result<BackendResponse> {
-            unimplemented!()
+            Ok(BackendResponse::Album(
+                self.albums.first().cloned().expect("album in mock backend"),
+            ))
         }
 
         async fn album_tracks(&self, _album_id: &str) -> Result<BackendResponse> {
-            unimplemented!()
+            Ok(BackendResponse::Tracks(self.tracks.clone()))
         }
 
         async fn track(&self, _track_id: &str) -> Result<BackendResponse> {
@@ -1017,12 +1080,45 @@ mod tests {
         }
     }
 
+    fn sample_track(id: &str, title: &str, artist: &str, album: &str) -> Track {
+        Track {
+            id: TrackId(id.to_string()),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.to_string(),
+            album_artist: Some(artist.to_string()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_seconds: Some(120),
+            bitrate: Some(320),
+            sample_rate: None,
+            channels: None,
+            codec: None,
+            genres: vec!["Rock".to_string()],
+            date: None,
+            musicbrainz_track_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            cover_art_id: Some(CoverArtId(format!("cover-{id}"))),
+            has_embedded_cover: false,
+            suffix: Some("mp3".to_string()),
+            relative_path: PathBuf::from(format!("{id}.mp3")),
+            file_size: 2048,
+            modified_at: SystemTime::UNIX_EPOCH,
+            content_type: "audio/mpeg".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn json_album_list_route_includes_album_list_container() {
-        let backend = MockBackend::new(vec![
-            sample_album("album-b", "Beta", "Artist B"),
-            sample_album("album-a", "Alpha", "Artist A"),
-        ]);
+        let backend = MockBackend::new(
+            vec![
+                sample_album("album-b", "Beta", "Artist B"),
+                sample_album("album-a", "Alpha", "Artist A"),
+            ],
+            Vec::new(),
+        );
 
         let response = handle_request(
             &SubsonicConfig {
@@ -1060,5 +1156,42 @@ mod tests {
         assert_eq!(albums.as_array().unwrap().len(), 2);
         assert_eq!(albums[0]["name"], "Alpha");
         assert_eq!(albums[1]["name"], "Beta");
+    }
+
+    #[tokio::test]
+    async fn json_album_route_includes_song_array() {
+        let backend = MockBackend::new(
+            vec![sample_album("album-a", "Alpha", "Artist A")],
+            vec![sample_track("track-a1", "First Song", "Artist A", "Alpha")],
+        );
+
+        let response = handle_request(
+            &SubsonicConfig {
+                bind: "127.0.0.1:4040".to_string(),
+                endpoint: String::new(),
+                ticket: None,
+                secret: None,
+                username: "user".to_string(),
+                password: "pass".to_string(),
+                relay: None,
+            },
+            &backend,
+            request(
+                "/rest/getAlbum",
+                &[("u", "user"), ("p", "pass"), ("f", "json"), ("id", "album-a")],
+            ),
+        )
+        .await
+        .expect("album response");
+
+        let SubsonicResponse::Json(body) = response else {
+            panic!("expected json response");
+        };
+        let value: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+
+        let songs = &value["subsonic-response"]["album"]["song"];
+        assert!(songs.is_array(), "album.song should be an array");
+        assert_eq!(songs.as_array().unwrap().len(), 1);
+        assert_eq!(songs[0]["title"], "First Song");
     }
 }
