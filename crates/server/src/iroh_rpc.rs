@@ -17,6 +17,7 @@ use crate::server::MusicServer;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default)]
 pub struct IrohConfig {
@@ -148,10 +149,7 @@ impl RemoteClient {
     pub async fn stream(&self, track_id: TrackId) -> Result<(StreamDescriptor, Vec<u8>)> {
         eprintln!("[server-rpc-client] stream start track_id={}", track_id.0);
         let conn = self.connection().await?;
-        match self
-            .stream_on_connection_with_timeout(&conn, track_id.clone())
-            .await
-        {
+        match self.stream_on_connection(&conn, track_id.clone()).await {
             Ok(stream) => {
                 self.log_connection_path_if_changed(&conn, "stream").await;
                 Ok(stream)
@@ -163,8 +161,7 @@ impl RemoteClient {
                 );
                 self.clear_connection().await;
                 let conn = self.connection().await?;
-                self.stream_on_connection_with_timeout(&conn, track_id)
-                    .await
+                self.stream_on_connection(&conn, track_id).await
             }
         }
     }
@@ -174,6 +171,26 @@ impl RemoteClient {
         conn: &Connection,
         track_id: TrackId,
     ) -> Result<(StreamDescriptor, Vec<u8>)> {
+        let (descriptor, mut recv) = timeout(
+            STREAM_OPEN_TIMEOUT,
+            self.stream_open_on_connection(conn, track_id.clone()),
+        )
+        .await
+        .map_err(|_| Error::Timeout(format!("stream open {}", track_id.0)))??;
+        eprintln!(
+            "[server-rpc-client] stream descriptor track_id={} file_size={} content_type={} transfer_timeout=disabled",
+            descriptor.track_id.0, descriptor.file_size, descriptor.content_type
+        );
+        let bytes = recv.read_to_end(usize::MAX).await?;
+        eprintln!("[server-rpc-client] stream ok bytes={}", bytes.len());
+        Ok((descriptor, bytes))
+    }
+
+    async fn stream_open_on_connection(
+        &self,
+        conn: &Connection,
+        track_id: TrackId,
+    ) -> Result<(StreamDescriptor, RecvStream)> {
         let (mut send, mut recv) = conn.open_bi().await?;
         write_json(&mut send, &BackendRequest::OpenStream { track_id }).await?;
         send.finish()?;
@@ -185,22 +202,7 @@ impl RemoteClient {
                 ));
             }
         };
-        let bytes = recv.read_to_end(usize::MAX).await?;
-        eprintln!("[server-rpc-client] stream ok bytes={}", bytes.len());
-        Ok((descriptor, bytes))
-    }
-
-    async fn stream_on_connection_with_timeout(
-        &self,
-        conn: &Connection,
-        track_id: TrackId,
-    ) -> Result<(StreamDescriptor, Vec<u8>)> {
-        timeout(
-            RPC_TIMEOUT,
-            self.stream_on_connection(conn, track_id.clone()),
-        )
-        .await
-        .map_err(|_| Error::Timeout(format!("stream {}", track_id.0)))?
+        Ok((descriptor, recv))
     }
 
     async fn connection(&self) -> Result<Connection> {
