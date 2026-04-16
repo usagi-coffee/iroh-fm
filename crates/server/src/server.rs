@@ -1,7 +1,10 @@
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Event, RecommendedWatcher, RecursiveMode, Watcher,
+    event::{DataChange, EventKind, ModifyKind},
+};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -296,10 +299,29 @@ fn spawn_library_watcher(
 }
 
 fn event_needs_rescan(event: &Event) -> bool {
+    if !event_kind_needs_rescan(event.kind) {
+        return false;
+    }
+
     event
         .paths
         .iter()
-        .any(|path| is_library_relevant_path(path.as_path()))
+        .any(|path| is_library_relevant_path(path))
+}
+
+fn event_kind_needs_rescan(kind: EventKind) -> bool {
+    match kind {
+        EventKind::Create(_) | EventKind::Remove(_) => true,
+        EventKind::Modify(ModifyKind::Name(_)) => true,
+        EventKind::Modify(ModifyKind::Data(
+            DataChange::Any | DataChange::Size | DataChange::Content | DataChange::Other,
+        )) => true,
+        EventKind::Modify(ModifyKind::Any | ModifyKind::Other) => true,
+        EventKind::Any => true,
+        EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(_)) | EventKind::Other => {
+            false
+        }
+    }
 }
 
 fn is_library_relevant_path(path: &std::path::Path) -> bool {
