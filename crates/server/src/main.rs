@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 use std::str::FromStr;
 
-use iroh::RelayUrl;
+use iroh::{EndpointId, RelayUrl};
 use iroh_tickets::endpoint::EndpointTicket;
 use server::{BackendRequest, IrohConfig, MusicServer, ServerConfig, spawn_iroh_server};
 
@@ -33,6 +33,9 @@ async fn run() -> server::Result<()> {
         let _ = iroh::RelayUrl::from_str(relay)
             .map_err(|error| server::Error::InvalidRequest(format!("invalid --relay: {error}")))?;
     }
+    for peer in &iroh.peers {
+        let _ = peer;
+    }
 
     let config = ServerConfig::new(
         music_dir,
@@ -53,6 +56,18 @@ async fn run() -> server::Result<()> {
     println!("server backend ready: {summary:?}");
     println!("endpoint={endpoint}");
     println!("ticket={ticket}");
+    if iroh.peers.is_empty() {
+        println!("peers=open");
+    } else {
+        println!(
+            "peers={}",
+            iroh.peers
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
     if let Some(relay) = iroh.relay.as_deref() {
         println!("relay={relay}");
     }
@@ -77,6 +92,12 @@ fn parse_config(
             "--lastfm-api-key" => lastfm_api_key = Some(args.next().ok_or_else(missing_value)?),
             "--secret" => iroh.secret = Some(args.next().ok_or_else(missing_value)?),
             "--relay" => iroh.relay = Some(args.next().ok_or_else(missing_value)?),
+            "--peer" => {
+                let peer = EndpointId::from_str(&args.next().ok_or_else(missing_value)?).map_err(
+                    |error| server::Error::InvalidRequest(format!("invalid --peer: {error}")),
+                )?;
+                iroh.peers.insert(peer);
+            }
             other => {
                 return Err(server::Error::InvalidRequest(format!(
                     "unknown argument: {other}"
@@ -98,6 +119,6 @@ fn missing_value() -> server::Error {
 fn print_usage() {
     println!("usage:");
     println!(
-        "  server --music-dir /path/to/music [--lastfm-api-key <api-key>] [--secret <secret-key>] [--relay <relay-url>]"
+        "  server --music-dir /path/to/music [--lastfm-api-key <api-key>] [--secret <secret-key>] [--relay <relay-url>] [--peer <endpoint-id> ...]"
     );
 }

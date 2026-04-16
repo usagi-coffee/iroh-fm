@@ -71,6 +71,7 @@ async fn run() -> server::Result<()> {
         server::IrohConfig {
             secret: config.secret.clone(),
             relay: None,
+            peers: Default::default(),
         },
     )
     .await?;

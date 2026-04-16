@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{collections::BTreeSet, fmt::Write as _};
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
@@ -23,6 +24,7 @@ const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct IrohConfig {
     pub secret: Option<String>,
     pub relay: Option<String>,
+    pub peers: BTreeSet<EndpointId>,
 }
 
 #[derive(Debug)]
@@ -252,11 +254,13 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
         .bind()
         .await?;
     eprintln!(
-        "[server-rpc] listening endpoint={} relay={}",
+        "[server-rpc] listening endpoint={} relay={} peers={}",
         endpoint.id(),
-        config.relay.as_deref().unwrap_or("<none>")
+        config.relay.as_deref().unwrap_or("<none>"),
+        peer_policy_label(&config.peers)
     );
     let server = Arc::new(server);
+    let allowed_peers = Arc::new(config.peers.clone());
     let endpoint_for_task = endpoint.clone();
     let task = tokio::spawn(async move {
         loop {
@@ -264,6 +268,7 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
                 break;
             };
             let server = Arc::clone(&server);
+            let allowed_peers = Arc::clone(&allowed_peers);
             tokio::spawn(async move {
                 eprintln!(
                     "[server-rpc] incoming connection remote_addr={:?}",
@@ -273,6 +278,15 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
                     Ok(accepting) => match accepting.await {
                         Ok(conn) => {
                             let remote_id = conn.remote_id();
+                            if !allowed_peers.is_empty() && !allowed_peers.contains(&remote_id) {
+                                eprintln!(
+                                    "[server-rpc] rejected connection remote_endpoint={} allowed_peers={}",
+                                    remote_id,
+                                    peer_policy_label(&allowed_peers)
+                                );
+                                conn.close(1u32.into(), b"peer not allowed");
+                                return;
+                            }
                             eprintln!(
                                 "[server-rpc] accepted connection remote_endpoint={}",
                                 remote_id
@@ -414,6 +428,21 @@ fn transport_addr_label(addr: &TransportAddr) -> String {
         TransportAddr::Custom(addr) => format!("custom:{addr}"),
         other => format!("unknown:{other:?}"),
     }
+}
+
+fn peer_policy_label(peers: &BTreeSet<EndpointId>) -> String {
+    if peers.is_empty() {
+        return "open".to_string();
+    }
+
+    let mut label = String::from("allow:");
+    for (index, peer) in peers.iter().enumerate() {
+        if index > 0 {
+            label.push(',');
+        }
+        let _ = write!(label, "{peer}");
+    }
+    label
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
