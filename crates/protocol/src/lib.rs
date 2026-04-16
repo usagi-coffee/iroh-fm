@@ -44,19 +44,6 @@ pub struct Album {
     pub duration_seconds: Option<u32>,
     pub size_bytes: u64,
     pub cover_art_id: Option<CoverArtId>,
-    pub metadata: Option<AlbumMetadata>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlbumMetadata {
-    pub lastfm_url: Option<String>,
-    pub lastfm_mbid: Option<String>,
-    pub published: Option<String>,
-    pub summary: Option<String>,
-    pub image_url: Option<String>,
-    pub tags: Vec<String>,
-    pub listeners: Option<u64>,
-    pub playcount: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +67,8 @@ pub struct Track {
     pub musicbrainz_album_id: Option<String>,
     pub musicbrainz_release_group_id: Option<String>,
     pub cover_art_id: Option<CoverArtId>,
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub has_embedded_cover: bool,
     pub suffix: Option<String>,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub relative_path: PathBuf,

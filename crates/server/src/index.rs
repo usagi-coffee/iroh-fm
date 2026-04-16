@@ -34,7 +34,4 @@ pub enum CoverArtSource {
     Embedded {
         track_id: TrackId,
     },
-    External {
-        url: String,
-    },
 }

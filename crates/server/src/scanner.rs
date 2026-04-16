@@ -29,7 +29,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
         "[scanner] scan start root={} tracks={} cover_dirs={} cache={} walk_ms={}",
         root.display(),
         library_files.audio_files.len(),
-        library_files.sidecar_by_dir.len(),
+        library_files.image_files_by_dir.len(),
         root.join(CACHE_DB_FILE).display(),
         walk_started.elapsed().as_millis()
     );
@@ -112,7 +112,7 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
 
     let index_started = Instant::now();
     eprintln!("[scanner] index build dispatch");
-    let builder = build_index_parallel(root, &scanned_tracks, library_files.sidecar_by_dir)?;
+    let builder = build_index_parallel(root, &scanned_tracks, library_files.image_files_by_dir)?;
     eprintln!(
         "[scanner] index build complete elapsed_ms={}",
         index_started.elapsed().as_millis()
@@ -121,18 +121,18 @@ pub fn scan_music_dir(root: &Path) -> Result<LibraryIndex> {
         "[scanner] scan total elapsed_ms={}",
         scan_started.elapsed().as_millis()
     );
-    Ok(builder.build(cache_hits, cache_misses))
+    builder.build(root, cache_hits, cache_misses)
 }
 
 struct LibraryFiles {
     audio_files: Vec<PathBuf>,
-    sidecar_by_dir: BTreeMap<PathBuf, Option<PathBuf>>,
+    image_files_by_dir: BTreeMap<PathBuf, Vec<PathBuf>>,
 }
 
 fn collect_library_files(root: &Path) -> Result<LibraryFiles> {
     let mut files = LibraryFiles {
         audio_files: Vec::new(),
-        sidecar_by_dir: BTreeMap::new(),
+        image_files_by_dir: BTreeMap::new(),
     };
     visit_dir(root, root, &mut files)?;
     files.audio_files.sort();
@@ -160,9 +160,10 @@ fn visit_dir(root: &Path, dir: &Path, files: &mut LibraryFiles) -> Result<()> {
         }
     }
 
+    image_files.sort();
     files
-        .sidecar_by_dir
-        .insert(dir.to_path_buf(), choose_sidecar_image(image_files));
+        .image_files_by_dir
+        .insert(dir.to_path_buf(), image_files);
     Ok(())
 }
 
@@ -178,7 +179,7 @@ struct LibraryBuilder {
     artists_by_name: BTreeMap<String, ArtistId>,
     albums_by_key: BTreeMap<(String, String), AlbumId>,
     cover_art_by_path: BTreeMap<PathBuf, CoverArtId>,
-    sidecar_by_dir: BTreeMap<PathBuf, Option<PathBuf>>,
+    image_files_by_dir: BTreeMap<PathBuf, Vec<PathBuf>>,
     artists: BTreeMap<ArtistId, Artist>,
     albums: BTreeMap<AlbumId, Album>,
     tracks: BTreeMap<TrackId, Track>,
@@ -186,14 +187,14 @@ struct LibraryBuilder {
 }
 
 impl LibraryBuilder {
-    fn new(sidecar_by_dir: BTreeMap<PathBuf, Option<PathBuf>>) -> Self {
+    fn new(image_files_by_dir: BTreeMap<PathBuf, Vec<PathBuf>>) -> Self {
         Self {
-            sidecar_by_dir,
+            image_files_by_dir,
             ..Self::default()
         }
     }
 
-    fn add_track(&mut self, root: &Path, scanned: ScannedTrack) -> Result<()> {
+    fn add_track(&mut self, scanned: ScannedTrack) -> Result<()> {
         let path = scanned.path;
         let relative_path = scanned.relative_path;
         let tags = scanned.tags.ok_or_else(|| {
@@ -212,7 +213,6 @@ impl LibraryBuilder {
             tags.album,
             relative_path.display()
         )));
-        let cover_art_id = self.cover_art_for(root, &path)?;
 
         let track = Track {
             id: track_id.clone(),
@@ -233,7 +233,8 @@ impl LibraryBuilder {
             musicbrainz_recording_id: tags.musicbrainz_recording_id,
             musicbrainz_album_id: tags.musicbrainz_album_id.clone(),
             musicbrainz_release_group_id: tags.musicbrainz_release_group_id.clone(),
-            cover_art_id: cover_art_id.clone(),
+            cover_art_id: None,
+            has_embedded_cover: tags.has_embedded_cover,
             suffix: path
                 .extension()
                 .and_then(|ext| ext.to_str())
@@ -251,7 +252,7 @@ impl LibraryBuilder {
 
         let album = self.albums.get_mut(&album_id).expect("album inserted");
         album.track_ids.push(track_id.clone());
-        merge_album_track_metadata(album, &track, scanned.file_size, cover_art_id);
+        merge_album_track_metadata(album, &track, scanned.file_size);
         self.tracks.insert(track_id.clone(), track);
 
         Ok(())
@@ -305,20 +306,106 @@ impl LibraryBuilder {
                 duration_seconds: None,
                 size_bytes: 0,
                 cover_art_id: None,
-                metadata: None,
             },
         );
         id
     }
 
-    fn cover_art_for(&mut self, root: &Path, track_path: &Path) -> Result<Option<CoverArtId>> {
-        let Some(parent) = track_path.parent() else {
-            return Ok(None);
-        };
-        let sidecar = self.sidecar_by_dir.get(parent).cloned().flatten();
-        let Some(sidecar) = sidecar else {
-            return Ok(None);
-        };
+    fn resolve_album_cover_art(&mut self, root: &Path) -> Result<()> {
+        let album_ids = self.albums.keys().cloned().collect::<Vec<_>>();
+        for album_id in album_ids {
+            let track_ids = self
+                .albums
+                .get(&album_id)
+                .map(|album| album.track_ids.clone())
+                .unwrap_or_default();
+            let cover_art_id = self.select_album_cover_art(root, &album_id, &track_ids)?;
+            let Some(album) = self.albums.get_mut(&album_id) else {
+                continue;
+            };
+            album.cover_art_id = cover_art_id.clone();
+            for track_id in &track_ids {
+                if let Some(track) = self.tracks.get_mut(track_id) {
+                    track.cover_art_id = cover_art_id.clone();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn select_album_cover_art(
+        &mut self,
+        root: &Path,
+        album_id: &AlbumId,
+        track_ids: &[TrackId],
+    ) -> Result<Option<CoverArtId>> {
+        let search_dirs = self.album_cover_search_dirs(root, track_ids);
+        let sidecar_candidates = search_dirs
+            .iter()
+            .flat_map(|dir| {
+                self.image_files_by_dir
+                    .get(dir)
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(sidecar) = choose_sidecar_image(sidecar_candidates) {
+            return self.register_sidecar_cover(root, &sidecar);
+        }
+
+        if let Some(track_id) = track_ids.iter().find(|track_id| {
+            self.tracks
+                .get(*track_id)
+                .map(|track| track.has_embedded_cover)
+                .unwrap_or(false)
+        }) {
+            let cover_art_id = CoverArtId(format!("embedded-{}", track_id.0));
+            self.cover_arts
+                .entry(cover_art_id.clone())
+                .or_insert_with(|| CoverArtSource::Embedded {
+                    track_id: track_id.clone(),
+                });
+            eprintln!(
+                "[scanner-cover] register embedded album_id={} cover_id={} track_id={}",
+                album_id.0, cover_art_id.0, track_id.0
+            );
+            return Ok(Some(cover_art_id));
+        }
+
+        eprintln!(
+            "[scanner-cover] no local cover found album_id={} track_count={}",
+            album_id.0,
+            track_ids.len()
+        );
+        Ok(None)
+    }
+
+    fn album_cover_search_dirs(&self, root: &Path, track_ids: &[TrackId]) -> Vec<PathBuf> {
+        let mut dirs = track_ids
+            .iter()
+            .filter_map(|track_id| self.tracks.get(track_id))
+            .filter_map(|track| track.relative_path.parent())
+            .map(|relative| root.join(relative))
+            .collect::<Vec<_>>();
+        dirs.sort();
+        dirs.dedup();
+
+        if let Some(common_parent) = common_parent_dir(&dirs) {
+            if !dirs.contains(&common_parent) {
+                dirs.push(common_parent);
+            }
+        }
+
+        dirs
+    }
+
+    fn register_sidecar_cover(
+        &mut self,
+        root: &Path,
+        sidecar: &Path,
+    ) -> Result<Option<CoverArtId>> {
         let relative_path = sidecar.strip_prefix(root).map(PathBuf::from).map_err(|_| {
             Error::InvalidRequest(format!("path outside music root: {}", sidecar.display()))
         })?;
@@ -328,14 +415,13 @@ impl LibraryBuilder {
         }
 
         let id = CoverArtId(slugify(&format!("cover:{}", relative_path.display())));
-        let content_type = detect_image_content_type(&sidecar)
+        let content_type = detect_image_content_type(sidecar)
             .unwrap_or_else(|| "application/octet-stream".to_string());
         eprintln!(
-            "[scanner-cover] register sidecar cover_id={} path={} content_type={} track_dir={}",
+            "[scanner-cover] register sidecar cover_id={} path={} content_type={}",
             id.0,
             relative_path.display(),
-            content_type,
-            parent.strip_prefix(root).unwrap_or(parent).display()
+            content_type
         );
         self.cover_art_by_path
             .insert(relative_path.clone(), id.clone());
@@ -349,7 +435,13 @@ impl LibraryBuilder {
         Ok(Some(id))
     }
 
-    fn build(self, cache_hits: usize, cache_misses: usize) -> LibraryIndex {
+    fn build(
+        mut self,
+        root: &Path,
+        cache_hits: usize,
+        cache_misses: usize,
+    ) -> Result<LibraryIndex> {
+        self.resolve_album_cover_art(root)?;
         let albums_with_cover = self
             .albums
             .values()
@@ -396,12 +488,12 @@ impl LibraryBuilder {
             cache_hits,
             cache_misses
         );
-        LibraryIndex {
+        Ok(LibraryIndex {
             artists: self.artists,
             albums: self.albums,
             tracks: self.tracks,
             cover_arts: self.cover_arts,
-        }
+        })
     }
 
     fn merge(&mut self, other: LibraryBuilder) {
@@ -448,12 +540,7 @@ impl LibraryBuilder {
                 };
                 if !target.track_ids.contains(&track_id) {
                     target.track_ids.push(track_id.clone());
-                    merge_album_track_metadata(
-                        target,
-                        track,
-                        track.file_size,
-                        track.cover_art_id.clone(),
-                    );
+                    merge_album_track_metadata(target, track, track.file_size);
                 }
             }
         }
@@ -465,12 +552,12 @@ impl LibraryBuilder {
 }
 
 fn build_index_parallel(
-    root: &Path,
+    _root: &Path,
     scanned_tracks: &[ScannedTrack],
-    sidecar_by_dir: BTreeMap<PathBuf, Option<PathBuf>>,
+    image_files_by_dir: BTreeMap<PathBuf, Vec<PathBuf>>,
 ) -> Result<LibraryBuilder> {
     if scanned_tracks.is_empty() {
-        return Ok(LibraryBuilder::new(sidecar_by_dir));
+        return Ok(LibraryBuilder::new(image_files_by_dir));
     }
 
     let threads = rayon::current_num_threads().max(1);
@@ -494,9 +581,9 @@ fn build_index_parallel(
                 chunk_index,
                 chunk.len()
             );
-            let mut builder = LibraryBuilder::new(sidecar_by_dir.clone());
+            let mut builder = LibraryBuilder::new(image_files_by_dir.clone());
             for scanned_track in chunk {
-                builder.add_track(root, scanned_track.clone())?;
+                builder.add_track(scanned_track.clone())?;
             }
             let completed = built_chunks.fetch_add(1, Ordering::Relaxed) + 1;
             eprintln!(
@@ -515,7 +602,7 @@ fn build_index_parallel(
         partials_started.elapsed().as_millis()
     );
 
-    let mut merged = LibraryBuilder::new(sidecar_by_dir);
+    let mut merged = LibraryBuilder::new(image_files_by_dir);
     let merge_started = Instant::now();
     for (index, partial) in partials.into_iter().enumerate() {
         let partial_artists = partial.artists.len();
@@ -560,6 +647,7 @@ struct TrackTags {
     musicbrainz_recording_id: Option<String>,
     musicbrainz_album_id: Option<String>,
     musicbrainz_release_group_id: Option<String>,
+    has_embedded_cover: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -828,6 +916,7 @@ fn read_track_tags(
         musicbrainz_recording_id: None,
         musicbrainz_album_id: None,
         musicbrainz_release_group_id: None,
+        has_embedded_cover: false,
     };
 
     let Ok(tagged_file) = Probe::open(path).and_then(|probe| probe.read()) else {
@@ -888,16 +977,12 @@ fn read_track_tags(
         .get_string(lofty::tag::ItemKey::MusicBrainzReleaseGroupId)
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().to_string());
+    tags.has_embedded_cover = !tag.pictures().is_empty();
 
     tags
 }
 
-fn merge_album_track_metadata(
-    album: &mut Album,
-    track: &Track,
-    file_size: u64,
-    cover_art_id: Option<CoverArtId>,
-) {
+fn merge_album_track_metadata(album: &mut Album, track: &Track, file_size: u64) {
     album.size_bytes = album.size_bytes.saturating_add(file_size);
     if let Some(duration) = track.duration_seconds {
         album.duration_seconds = Some(album.duration_seconds.unwrap_or(0).saturating_add(duration));
@@ -922,9 +1007,6 @@ fn merge_album_track_metadata(
     }
     if album.musicbrainz_release_group_id.is_none() {
         album.musicbrainz_release_group_id = track.musicbrainz_release_group_id.clone();
-    }
-    if album.cover_art_id.is_none() {
-        album.cover_art_id = cover_art_id;
     }
     for genre in &track.genres {
         if !album
@@ -996,6 +1078,21 @@ fn choose_sidecar_image(mut images: Vec<PathBuf>) -> Option<PathBuf> {
     });
 
     images.into_iter().next()
+}
+
+fn common_parent_dir(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut iter = paths.iter();
+    let mut common = iter.next()?.clone();
+    for path in iter {
+        while !common.as_os_str().is_empty() && !path.starts_with(&common) {
+            common.pop();
+        }
+    }
+    if common.as_os_str().is_empty() {
+        None
+    } else {
+        Some(common)
+    }
 }
 
 fn modified_unix(metadata: &fs::Metadata) -> Result<i64> {

@@ -375,49 +375,22 @@ fn map_album(
     );
 
     match format {
-        ResponseFormat::Xml => {
-            let year = album.year.map(|year| year.to_string()).or_else(|| {
-                album
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| extract_year(m.published.as_deref()))
-            });
-            let play_count = album
-                .metadata
-                .as_ref()
-                .and_then(|m| m.playcount.map(|value| value.to_string()));
-            Ok(SubsonicResponse::Xml(wrap_xml(&format!(
-                "<album id=\"{}\" name=\"{}\" artist=\"{}\" songCount=\"{}\"{}{}{}{}{}{}{}{} />",
-                xml_escape(&album.id.0),
-                xml_escape(&album.title),
-                xml_escape(&album.artist),
-                album.track_ids.len(),
-                optional_attr("albumArtist", album.album_artist.as_deref()),
-                optional_attr(
-                    "genre",
-                    album.genres.first().map(String::as_str).or_else(|| album
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.tags.first())
-                        .map(String::as_str))
-                ),
-                optional_attr("year", year.as_deref()),
-                optional_attr(
-                    "coverArt",
-                    album.cover_art_id.as_ref().map(|id| id.0.as_str())
-                ),
-                optional_number_attr("duration", album.duration_seconds),
-                optional_number_attr("size", Some(album.size_bytes)),
-                optional_attr("playCount", play_count.as_deref()),
-                optional_attr(
-                    "url",
-                    album
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.lastfm_url.as_deref())
-                )
-            ))))
-        }
+        ResponseFormat::Xml => Ok(SubsonicResponse::Xml(wrap_xml(&format!(
+            "<album id=\"{}\" name=\"{}\" artist=\"{}\" songCount=\"{}\"{}{}{}{}{}{} />",
+            xml_escape(&album.id.0),
+            xml_escape(&album.title),
+            xml_escape(&album.artist),
+            album.track_ids.len(),
+            optional_attr("albumArtist", album.album_artist.as_deref()),
+            optional_attr("genre", album.genres.first().map(String::as_str)),
+            optional_attr("year", album.year.map(|year| year.to_string()).as_deref()),
+            optional_attr(
+                "coverArt",
+                album.cover_art_id.as_ref().map(|id| id.0.as_str())
+            ),
+            optional_number_attr("duration", album.duration_seconds),
+            optional_number_attr("size", Some(album.size_bytes))
+        )))),
         ResponseFormat::Json => Ok(SubsonicResponse::Json(wrap_json(json!({
             "album": {
                 "id": album.id.0,
@@ -425,15 +398,11 @@ fn map_album(
                 "artist": album.artist,
                 "albumArtist": album.album_artist,
                 "songCount": album.track_ids.len(),
-                "genre": album.genres.first().cloned().or_else(|| album.metadata.as_ref().and_then(|m| m.tags.first().cloned())),
-                "year": album.year.map(|year| year.to_string()).or_else(|| album.metadata.as_ref().and_then(|m| extract_year(m.published.as_deref()))),
+                "genre": album.genres.first().cloned(),
+                "year": album.year.map(|year| year.to_string()),
                 "coverArt": album.cover_art_id.map(|id| id.0),
                 "duration": album.duration_seconds,
-                "size": album.size_bytes,
-                "playCount": album.metadata.as_ref().and_then(|m| m.playcount),
-                "url": album.metadata.as_ref().and_then(|m| m.lastfm_url.clone()),
-                "lastfmImageUrl": album.metadata.as_ref().and_then(|m| m.image_url.clone()),
-                "description": album.metadata.as_ref().and_then(|m| m.summary.clone())
+                "size": album.size_bytes
             }
         })))),
     }
@@ -840,19 +809,6 @@ fn optional_number_attr<T: std::fmt::Display>(name: &str, value: Option<T>) -> S
     value
         .map(|value| format!(" {name}=\"{value}\""))
         .unwrap_or_default()
-}
-
-fn extract_year(published: Option<&str>) -> Option<String> {
-    let published = published?;
-    let year = published
-        .chars()
-        .filter(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    if year.len() >= 4 {
-        Some(year[0..4].to_string())
-    } else {
-        None
-    }
 }
 
 fn query_value<'a>(request: &'a RequestContext, key: &str) -> Option<&'a str> {

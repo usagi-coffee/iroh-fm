@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lofty::file::TaggedFileExt;
 use notify::{
     Event, RecommendedWatcher, RecursiveMode, Watcher,
     event::{DataChange, EventKind, ModifyKind},
@@ -13,7 +14,6 @@ use tokio::task::JoinHandle;
 use crate::config::ServerConfig;
 use crate::error::{Error, Result};
 use crate::index::{CoverArtSource, LibraryIndex};
-use crate::lastfm::LastfmClient;
 use crate::scanner::scan_music_dir;
 use protocol::{
     AlbumId, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId, ResolvedId,
@@ -32,15 +32,11 @@ pub struct MusicServer {
 
 impl MusicServer {
     pub fn load(config: ServerConfig) -> Result<Self> {
-        let mut initial_library = scan_music_dir(&config.music_dir)?;
-        enrich_with_lastfm(&mut initial_library, config.lastfm_api_key.as_deref());
+        let initial_library = scan_music_dir(&config.music_dir)?;
         let library = Arc::new(RwLock::new(initial_library));
         let starred_db = open_state_db(&config.music_dir)?;
-        let (watcher, watch_task) = spawn_library_watcher(
-            config.music_dir.clone(),
-            config.lastfm_api_key.clone(),
-            Arc::clone(&library),
-        )?;
+        let (watcher, watch_task) =
+            spawn_library_watcher(config.music_dir.clone(), Arc::clone(&library))?;
 
         Ok(Self {
             config,
@@ -342,40 +338,36 @@ impl MusicServer {
                 }))
             }
             CoverArtSource::Embedded { track_id } => {
+                let track = library
+                    .tracks
+                    .get(track_id)
+                    .ok_or_else(|| Error::NotFound("track", track_id.0.clone()))?;
+                let full_path = self.config.music_dir.join(&track.relative_path);
                 eprintln!(
-                    "[server-cover] source=embedded unsupported cover_art_id={} track_id={}",
-                    cover_art_id.0, track_id.0
+                    "[server-cover] source=embedded cover_art_id={} track_id={} path={}",
+                    cover_art_id.0,
+                    track_id.0,
+                    full_path.display()
                 );
-                Err(Error::InvalidRequest(format!(
-                    "embedded cover art extraction is not implemented for track {}",
-                    track_id.0
-                )))
-            }
-            CoverArtSource::External { url } => {
+                let tagged_file =
+                    lofty::probe::Probe::open(&full_path).and_then(|probe| probe.read())?;
+                let picture = tagged_file
+                    .primary_tag()
+                    .or_else(|| tagged_file.first_tag())
+                    .and_then(select_embedded_picture)
+                    .ok_or_else(|| {
+                        Error::InvalidRequest(format!(
+                            "embedded cover art missing for track {}",
+                            track_id.0
+                        ))
+                    })?;
+                let content_type = picture
+                    .mime_type()
+                    .map(|mime: &lofty::picture::MimeType| mime.as_str().to_string())
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                let bytes = picture.data().to_vec();
                 eprintln!(
-                    "[server-cover] source=external cover_art_id={} url={}",
-                    cover_art_id.0, url
-                );
-                let response = match reqwest::blocking::get(url) {
-                    Ok(response) => response,
-                    Err(error) => {
-                        eprintln!(
-                            "[server-cover] external fetch failed cover_art_id={} url={} error={}",
-                            cover_art_id.0, url, error
-                        );
-                        return Err(error.into());
-                    }
-                }
-                .error_for_status()?;
-                let content_type = response
-                    .headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap_or("application/octet-stream")
-                    .to_string();
-                let bytes = response.bytes()?.to_vec();
-                eprintln!(
-                    "[server-cover] served cover_art_id={} bytes={} content_type={} source=external",
+                    "[server-cover] served cover_art_id={} bytes={} content_type={} source=embedded",
                     cover_art_id.0,
                     bytes.len(),
                     content_type
@@ -392,7 +384,6 @@ impl MusicServer {
 
 fn spawn_library_watcher(
     music_dir: std::path::PathBuf,
-    lastfm_api_key: Option<String>,
     library: Arc<RwLock<LibraryIndex>>,
 ) -> Result<(RecommendedWatcher, JoinHandle<()>)> {
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -420,8 +411,6 @@ fn spawn_library_watcher(
 
                     match scan_music_dir(&music_dir) {
                         Ok(updated) => {
-                            let mut updated = updated;
-                            enrich_with_lastfm(&mut updated, lastfm_api_key.as_deref());
                             if let Ok(mut current) = library.write() {
                                 *current = updated;
                             }
@@ -458,6 +447,11 @@ fn now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn select_embedded_picture(tag: &lofty::tag::Tag) -> Option<&lofty::picture::Picture> {
+    tag.get_picture_type(lofty::picture::PictureType::CoverFront)
+        .or_else(|| tag.pictures().first())
 }
 
 fn event_needs_rescan(event: &Event) -> bool {
@@ -511,11 +505,4 @@ fn is_library_relevant_path(path: &std::path::Path) -> bool {
                 "mp3" | "flac" | "ogg" | "opus" | "m4a" | "wav" | "jpg" | "jpeg" | "png" | "webp" | "gif"
             )
     )
-}
-
-fn enrich_with_lastfm(library: &mut LibraryIndex, api_key: Option<&str>) {
-    if let Some(api_key) = api_key.filter(|api_key| !api_key.trim().is_empty()) {
-        eprintln!("[lastfm] enriching album metadata");
-        LastfmClient::new(api_key).enrich_library(library);
-    }
 }
