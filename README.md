@@ -10,7 +10,7 @@ Most music servers make the client protocol the center of the system. `iroh-fm` 
 
 - the backend is protocol-agnostic
 - the transport is `iroh`
-- Subsonic is one of a multiple compatibility layers
+- Subsonic is one of multiple possible compatibility layers (e.g jellyfin, subsonic, plex)
 - more frontends can be added without changing the server model
 
 That means one music library, one backend, many possible client-facing APIs.
