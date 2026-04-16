@@ -307,9 +307,7 @@ fn map_album_list(
     };
 
     let list_name = if use_v2_name { "albumList2" } else { "albumList" };
-    let list_size = query_value(request, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(10);
+    let list_size = query_value(request, "size").and_then(|value| value.parse::<usize>().ok());
     let offset = query_value(request, "offset")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
@@ -318,11 +316,14 @@ fn map_album_list(
     let mut albums = albums;
     sort_albums(&mut albums, list_type);
 
-    let albums = albums
-        .into_iter()
-        .skip(offset)
-        .take(list_size)
-        .collect::<Vec<_>>();
+    let albums = match list_size {
+        Some(list_size) => albums
+            .into_iter()
+            .skip(offset)
+            .take(list_size)
+            .collect::<Vec<_>>(),
+        None => albums.into_iter().skip(offset).collect::<Vec<_>>(),
+    };
 
     match format {
         ResponseFormat::Xml => {
@@ -1167,6 +1168,55 @@ mod tests {
         assert_eq!(albums.as_array().unwrap().len(), 2);
         assert_eq!(albums[0]["name"], "Alpha");
         assert_eq!(albums[1]["name"], "Beta");
+    }
+
+    #[tokio::test]
+    async fn json_album_list_without_size_returns_all_albums() {
+        let backend = MockBackend::new(
+            vec![
+                sample_album("album-c", "Gamma", "Artist C"),
+                sample_album("album-b", "Beta", "Artist B"),
+                sample_album("album-a", "Alpha", "Artist A"),
+            ],
+            Vec::new(),
+        );
+
+        let response = handle_request(
+            &SubsonicConfig {
+                bind: "127.0.0.1:4040".to_string(),
+                endpoint: String::new(),
+                ticket: None,
+                secret: None,
+                username: "user".to_string(),
+                password: "pass".to_string(),
+                relay: None,
+            },
+            &backend,
+            request(
+                "/rest/getAlbumList2",
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("type", "alphabeticalByName"),
+                    ("offset", "0"),
+                ],
+            ),
+        )
+        .await
+        .expect("album list response");
+
+        let SubsonicResponse::Json(body) = response else {
+            panic!("expected json response");
+        };
+        let value: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+
+        let albums = &value["subsonic-response"]["albumList2"]["album"];
+        assert!(albums.is_array(), "albumList2.album should be an array");
+        assert_eq!(albums.as_array().unwrap().len(), 3);
+        assert_eq!(albums[0]["name"], "Alpha");
+        assert_eq!(albums[1]["name"], "Beta");
+        assert_eq!(albums[2]["name"], "Gamma");
     }
 
     #[tokio::test]
