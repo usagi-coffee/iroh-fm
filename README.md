@@ -28,11 +28,13 @@ That means one music library, one backend, many possible client-facing APIs.
 
 ```text
 crates/
+  client/
   protocol/
   server/
   subsonic/
 ```
 
+- `client`: `iroh` RPC client for talking to the backend server
 - `protocol`: shared backend request and response types
 - `server`: the actual music server
 - `subsonic`: Subsonic facade over the backend
@@ -69,4 +71,3 @@ Default Subsonic credentials:
 
 - username: `admin`
 - password: `admin`
-
