@@ -17,8 +17,7 @@ use subsonic::{
 };
 use tokio_util::io::ReaderStream;
 
-const BACKEND_RETRY_INITIAL_DELAY: Duration = Duration::from_secs(1);
-const BACKEND_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+const BACKEND_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -92,7 +91,6 @@ async fn connect_backend_with_retry(
     backend_addr: EndpointAddr,
 ) -> RemoteBackend {
     let mut attempt = 0_u32;
-    let mut delay = BACKEND_RETRY_INITIAL_DELAY;
 
     loop {
         attempt = attempt.saturating_add(1);
@@ -122,7 +120,7 @@ async fn connect_backend_with_retry(
                             "[subsonic] backend summary probe failed attempt={} error={} retry_in={}s",
                             attempt,
                             error,
-                            delay.as_secs()
+                            BACKEND_RETRY_DELAY.as_secs()
                         );
                     }
                 }
@@ -132,13 +130,12 @@ async fn connect_backend_with_retry(
                     "[subsonic] backend connect failed attempt={} error={} retry_in={}s",
                     attempt,
                     error,
-                    delay.as_secs()
+                    BACKEND_RETRY_DELAY.as_secs()
                 );
             }
         }
 
-        tokio::time::sleep(delay).await;
-        delay = (delay * 2).min(BACKEND_RETRY_MAX_DELAY);
+        tokio::time::sleep(BACKEND_RETRY_DELAY).await;
     }
 }
 
