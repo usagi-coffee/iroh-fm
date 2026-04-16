@@ -2,7 +2,7 @@ use iroh::{EndpointAddr, EndpointId, RelayUrl};
 use protocol::{
     BackendRequest, BackendResponse, CoverArtId, SearchQuery, StreamDescriptor, TrackId,
 };
-use server::{Error, RemoteClient, Result};
+use server::{Error, IrohConfig, RemoteClient, Result};
 
 #[allow(async_fn_in_trait)]
 pub trait Backend {
@@ -31,6 +31,11 @@ impl RemoteBackend {
 
     pub async fn connect_addr(addr: EndpointAddr) -> Result<Self> {
         let client = RemoteClient::connect_addr(addr).await?;
+        Ok(Self { client })
+    }
+
+    pub async fn connect_addr_with_config(addr: EndpointAddr, config: IrohConfig) -> Result<Self> {
+        let client = RemoteClient::connect_addr_with_config(addr, config).await?;
         Ok(Self { client })
     }
 }

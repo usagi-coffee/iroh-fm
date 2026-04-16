@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use iroh::{EndpointAddr, EndpointId, RelayUrl};
+use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey};
 use iroh_tickets::endpoint::EndpointTicket;
 use serde::Deserialize;
 use subsonic::{
@@ -58,8 +58,22 @@ async fn run() -> server::Result<()> {
         backend_addr.id,
         relays_for_log(&backend_addr)
     );
-    eprintln!("[subsonic] connecting backend");
-    let backend = RemoteBackend::connect_addr(backend_addr).await?;
+    eprintln!(
+        "[subsonic] connecting backend local_secret={}",
+        if config.secret.is_some() {
+            "provided"
+        } else {
+            "random"
+        }
+    );
+    let backend = RemoteBackend::connect_addr_with_config(
+        backend_addr,
+        server::IrohConfig {
+            secret: config.secret.clone(),
+            relay: None,
+        },
+    )
+    .await?;
     eprintln!("[subsonic] backend transport connected, probing summary");
     let summary = backend.summary().await?;
     eprintln!("[subsonic] backend summary probe ok: {summary:?}");
@@ -227,6 +241,7 @@ fn parse_config(args: impl Iterator<Item = String>) -> server::Result<SubsonicCo
             "--endpoint" => config.endpoint = args.next().ok_or_else(missing_value)?,
             "--ticket" => config.ticket = Some(args.next().ok_or_else(missing_value)?),
             "--relay" => config.relay = Some(args.next().ok_or_else(missing_value)?),
+            "--secret" => config.secret = Some(args.next().ok_or_else(missing_value)?),
             "--username" => config.username = args.next().ok_or_else(missing_value)?,
             "--password" => config.password = args.next().ok_or_else(missing_value)?,
             other => {
@@ -247,6 +262,10 @@ fn parse_config(args: impl Iterator<Item = String>) -> server::Result<SubsonicCo
         return Err(server::Error::InvalidRequest(
             "expected --endpoint or --ticket".to_string(),
         ));
+    }
+    if let Some(secret) = &config.secret {
+        SecretKey::from_str(secret)
+            .map_err(|error| server::Error::InvalidRequest(format!("invalid --secret: {error}")))?;
     }
     Ok(config)
 }
@@ -310,6 +329,6 @@ fn missing_value() -> server::Error {
 fn print_usage() {
     println!("usage:");
     println!(
-        "  subsonic --bind 127.0.0.1:4040 (--ticket <endpoint-ticket> | --endpoint <server-endpoint-id> [--relay <relay-url>])"
+        "  subsonic --bind 127.0.0.1:4040 (--ticket <endpoint-ticket> | --endpoint <server-endpoint-id> [--relay <relay-url>]) [--secret <secret-key>]"
     );
 }

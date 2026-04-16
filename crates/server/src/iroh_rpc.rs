@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
+    Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
     endpoint::{Connection, RecvStream, SendStream, presets},
 };
 use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, TrackId};
@@ -35,6 +35,7 @@ pub struct RemoteClient {
     endpoint: Endpoint,
     addr: EndpointAddr,
     conn: Arc<Mutex<Option<Connection>>>,
+    last_path: Arc<Mutex<Option<String>>>,
 }
 
 impl RemoteClient {
@@ -55,11 +56,15 @@ impl RemoteClient {
     }
 
     pub async fn connect_addr(addr: EndpointAddr) -> Result<Self> {
+        Self::connect_addr_with_config(addr, IrohConfig::default()).await
+    }
+
+    pub async fn connect_addr_with_config(addr: EndpointAddr, config: IrohConfig) -> Result<Self> {
         eprintln!(
             "[server-rpc-client] local endpoint startup remote_addr={:?}",
             addr
         );
-        let endpoint = endpoint_builder(&IrohConfig::default()).bind().await?;
+        let endpoint = endpoint_builder(&config).bind().await?;
         eprintln!(
             "[server-rpc-client] local endpoint ready local_endpoint={}",
             endpoint.id()
@@ -68,6 +73,7 @@ impl RemoteClient {
             endpoint,
             addr,
             conn: Arc::new(Mutex::new(None)),
+            last_path: Arc::new(Mutex::new(None)),
         };
         let _ = client.connection().await?;
         Ok(client)
@@ -89,6 +95,7 @@ impl RemoteClient {
                     "[server-rpc-client] request ok kind={}",
                     request_name(&request)
                 );
+                self.log_connection_path_if_changed(&conn, "request").await;
                 Ok(response)
             }
             Err(error) => {
@@ -111,6 +118,7 @@ impl RemoteClient {
                     "[server-rpc-client] request ok kind={}",
                     request_name(&request)
                 );
+                self.log_connection_path_if_changed(&conn, "request").await;
                 Ok(response)
             }
         }
@@ -144,7 +152,10 @@ impl RemoteClient {
             .stream_on_connection_with_timeout(&conn, track_id.clone())
             .await
         {
-            Ok(stream) => Ok(stream),
+            Ok(stream) => {
+                self.log_connection_path_if_changed(&conn, "stream").await;
+                Ok(stream)
+            }
             Err(error) => {
                 eprintln!(
                     "[server-rpc-client] stream failed track_id={} error={error}; reconnecting once",
@@ -209,6 +220,8 @@ impl RemoteClient {
             "[server-rpc-client] backend transport connected remote_endpoint={}",
             conn.remote_id()
         );
+        log_connection_path("server-rpc-client", "connected", &conn);
+        *self.last_path.lock().await = Some(connection_path_label(&conn));
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -217,6 +230,16 @@ impl RemoteClient {
         let mut guard = self.conn.lock().await;
         if let Some(conn) = guard.take() {
             conn.close(1u32.into(), b"reconnect");
+        }
+        *self.last_path.lock().await = None;
+    }
+
+    async fn log_connection_path_if_changed(&self, conn: &Connection, event: &str) {
+        let label = connection_path_label(conn);
+        let mut guard = self.last_path.lock().await;
+        if guard.as_deref() != Some(label.as_str()) {
+            eprintln!("[server-rpc-client] path changed event={event} {label}");
+            *guard = Some(label);
         }
     }
 }
@@ -252,6 +275,7 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
                                 "[server-rpc] accepted connection remote_endpoint={}",
                                 remote_id
                             );
+                            log_connection_path("server-rpc", "accepted", &conn);
                             loop {
                                 match conn.accept_bi().await {
                                     Ok((send, recv)) => {
@@ -348,6 +372,46 @@ async fn handle_rpc_stream(
         }
     }
     Ok(())
+}
+
+fn log_connection_path(prefix: &str, event: &str, conn: &Connection) {
+    eprintln!(
+        "[{prefix}] path event={event} {}",
+        connection_path_label(conn)
+    );
+}
+
+fn connection_path_label(conn: &Connection) -> String {
+    let Some(path) = conn.to_info().selected_path() else {
+        return "type=unknown selected_path=<none>".to_string();
+    };
+    let kind = if path.is_relay() {
+        "relay"
+    } else if path.is_ip() {
+        "direct"
+    } else {
+        "custom"
+    };
+    let rtt = path
+        .rtt()
+        .map(|rtt| format!(" rtt_ms={}", rtt.as_millis()))
+        .unwrap_or_default();
+    format!(
+        "type={} selected_path={:?} remote_addr={}{}",
+        kind,
+        path.id(),
+        transport_addr_label(path.remote_addr()),
+        rtt
+    )
+}
+
+fn transport_addr_label(addr: &TransportAddr) -> String {
+    match addr {
+        TransportAddr::Relay(relay) => format!("relay:{relay}"),
+        TransportAddr::Ip(addr) => format!("ip:{addr}"),
+        TransportAddr::Custom(addr) => format!("custom:{addr}"),
+        other => format!("unknown:{other:?}"),
+    }
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {

@@ -4,6 +4,7 @@ pub struct SubsonicConfig {
     pub endpoint: String,
     pub ticket: Option<String>,
     pub relay: Option<String>,
+    pub secret: Option<String>,
     pub username: String,
     pub password: String,
 }
@@ -15,6 +16,7 @@ impl Default for SubsonicConfig {
             endpoint: String::new(),
             ticket: None,
             relay: None,
+            secret: None,
             username: "admin".to_string(),
             password: "admin".to_string(),
         }

@@ -18,5 +18,5 @@ server = { path = "../server" }
 path = "src/lib.rs"
 
 [[bin]]
-name = "subsonic"
+name = "iroh-fm-subsonic"
 path = "src/main.rs"
