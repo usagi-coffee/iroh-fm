@@ -67,6 +67,9 @@ impl MusicServer {
             BackendRequest::ListArtists => Ok(BackendResponse::Artists(
                 library.artists.values().cloned().collect(),
             )),
+            BackendRequest::ListAlbums => {
+                Ok(BackendResponse::Albums(library.albums.values().cloned().collect()))
+            }
             BackendRequest::GetStarred => self.get_starred(&library),
             BackendRequest::SetStarred { id, starred } => self.set_starred(&library, id, starred),
             BackendRequest::GetArtist { artist_id } => Self::get_artist(&library, artist_id),

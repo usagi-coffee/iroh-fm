@@ -8,6 +8,7 @@ use protocol::{
 pub trait Backend {
     async fn summary(&self) -> Result<BackendResponse>;
     async fn artists(&self) -> Result<BackendResponse>;
+    async fn albums(&self) -> Result<BackendResponse>;
     async fn starred(&self) -> Result<BackendResponse>;
     async fn set_starred(&self, id: &str, starred: bool) -> Result<BackendResponse>;
     async fn artist(&self, artist_id: &str) -> Result<BackendResponse>;
@@ -29,6 +30,10 @@ impl Backend for Client {
 
     async fn artists(&self) -> Result<BackendResponse> {
         self.request(BackendRequest::ListArtists).await
+    }
+
+    async fn albums(&self) -> Result<BackendResponse> {
+        self.request(BackendRequest::ListAlbums).await
     }
 
     async fn starred(&self) -> Result<BackendResponse> {

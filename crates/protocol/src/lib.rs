@@ -117,6 +117,7 @@ pub enum ResolvedId {
 pub enum BackendRequest {
     GetLibrarySummary,
     ListArtists,
+    ListAlbums,
     GetStarred,
     SetStarred { id: String, starred: bool },
     GetArtist { artist_id: ArtistId },
@@ -141,6 +142,7 @@ pub enum BackendResponse {
     },
     Empty,
     Artists(Vec<Artist>),
+    Albums(Vec<Album>),
     Starred(StarredSet),
     Artist(Artist),
     Album(Album),

@@ -31,6 +31,8 @@ pub async fn handle_request(
         "/rest/getMusicFolders" => Ok(map_music_folders(format)),
         "/rest/getArtists" => map_artists(format, backend.artists().await?),
         "/rest/getIndexes" => map_indexes(format, backend.artists().await?),
+        "/rest/getAlbumList" => map_album_list(format, &request, backend.albums().await?, false),
+        "/rest/getAlbumList2" => map_album_list(format, &request, backend.albums().await?, true),
         "/rest/getMusicDirectory" => {
             let id = query_value(&request, "id").unwrap_or("root");
             map_directory(format, backend, id).await
@@ -289,6 +291,53 @@ fn map_indexes(format: ResponseFormat, response: BackendResponse) -> Result<Subs
                 }
             }))))
         }
+    }
+}
+
+fn map_album_list(
+    format: ResponseFormat,
+    request: &RequestContext,
+    response: BackendResponse,
+    use_v2_name: bool,
+) -> Result<SubsonicResponse> {
+    let BackendResponse::Albums(albums) = response else {
+        return Err(Error::InvalidRequest(
+            "backend returned unexpected response for getAlbumList".to_string(),
+        ));
+    };
+
+    let list_name = if use_v2_name { "albumList2" } else { "albumList" };
+    let list_size = query_value(request, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10);
+    let offset = query_value(request, "offset")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let list_type = query_value(request, "type").unwrap_or("alphabeticalByName");
+
+    let mut albums = albums;
+    sort_albums(&mut albums, list_type);
+
+    let albums = albums
+        .into_iter()
+        .skip(offset)
+        .take(list_size)
+        .collect::<Vec<_>>();
+
+    match format {
+        ResponseFormat::Xml => {
+            let mut body = format!("<{}>", list_name);
+            for album in albums {
+                body.push_str(&render_album_xml(&album));
+            }
+            body.push_str(&format!("</{}>", list_name));
+            Ok(SubsonicResponse::Xml(wrap_xml(&body)))
+        }
+        ResponseFormat::Json => Ok(SubsonicResponse::Json(wrap_json(json!({
+            list_name: {
+                "album": albums.into_iter().map(render_album_json).collect::<Vec<_>>()
+            }
+        })))),
     }
 }
 
@@ -799,10 +848,217 @@ fn query_value<'a>(request: &'a RequestContext, key: &str) -> Option<&'a str> {
         .find_map(|(candidate, value)| (candidate == key).then_some(value.as_str()))
 }
 
+fn sort_albums(albums: &mut [protocol::Album], list_type: &str) {
+    match list_type {
+        "newest" => albums.sort_by(|left, right| {
+            right
+                .date
+                .cmp(&left.date)
+                .then_with(|| right.year.cmp(&left.year))
+                .then_with(|| left.title.cmp(&right.title))
+        }),
+        "alphabeticalByArtist" => albums.sort_by(|left, right| {
+            left.artist
+                .cmp(&right.artist)
+                .then_with(|| left.title.cmp(&right.title))
+        }),
+        "recent" | "frequent" | "random" | "starred" | "alphabeticalByName" => {
+            albums.sort_by(|left, right| left.title.cmp(&right.title))
+        }
+        _ => albums.sort_by(|left, right| left.title.cmp(&right.title)),
+    }
+}
+
+fn render_album_xml(album: &protocol::Album) -> String {
+    format!(
+        "<album id=\"{}\" name=\"{}\" artist=\"{}\" songCount=\"{}\"{}{}{}{}{}{} />",
+        xml_escape(&album.id.0),
+        xml_escape(&album.title),
+        xml_escape(&album.artist),
+        album.track_ids.len(),
+        optional_attr("albumArtist", album.album_artist.as_deref()),
+        optional_attr("genre", album.genres.first().map(String::as_str)),
+        optional_attr("year", album.year.map(|year| year.to_string()).as_deref()),
+        optional_attr(
+            "coverArt",
+            album.cover_art_id.as_ref().map(|id| id.0.as_str())
+        ),
+        optional_number_attr("duration", album.duration_seconds),
+        optional_number_attr("size", Some(album.size_bytes))
+    )
+}
+
+fn render_album_json(album: protocol::Album) -> serde_json::Value {
+    json!({
+        "id": album.id.0,
+        "name": album.title,
+        "artist": album.artist,
+        "albumArtist": album.album_artist,
+        "songCount": album.track_ids.len(),
+        "genre": album.genres.first().cloned(),
+        "year": album.year.map(|year| year.to_string()),
+        "coverArt": album.cover_art_id.map(|id| id.0),
+        "duration": album.duration_seconds,
+        "size": album.size_bytes
+    })
+}
+
 fn xml_escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use client::Result;
+    use protocol::{Album, AlbumId, BackendResponse, CoverArtId, TrackId};
+
+    struct MockBackend {
+        albums: Vec<Album>,
+    }
+
+    impl MockBackend {
+        fn new(albums: Vec<Album>) -> Self {
+            Self { albums }
+        }
+    }
+
+    impl Backend for MockBackend {
+        async fn summary(&self) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn artists(&self) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn albums(&self) -> Result<BackendResponse> {
+            Ok(BackendResponse::Albums(self.albums.clone()))
+        }
+
+        async fn starred(&self) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn set_starred(&self, _id: &str, _starred: bool) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn artist(&self, _artist_id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn album(&self, _album_id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn album_tracks(&self, _album_id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn track(&self, _track_id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn resolve_id(&self, _id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn cover_art(&self, _cover_art_id: &str) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn search(&self, _term: &str, _limit: usize) -> Result<BackendResponse> {
+            unimplemented!()
+        }
+
+        async fn stream(
+            &self,
+            _track_id: &str,
+        ) -> Result<(StreamDescriptor, iroh::endpoint::RecvStream)> {
+            unimplemented!()
+        }
+    }
+
+    fn request(path: &str, query: &[(&str, &str)]) -> RequestContext {
+        RequestContext {
+            path: path.to_string(),
+            query: query
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        }
+    }
+
+    fn sample_album(id: &str, title: &str, artist: &str) -> Album {
+        Album {
+            id: AlbumId(id.to_string()),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album_artist: Some(artist.to_string()),
+            track_ids: vec![TrackId(format!("{id}-track"))],
+            date: Some("2024-01-01".to_string()),
+            original_date: None,
+            year: Some(2024),
+            genres: vec!["Rock".to_string()],
+            labels: Vec::new(),
+            catalog_number: None,
+            comment: None,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            disc_count: Some(1),
+            duration_seconds: Some(1800),
+            size_bytes: 1024,
+            cover_art_id: Some(CoverArtId(format!("cover-{id}"))),
+        }
+    }
+
+    #[tokio::test]
+    async fn json_album_list_route_includes_album_list_container() {
+        let backend = MockBackend::new(vec![
+            sample_album("album-b", "Beta", "Artist B"),
+            sample_album("album-a", "Alpha", "Artist A"),
+        ]);
+
+        let response = handle_request(
+            &SubsonicConfig {
+                bind: "127.0.0.1:4040".to_string(),
+                endpoint: String::new(),
+                ticket: None,
+                secret: None,
+                username: "user".to_string(),
+                password: "pass".to_string(),
+                relay: None,
+            },
+            &backend,
+            request(
+                "/rest/getAlbumList",
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("type", "alphabeticalByName"),
+                    ("size", "10"),
+                    ("offset", "0"),
+                ],
+            ),
+        )
+        .await
+        .expect("album list response");
+
+        let SubsonicResponse::Json(body) = response else {
+            panic!("expected json response");
+        };
+        let value: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+
+        let albums = &value["subsonic-response"]["albumList"]["album"];
+        assert!(albums.is_array(), "albumList.album should be an array");
+        assert_eq!(albums.as_array().unwrap().len(), 2);
+        assert_eq!(albums[0]["name"], "Alpha");
+        assert_eq!(albums[1]["name"], "Beta");
+    }
 }
