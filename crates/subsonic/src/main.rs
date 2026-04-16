@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
@@ -14,6 +15,7 @@ use serde::Deserialize;
 use subsonic::{
     Backend, RemoteBackend, RequestContext, SubsonicConfig, SubsonicResponse, handle_request,
 };
+use tokio_util::io::ReaderStream;
 
 const BACKEND_RETRY_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const BACKEND_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
@@ -289,6 +291,26 @@ fn into_http_response(response: SubsonicResponse) -> Response {
             );
             response
         }
+        SubsonicResponse::Stream {
+            content_type,
+            content_length,
+            stream,
+        } => {
+            let mut response = Body::from_stream(ReaderStream::new(stream)).into_response();
+            response.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_str(&content_type)
+                    .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+            );
+            if let Some(content_length) = content_length {
+                if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
+                    response
+                        .headers_mut()
+                        .insert(axum::http::header::CONTENT_LENGTH, value);
+                }
+            }
+            response
+        }
     }
 }
 
@@ -296,7 +318,7 @@ fn response_is_ok(response: &SubsonicResponse) -> bool {
     match response {
         SubsonicResponse::Xml(body) => body.contains("status=\"ok\""),
         SubsonicResponse::Json(body) => !body.contains("\"status\":\"failed\""),
-        SubsonicResponse::Binary { .. } => true,
+        SubsonicResponse::Binary { .. } | SubsonicResponse::Stream { .. } => true,
     }
 }
 
@@ -307,6 +329,17 @@ fn response_summary(response: &SubsonicResponse) -> String {
             content_type,
             bytes,
         } => format!("binary content_type={} bytes={}", content_type, bytes.len()),
+        SubsonicResponse::Stream {
+            content_type,
+            content_length,
+            ..
+        } => format!(
+            "stream content_type={} content_length={}",
+            content_type,
+            content_length
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        ),
     }
 }
 

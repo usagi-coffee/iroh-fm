@@ -558,11 +558,12 @@ fn map_starred2(
 }
 
 fn map_stream(
-    (stream, bytes): (server::StreamDescriptor, Vec<u8>),
+    (stream, recv): (server::StreamDescriptor, iroh::endpoint::RecvStream),
 ) -> server::Result<SubsonicResponse> {
-    Ok(SubsonicResponse::Binary {
+    Ok(SubsonicResponse::Stream {
         content_type: stream.content_type,
-        bytes,
+        content_length: Some(stream.file_size),
+        stream: recv,
     })
 }
 

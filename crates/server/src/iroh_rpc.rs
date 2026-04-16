@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeSet, fmt::Write as _};
@@ -148,7 +147,7 @@ impl RemoteClient {
             .map_err(|_| Error::Timeout(format!("rpc {}", request_name(request))))?
     }
 
-    pub async fn stream(&self, track_id: TrackId) -> Result<(StreamDescriptor, Vec<u8>)> {
+    pub async fn stream_open(&self, track_id: TrackId) -> Result<(StreamDescriptor, RecvStream)> {
         eprintln!("[server-rpc-client] stream start track_id={}", track_id.0);
         let conn = self.connection().await?;
         match self.stream_on_connection(&conn, track_id.clone()).await {
@@ -172,8 +171,8 @@ impl RemoteClient {
         &self,
         conn: &Connection,
         track_id: TrackId,
-    ) -> Result<(StreamDescriptor, Vec<u8>)> {
-        let (descriptor, mut recv) = timeout(
+    ) -> Result<(StreamDescriptor, RecvStream)> {
+        let (descriptor, recv) = timeout(
             STREAM_OPEN_TIMEOUT,
             self.stream_open_on_connection(conn, track_id.clone()),
         )
@@ -183,9 +182,7 @@ impl RemoteClient {
             "[server-rpc-client] stream descriptor track_id={} file_size={} content_type={} transfer_timeout=disabled",
             descriptor.track_id.0, descriptor.file_size, descriptor.content_type
         );
-        let bytes = recv.read_to_end(usize::MAX).await?;
-        eprintln!("[server-rpc-client] stream ok bytes={}", bytes.len());
-        Ok((descriptor, bytes))
+        Ok((descriptor, recv))
     }
 
     async fn stream_open_on_connection(
@@ -363,14 +360,14 @@ async fn handle_rpc_stream(
                 return Ok(());
             };
             write_json(&mut send, &BackendResponse::Stream(stream.clone())).await?;
-            let full_path = PathBuf::from(&stream.path);
-            let bytes = tokio::fs::read(&full_path).await?;
+            let full_path = stream.path.clone();
+            let mut file = tokio::fs::File::open(&full_path).await?;
             eprintln!(
                 "[server-rpc] stream sending path={} bytes={}",
                 full_path.display(),
-                bytes.len()
+                stream.file_size
             );
-            send.write_all(&bytes).await?;
+            tokio::io::copy(&mut file, &mut send).await?;
             send.finish()?;
         }
         other => {

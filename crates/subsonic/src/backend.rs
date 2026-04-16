@@ -1,3 +1,4 @@
+use iroh::endpoint::RecvStream;
 use iroh::{EndpointAddr, EndpointId, RelayUrl};
 use protocol::{
     BackendRequest, BackendResponse, CoverArtId, SearchQuery, StreamDescriptor, TrackId,
@@ -17,7 +18,7 @@ pub trait Backend {
     async fn resolve_id(&self, id: &str) -> Result<BackendResponse>;
     async fn cover_art(&self, cover_art_id: &str) -> Result<BackendResponse>;
     async fn search(&self, term: &str, limit: usize) -> Result<BackendResponse>;
-    async fn stream(&self, track_id: &str) -> Result<(server::StreamDescriptor, Vec<u8>)>;
+    async fn stream(&self, track_id: &str) -> Result<(server::StreamDescriptor, RecvStream)>;
 }
 
 #[derive(Debug, Clone)]
@@ -127,7 +128,7 @@ impl Backend for RemoteBackend {
             .await
     }
 
-    async fn stream(&self, track_id: &str) -> Result<(StreamDescriptor, Vec<u8>)> {
-        self.client.stream(TrackId(track_id.to_string())).await
+    async fn stream(&self, track_id: &str) -> Result<(StreamDescriptor, RecvStream)> {
+        self.client.stream_open(TrackId(track_id.to_string())).await
     }
 }
