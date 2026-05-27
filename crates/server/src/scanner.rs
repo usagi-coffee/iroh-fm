@@ -207,12 +207,13 @@ impl LibraryBuilder {
             .unwrap_or_else(|| tags.artist.clone());
         let artist_id = self.artist_id_for(&album_artist);
         let album_id = self.album_id_for(&album_artist, &tags.album);
-        let track_id = TrackId(slugify(&format!(
+        let track_key = format!(
             "{}:{}:{}",
             album_artist,
             tags.album,
             relative_path.display()
-        )));
+        );
+        let track_id = TrackId(stable_id("track", &track_key));
 
         let track = Track {
             id: track_id.clone(),
@@ -263,7 +264,7 @@ impl LibraryBuilder {
             return existing.clone();
         }
 
-        let id = ArtistId(slugify(artist_name));
+        let id = ArtistId(stable_id("artist", artist_name));
         self.artists_by_name
             .insert(artist_name.to_string(), id.clone());
         self.artists.insert(
@@ -283,7 +284,7 @@ impl LibraryBuilder {
             return existing.clone();
         }
 
-        let id = AlbumId(slugify(&format!("{artist_name}:{album_name}")));
+        let id = AlbumId(stable_id("album", &format!("{artist_name}:{album_name}")));
         self.albums_by_key.insert(key, id.clone());
         self.albums.insert(
             id.clone(),
@@ -414,7 +415,10 @@ impl LibraryBuilder {
             return Ok(Some(existing.clone()));
         }
 
-        let id = CoverArtId(slugify(&format!("cover:{}", relative_path.display())));
+        let id = CoverArtId(stable_id(
+            "cover",
+            &format!("cover:{}", relative_path.display()),
+        ));
         let content_type = detect_image_content_type(sidecar)
             .unwrap_or_else(|| "application/octet-stream".to_string());
         eprintln!(
@@ -1180,12 +1184,26 @@ fn slugify(input: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+fn stable_id(prefix: &str, input: &str) -> String {
+    let slug = slugify(input);
+    if !slug.is_empty() && input.is_ascii() {
+        return slug;
+    }
+
+    let digest = format!("{:x}", md5::compute(input.as_bytes()));
+    if slug.is_empty() {
+        format!("{prefix}-{digest}")
+    } else {
+        format!("{slug}-{digest}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{CACHE_DB_FILE, scan_music_dir};
+    use super::{CACHE_DB_FILE, scan_music_dir, stable_id};
 
     #[test]
     fn single_artist_album_folder_scans_as_one_album_with_cover_art() {
@@ -1223,6 +1241,46 @@ mod tests {
         assert_eq!(cached_library.track_count(), 2);
 
         fs::remove_dir_all(root).expect("remove fixture library");
+    }
+
+    #[test]
+    fn japanese_album_names_produce_distinct_non_empty_album_ids() {
+        let root = unique_temp_dir();
+        let artist_dir = root.join("宇多田ヒカル");
+        let first_album_dir = artist_dir.join("初恋");
+        let second_album_dir = artist_dir.join("Fantome");
+        fs::create_dir_all(&first_album_dir).expect("create first album dir");
+        fs::create_dir_all(&second_album_dir).expect("create second album dir");
+        fs::write(first_album_dir.join("01 - Play A Love Song.flac"), [])
+            .expect("write first track");
+        fs::write(second_album_dir.join("01 - 道.flac"), []).expect("write second track");
+
+        let library = scan_music_dir(&root).expect("scan fixture library");
+
+        assert_eq!(library.artist_count(), 1);
+        assert_eq!(library.album_count(), 2);
+        assert_eq!(library.track_count(), 2);
+
+        let album_titles = library
+            .albums
+            .values()
+            .map(|album| album.title.as_str())
+            .collect::<Vec<_>>();
+        assert!(album_titles.contains(&"初恋"));
+        assert!(album_titles.contains(&"Fantome"));
+        assert!(library.albums.keys().all(|album_id| !album_id.0.is_empty()));
+
+        fs::remove_dir_all(root).expect("remove fixture library");
+    }
+
+    #[test]
+    fn japanese_only_ids_do_not_collapse_to_empty_slug() {
+        let first = stable_id("album", "宇多田ヒカル:初恋");
+        let second = stable_id("album", "宇多田ヒカル:日本語");
+
+        assert!(!first.is_empty());
+        assert!(!second.is_empty());
+        assert_ne!(first, second);
     }
 
     fn unique_temp_dir() -> std::path::PathBuf {

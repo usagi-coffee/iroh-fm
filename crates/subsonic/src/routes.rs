@@ -306,7 +306,11 @@ fn map_album_list(
         ));
     };
 
-    let list_name = if use_v2_name { "albumList2" } else { "albumList" };
+    let list_name = if use_v2_name {
+        "albumList2"
+    } else {
+        "albumList"
+    };
     let list_size = query_value(request, "size").and_then(|value| value.parse::<usize>().ok());
     let offset = query_value(request, "offset")
         .and_then(|value| value.parse::<usize>().ok())
@@ -1239,7 +1243,12 @@ mod tests {
             &backend,
             request(
                 "/rest/getAlbum",
-                &[("u", "user"), ("p", "pass"), ("f", "json"), ("id", "album-a")],
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("id", "album-a"),
+                ],
             ),
         )
         .await
