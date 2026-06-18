@@ -6,6 +6,7 @@ use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
     endpoint::{Connection, RecvStream, SendStream, presets},
 };
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, TrackId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -441,7 +442,7 @@ fn peer_policy_label(peers: &BTreeSet<EndpointId>) -> String {
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
-    let mut builder = Endpoint::builder(presets::N0);
+    let mut builder = Endpoint::builder(presets::N0).address_lookup(MdnsAddressLookup::builder());
     if let Some(secret) = &config.secret {
         let secret = SecretKey::from_str(secret)
             .map_err(|error| Error::InvalidRequest(format!("invalid --secret: {error}")))

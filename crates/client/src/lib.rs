@@ -8,6 +8,7 @@ use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
     endpoint::{Connection, RecvStream, presets},
 };
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::IROH_ALPN;
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
@@ -225,7 +226,7 @@ impl Client {
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
-    let mut builder = Endpoint::builder(presets::N0);
+    let mut builder = Endpoint::builder(presets::N0).address_lookup(MdnsAddressLookup::builder());
     if let Some(secret) = &config.secret {
         let secret = SecretKey::from_str(secret)
             .map_err(|error| Error::InvalidRequest(format!("invalid --secret: {error}")))

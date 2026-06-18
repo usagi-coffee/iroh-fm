@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 iroh.workspace = true
+iroh-mdns-address-lookup.workspace = true
 iroh-tickets.workspace = true
 lofty.workspace = true
 md5.workspace = true
