@@ -56,6 +56,8 @@ export class MusicClient {
     this.inner = inner;
     /** @type {Map<string, Promise<string>>} */
     this.coverCache = new Map();
+    /** @type {Map<string, Promise<Blob>>} */
+    this.trackPrefetchCache = new Map();
     /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
@@ -228,6 +230,19 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   async trackSource(id, onProgress = () => {}) {
+    const prefetched = this.trackPrefetchCache.get(id);
+    if (prefetched) {
+      try {
+        const blob = await prefetched;
+        if (this.trackPrefetchCache.get(id) === prefetched) this.trackPrefetchCache.delete(id);
+        onProgress(blob.size, blob.size);
+        return new BlobTrackSource(blob, () => {});
+      } catch {
+        if (this.trackPrefetchCache.get(id) === prefetched) this.trackPrefetchCache.delete(id);
+        // Retry through the normal streaming path when speculative loading failed.
+      }
+    }
+
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
     this.inner.prioritizeAudio();
@@ -282,6 +297,63 @@ export class MusicClient {
     }
   }
 
+  /** @param {string} id */
+  prefetchTrack(id) {
+    const existing = this.trackPrefetchCache.get(id);
+    if (existing) return existing.then(() => undefined);
+
+    // Lookahead is intentionally shallow so large libraries do not become an
+    // unbounded in-memory audio cache when the user changes queues frequently.
+    while (this.trackPrefetchCache.size >= 2) {
+      const oldest = this.trackPrefetchCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.trackPrefetchCache.delete(oldest);
+    }
+
+    const pending = this.downloadTrackBlob(id);
+    this.trackPrefetchCache.set(id, pending);
+    pending.catch(() => {
+      if (this.trackPrefetchCache.get(id) === pending) this.trackPrefetchCache.delete(id);
+    });
+    return pending.then(() => undefined);
+  }
+
+  /** @param {string} id */
+  async downloadTrackBlob(id) {
+    this.audioOpenRequests += 1;
+    this.coverFetchPaused = true;
+    this.inner.prioritizeAudio();
+    try {
+      const media = await this.inner.openTrack(id);
+      let stream;
+      let contentType;
+      let fileSize;
+      try {
+        contentType = media.contentType;
+        fileSize = Number(media.fileSize);
+        stream = media.takeStream();
+      } finally {
+        media.free();
+      }
+
+      this.activeAudioSources += 1;
+      try {
+        return await new Response(trackDownload(stream, fileSize, () => {}), {
+          headers: { "content-type": contentType },
+        }).blob();
+      } finally {
+        this.activeAudioSources = Math.max(0, this.activeAudioSources - 1);
+        queueMicrotask(() => this.drainCoverFetchQueue());
+      }
+    } finally {
+      this.audioOpenRequests -= 1;
+      if (this.audioOpenRequests === 0) {
+        this.coverFetchPaused = false;
+        this.drainCoverFetchQueue();
+      }
+    }
+  }
+
   async close() {
     this.closed = true;
     const closeError = new Error("music client is closed");
@@ -290,6 +362,7 @@ export class MusicClient {
       pending.then(URL.revokeObjectURL).catch(() => {});
     }
     this.coverCache.clear();
+    this.trackPrefetchCache.clear();
     await this.inner.close();
     this.inner.free();
   }

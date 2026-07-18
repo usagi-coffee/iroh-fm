@@ -650,6 +650,15 @@
 		if (albumQueue[0]) await playTrack(albumQueue[0], albumQueue);
 	}
 
+	function prefetchNextTrack(track, sourceQueue, generation) {
+		if (generation !== playGeneration || shuffle || repeat || sourceQueue.length < 2) return;
+		const index = sourceQueue.findIndex((item) => item.id === track.id);
+		if (index < 0) return;
+		const next = sourceQueue[(index + 1) % sourceQueue.length];
+		if (!next || next.id === track.id) return;
+		client.prefetchTrack(next.id).catch((error) => console.warn('[player] next-track prefetch failed', error));
+	}
+
 	async function playTrack(track, sourceQueue = filteredTracks) {
 		const generation = ++playGeneration;
 		audio?.pause();
@@ -680,9 +689,12 @@
 			audio.load();
 			await source.start();
 			if (generation !== playGeneration) return;
-			source.done.catch((error) => {
-				if (audioSource === source && !source.disposed) playerError = friendlyError(error, 'Stream interrupted.');
-			});
+			source.done.then(
+				() => prefetchNextTrack(track, sourceQueue, generation),
+				(error) => {
+					if (audioSource === source && !source.disposed) playerError = friendlyError(error, 'Stream interrupted.');
+				}
+			);
 			await audio.play();
 		} catch (error) {
 			if (generation === playGeneration) {
