@@ -1,16 +1,24 @@
-# iroh-fm
+<p align="center">
+  <img src="extra/iroh-fm.png" width="180" height="180" alt="iroh-fm project icon" />
+</p>
 
-**Your unstoppable personal music server.** Host your library on practically any device, then listen from anywhere on any device with a modern browser.
+<h1 align="center">iroh-fm</h1>
+
+**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a ticket. They open the website, paste the ticket, and your library is ready to play—no account, native app, public IP address, or port forwarding required.
+
+Host it on practically any device and listen from anywhere on any modern browser. It is your unstoppable personal music server: your files stay on your hardware while iroh provides the private, end-to-end encrypted connection.
+
+**The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your—or your friend's—device.
 
 ## [Open the web player](https://usagi-coffee.github.io/iroh-fm/)
 
-`iroh-fm` serves your music over [iroh](https://iroh.computer/) instead of tying it to a public IP address, domain, HTTP server, or one specific player protocol. Start the server, copy its endpoint ticket, and paste that ticket into the web player.
+Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and share it with the people you trust. The same ticket works from a phone, tablet, laptop, or desktop wherever they can open the web player.
 
-The web player is a fully static SPA hosted on GitHub Pages. Your browser connects to your music server directly through iroh; GitHub does not proxy your library, credentials, artwork, or audio.
+GitHub only serves the static player files. It does not run an `iroh-fm` service and does not proxy, process, or store your library, credentials, artwork, or audio.
 
 ## Why “unstoppable”?
 
-- **Host it anywhere:** a desktop, laptop, NAS, home server, VPS, or any other device that can run the `iroh-fm` binary and read your music directory.
+- **Host it anywhere:** a desktop, laptop, NAS, android smartphone, home server, VPS, or any other device that can run the `iroh-fm` binary and read your music directory.
 - **Listen from anywhere:** the endpoint ticket carries the information needed to reach the server without port forwarding or a public HTTP endpoint.
 - **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop - there is no native client to install.
 - **No application middleman:** the browser talks to your iroh endpoint, not to a hosted iroh-fm API service.
@@ -127,3 +135,9 @@ packages/
 ```
 
 The architecture deliberately keeps the music library and iroh operations protocol-agnostic. Subsonic and any future compatibility service remain sibling adapters rather than becoming the source of truth.
+
+## Credits
+
+- The interface uses the **[Catppuccin](https://catppuccin.com/) Mocha** palette.
+- The library layout and player experience are inspired by **[Tauon Music Box](https://tauonmusicbox.rocks/)**.
+
