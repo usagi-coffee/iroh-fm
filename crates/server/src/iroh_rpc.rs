@@ -19,6 +19,8 @@ use crate::server::MusicServer;
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+const AUDIO_STREAM_PRIORITY: i32 = 100;
+const COVER_STREAM_PRIORITY: i32 = -10;
 
 #[derive(Debug, Clone, Default)]
 pub struct IrohConfig {
@@ -331,6 +333,11 @@ async fn handle_rpc_stream(
 ) -> Result<()> {
     let request: BackendRequest = read_json(&mut recv).await?;
     eprintln!("[server-rpc] request kind={}", request_name(&request));
+    match &request {
+        BackendRequest::OpenStream { .. } => send.set_priority(AUDIO_STREAM_PRIORITY)?,
+        BackendRequest::GetCoverArt { .. } => send.set_priority(COVER_STREAM_PRIORITY)?,
+        _ => {}
+    }
     match request {
         BackendRequest::OpenStream { track_id } => {
             let response = match server.handle(BackendRequest::OpenStream { track_id }) {
