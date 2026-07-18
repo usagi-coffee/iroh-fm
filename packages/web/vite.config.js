@@ -6,8 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
+const commitHash = (process.env.GITHUB_SHA ?? "development").slice(0, 12);
 
 export default defineConfig({
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(commitHash),
+  },
   plugins: [
     tailwindcss(),
     sveltekit({

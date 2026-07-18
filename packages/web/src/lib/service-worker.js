@@ -4,6 +4,12 @@ import { base } from '$app/paths';
 const workerUrl = `${base}/service-worker.js`;
 const START_TIMEOUT_MS = 30_000;
 let startupPromise;
+/** @type {ServiceWorker | undefined} */
+let waitingWorker;
+/** @type {Set<(ready: boolean) => void>} */
+const updateListeners = new Set();
+/** @type {WeakSet<ServiceWorkerRegistration>} */
+const watchedRegistrations = new WeakSet();
 
 function registerServiceWorker() {
 	return navigator.serviceWorker.register(workerUrl, {
@@ -19,6 +25,19 @@ export function attach() {
 	};
 }
 
+/** @param {(ready: boolean) => void} listener */
+export function subscribeToServiceWorkerUpdates(listener) {
+	updateListeners.add(listener);
+	listener(Boolean(waitingWorker));
+	return () => updateListeners.delete(listener);
+}
+
+export function activateServiceWorkerUpdate() {
+	if (!waitingWorker) return;
+	navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+	waitingWorker.postMessage({ type: 'skip-waiting' });
+}
+
 export async function ensure_service_worker() {
 	if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 	startupPromise ??= startServiceWorker().catch((error) => {
@@ -31,6 +50,7 @@ export async function ensure_service_worker() {
 async function startServiceWorker() {
 	let registration = await navigator.serviceWorker.getRegistration();
 	if (!registration) registration = await registerServiceWorker();
+	watchRegistration(registration);
 
 	let target;
 	try {
@@ -42,7 +62,30 @@ async function startServiceWorker() {
 	}
 
 	await pingWorker(target);
+	registration.update().catch((error) => console.warn('[sw] update check failed', error));
 	return true;
+}
+
+/** @param {ServiceWorkerRegistration} registration */
+function watchRegistration(registration) {
+	if (watchedRegistrations.has(registration)) return;
+	watchedRegistrations.add(registration);
+
+	/** @param {ServiceWorker | null | undefined} worker */
+	const announceWaitingWorker = (worker) => {
+		if (!worker || !navigator.serviceWorker.controller) return;
+		waitingWorker = worker;
+		for (const listener of updateListeners) listener(true);
+	};
+
+	announceWaitingWorker(registration.waiting);
+	registration.addEventListener('updatefound', () => {
+		const installing = registration.installing;
+		if (!installing) return;
+		installing.addEventListener('statechange', () => {
+			if (installing.state === 'installed') announceWaitingWorker(registration.waiting ?? installing);
+		});
+	});
 }
 
 /** @param {ServiceWorkerRegistration} registration @returns {Promise<ServiceWorker>} */

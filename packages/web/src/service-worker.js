@@ -32,7 +32,6 @@ self.addEventListener("install", (event) => {
         // must never prevent a newer network-safe worker from activating.
         console.warn("[sw] app shell could not be cached", error);
       }
-      await self.skipWaiting();
     })(),
   );
 });
@@ -70,6 +69,10 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "skip-waiting") {
+    self.skipWaiting();
+    return;
+  }
   if (event.data?.type !== "version" && event.data?.type !== "user") return;
   event.ports[0]?.postMessage({ type: "version", version });
 });

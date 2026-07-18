@@ -6,6 +6,7 @@
 	import { VList } from 'virtua/svelte';
 	import Cover from '$lib/components/Cover.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import { activateServiceWorkerUpdate, subscribeToServiceWorkerUpdates } from '$lib/service-worker.js';
 
 	const ROW_HEIGHT = 30;
 	const TRACK_LIST_BUFFER = ROW_HEIGHT * 60;
@@ -58,6 +59,9 @@
 	let cachedTrackIds = $state(new Set());
 	let cachingTrackIds = $state(new Set());
 	let offlineOnly = $state(false);
+	let updateReady = $state(false);
+	let updateDismissed = $state(false);
+	let updateApplying = $state(false);
 	let trackMenu = $state(null);
 	let longPressTimer;
 	let longPressOrigin;
@@ -198,12 +202,14 @@
 		};
 		importConnection();
 		window.addEventListener('hashchange', importConnection);
+		const unsubscribeFromUpdates = subscribeToServiceWorkerUpdates((ready) => (updateReady = ready));
 		let mounted = true;
 		initializeIdentity().then(() => {
 			if (mounted) autoConnectOnce();
 		});
 		return () => {
 			mounted = false;
+			unsubscribeFromUpdates();
 			window.removeEventListener('hashchange', importConnection);
 			stopQrScanner();
 		};
@@ -937,6 +943,11 @@
 		const message = error instanceof Error ? error.message : String(error ?? '');
 		return message.replace(/^Error:\s*/i, '') || fallback;
 	}
+
+	function installApplicationUpdate() {
+		updateApplying = true;
+		activateServiceWorkerUpdate();
+	}
 </script>
 
 <svelte:head>
@@ -991,6 +1002,7 @@
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
 				<div class="hidden h-full min-w-0 items-center gap-2 border-l border-surface0 px-3 font-mono text-[9px] text-overlay1 lg:flex" title={`${connectionInfo.path_type}: ${connectionInfo.address || 'selecting path'} · ${formatBytes(connectionInfo.received_bytes)} received`}><span class="size-1.5 shrink-0 rounded-full {connectionInfo.address ? 'bg-green' : 'animate-pulse bg-yellow'}"></span><span class="max-w-44 truncate text-subtext0">{connectionAddressLabel(connectionInfo)}</span><span class="shrink-0 text-overlay0">↓ {formatBytes(connectionInfo.received_bytes)}</span></div>
+				{#if updateReady}<button onclick={activateServiceWorkerUpdate} class="grid h-full w-9 place-items-center border-l border-surface0 bg-mauve/15 text-mauve hover:bg-mauve hover:text-crust" title="Update ready. Click to install and reload" aria-label="Install application update"><Icon name="refresh" size={15}/></button>{/if}
 				<button onclick={toggleOfflineOnly} class="grid h-full w-9 place-items-center border-l border-surface0 hover:bg-surface0 {offlineOnly ? 'bg-surface0 text-mauve' : 'text-overlay1 hover:text-mauve'}" title={offlineOnly ? 'Offline-only mode enabled' : 'Use cached music only'} aria-pressed={offlineOnly}><Icon name="offline" size={15}/></button>
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
 				<button onclick={disconnect} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
@@ -1085,14 +1097,14 @@
 							<div class="flex items-center gap-3 text-[9px] uppercase tracking-wider text-overlay0"><span class="h-px flex-1 bg-surface0"></span>manual address override<span class="h-px flex-1 bg-surface0"></span></div>
 							<div><label for="settings-endpoint" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server endpoint ID</label><input id="settings-endpoint" bind:value={settingsEndpoint} spellcheck="false" autocomplete="off" placeholder="Leave empty to use ticket" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/></div>
 							<div><div class="mb-2 flex items-center justify-between"><label for="settings-relay-0" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Relay URLs</label><button type="button" onclick={() => addRelay(true)} class="font-mono text-[10px] text-mauve hover:text-pink">+ ADD RELAY</button></div><div class="space-y-2">{#each settingsRelays as relayUrl, index}<div class="relative"><input id={`settings-relay-${index}`} bind:value={settingsRelays[index]} spellcheck="false" autocomplete="url" placeholder="https://relay.example" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-10 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/>{#if settingsRelays.length > 1}<button type="button" onclick={() => removeRelay(index, true)} class="absolute inset-y-0 right-2 grid w-7 place-items-center text-overlay0 hover:text-red" aria-label={`Remove relay ${index + 1}`}><Icon name="close" size={12}/></button>{/if}</div>{/each}</div></div>
-							<div><label for="settings-secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="settings-secret" bind:value={settingsSecret} type={settingsShowSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (settingsShowSecret = !settingsShowSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{settingsShowSecret ? 'HIDE' : 'SHOW'}</button></div></div>
+							<div><label for="settings-secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="settings-secret" bind:value={settingsSecret} type={settingsShowSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (settingsShowSecret = !settingsShowSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{settingsShowSecret ? 'HIDE' : 'SHOW'}</button></div><div class="mt-2 border border-surface0 bg-mantle p-3"><p class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Client endpoint ID</p><code class="mt-2 block break-all text-[11px] leading-5 text-subtext0">{client.endpointId}</code></div></div>
 							<div><label for="settings-starred-key" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Starred collection key</label><input id="settings-starred-key" bind:value={settingsStarredKey} spellcheck="false" autocomplete="off" placeholder="Default: this client identity" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/><p class="mt-1.5 text-[10px] leading-4 text-overlay0">Leave empty for a private collection tied to the Client Endpoint ID. Use the same custom key on multiple clients to share one collection.</p></div>
-							<section class="border border-surface0 bg-mantle p-3" aria-labelledby="storage-title">
+							<section aria-labelledby="storage-title">
 								<div class="flex items-center justify-between gap-3"><div><p id="storage-title" class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Offline cache</p><p class="mt-1 text-[10px] text-overlay1">Played and prefetched songs are reused across visits.</p></div><button type="button" onclick={refreshStorageInfo} disabled={settingsStorage.loading} class="shrink-0 font-mono text-[9px] text-mauve hover:text-pink disabled:opacity-40">{settingsStorage.loading ? 'READING…' : 'REFRESH'}</button></div>
-								<div class="mt-3 grid grid-cols-2 gap-2"><div class="border border-surface0 bg-base p-2"><p class="font-mono text-[9px] uppercase text-overlay0">Songs</p><p class="mt-1 text-xs text-text">{settingsStorage.tracks} · {formatBytes(settingsStorage.trackSize)}</p><p class="mt-1 text-[9px] text-overlay0">Cache API</p></div><div class="border border-surface0 bg-base p-2"><p class="font-mono text-[9px] uppercase text-overlay0">Covers</p><p class="mt-1 text-xs text-text">{settingsStorage.covers} · {formatBytes(settingsStorage.coverSize)}</p><p class="mt-1 text-[9px] text-overlay0">Cache API</p></div></div>
+								<div class="mt-3 grid grid-cols-2 divide-x divide-surface0"><div class="pr-3"><p class="font-mono text-[9px] uppercase text-overlay0">Songs</p><p class="mt-1 text-xs text-text">{settingsStorage.tracks} · {formatBytes(settingsStorage.trackSize)}</p></div><div class="pl-3"><p class="font-mono text-[9px] uppercase text-overlay0">Covers</p><p class="mt-1 text-xs text-text">{settingsStorage.covers} · {formatBytes(settingsStorage.coverSize)}</p></div></div>
 								<div class="mt-3 flex items-center justify-between gap-3 border-t border-surface0 pt-3"><div class="min-w-0"><p class="text-[10px] text-subtext0">Browser storage: {formatBytes(settingsStorage.usage)} / {formatBytes(settingsStorage.quota)}</p><p class="mt-1 text-[9px] text-overlay0">{settingsStorage.persisted ? 'Persistent storage granted; the browser should not evict this cache automatically.' : 'Storage may be evicted under pressure. Browser quota is managed automatically.'}</p></div>{#if settingsStorage.supported && !settingsStorage.persisted}<button type="button" onclick={requestPersistentStorage} disabled={settingsStorage.requesting} class="shrink-0 border border-mauve px-2 py-1.5 font-mono text-[9px] text-mauve hover:bg-mauve hover:text-crust disabled:opacity-40">{settingsStorage.requesting ? 'REQUESTING…' : 'KEEP OFFLINE'}</button>{/if}</div>
 							</section>
-							<div class="border border-surface0 bg-mantle p-3"><p class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Current client endpoint ID</p><code class="mt-2 block break-all text-[11px] leading-5 text-subtext0">{client.endpointId}</code></div><p class="text-[11px] leading-5 text-overlay1">Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
+							<div class="flex items-start justify-between gap-4 text-[11px] leading-5 text-overlay1"><p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p><p class="shrink-0 font-mono text-[9px] text-overlay0" title="Application build commit">BUILD {__BUILD_COMMIT__}</p></div>
 						</div>
 						<div class="flex shrink-0 justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button type="button" onclick={() => (settingsOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button type="submit" disabled={!(settingsEndpoint.trim() ? cleanRelays(settingsRelays).length : settingsTicket.trim()) || connecting} class="bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">SAVE & RECONNECT</button></div>
 					</form>
@@ -1101,5 +1113,15 @@
 		{/if}
 
 		<audio bind:this={audio} src={audioSrc} onplay={() => (playing = true)} onpause={() => (playing = false)} ontimeupdate={() => { currentTime = audio.currentTime; duration = Number.isFinite(audio.duration) ? audio.duration : currentTrack?.duration_seconds || 0; }} onloadedmetadata={() => { duration = Number.isFinite(audio.duration) ? audio.duration : currentTrack?.duration_seconds || 0; audio.volume = volume; }} onended={onEnded}></audio>
+	</div>
+{/if}
+
+{#if updateReady && !updateDismissed}
+	<div class="fixed inset-0 z-[100] grid place-items-center bg-crust/75 p-4 backdrop-blur-sm" role="presentation">
+		<div class="w-full max-w-sm border border-surface1 bg-base shadow-float" role="dialog" aria-modal="true" aria-labelledby="update-title" aria-describedby="update-description">
+			<div class="border-b border-surface0 bg-mantle px-5 py-4"><p class="font-mono text-[10px] uppercase tracking-[.16em] text-mauve">Update ready</p><h2 id="update-title" class="mt-1 text-lg font-semibold text-text">A new version is available</h2></div>
+			<div class="p-5"><p id="update-description" class="text-xs leading-5 text-overlay1">The update has finished downloading. Upgrade now to reload the player with the latest version, or continue using the current version for this session.</p></div>
+			<div class="flex justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button onclick={() => (updateDismissed = true)} disabled={updateApplying} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0 disabled:opacity-40">LATER</button><button onclick={installApplicationUpdate} disabled={updateApplying} class="flex items-center gap-2 bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">{#if updateApplying}<span class="size-3 animate-spin rounded-full border-2 border-crust/25 border-t-crust"></span>UPGRADING…{:else}<Icon name="refresh" size={12}/>UPGRADE{/if}</button></div>
+		</div>
 	</div>
 {/if}
