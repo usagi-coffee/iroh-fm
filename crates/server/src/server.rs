@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use crate::config::ServerConfig;
 use crate::error::{Error, Result};
 use crate::index::{CoverArtSource, LibraryIndex};
-use crate::scanner::scan_music_dir;
+use crate::scanner::{legacy_id, scan_music_dir};
 use protocol::{
     AlbumId, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId, ResolvedId,
     SearchQuery, StarredSet, StreamDescriptor, TrackId,
@@ -129,26 +129,67 @@ impl MusicServer {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
+        let mut stored_count = 0usize;
+        let mut unresolved_count = 0usize;
+        let mut legacy_migrations = Vec::new();
         for row in rows {
+            stored_count += 1;
             let (id, kind) = row?;
+            let mut resolved = true;
             match kind.as_str() {
                 "artist" => {
-                    if let Some(artist) = library.artists.get(&ArtistId(id)) {
+                    if let Some(artist) = library.artists.get(&ArtistId(id.clone())) {
                         artists.push(artist.clone());
+                    } else {
+                        resolved = false;
                     }
                 }
                 "album" => {
-                    if let Some(album) = library.albums.get(&AlbumId(id)) {
+                    if let Some(album) = library.albums.get(&AlbumId(id.clone())) {
                         albums.push(album.clone());
+                    } else {
+                        resolved = false;
                     }
                 }
                 "track" => {
-                    if let Some(track) = library.tracks.get(&TrackId(id)) {
+                    if let Some(track) = library.tracks.get(&TrackId(id.clone())) {
                         tracks.push(track.clone());
+                    } else {
+                        resolved = false;
                     }
                 }
-                _ => {}
+                _ => resolved = false,
             }
+            if !resolved {
+                if let Some(track) = library.tracks.get(&TrackId(id.clone())) {
+                    tracks.push(track.clone());
+                } else if let Some(album) = library.albums.get(&AlbumId(id.clone())) {
+                    albums.push(album.clone());
+                } else if let Some(artist) = library.artists.get(&ArtistId(id.clone())) {
+                    artists.push(artist.clone());
+                } else if let Some(track) = find_legacy_track(library, &id) {
+                    tracks.push(track.clone());
+                    legacy_migrations.push((id.clone(), track.id.0.clone(), "track"));
+                } else if let Some(album) = find_legacy_album(library, &id) {
+                    albums.push(album.clone());
+                    legacy_migrations.push((id.clone(), album.id.0.clone(), "album"));
+                } else if let Some(artist) = find_legacy_artist(library, &id) {
+                    artists.push(artist.clone());
+                    legacy_migrations.push((id.clone(), artist.id.0.clone(), "artist"));
+                } else {
+                    unresolved_count += 1;
+                    eprintln!("[starred] unresolved row scope={scope} id={id} stored_kind={kind}");
+                }
+            }
+        }
+
+        eprintln!(
+            "[starred] loaded scope={scope} stored={stored_count} resolved={} unresolved={unresolved_count}",
+            artists.len() + albums.len() + tracks.len()
+        );
+        drop(stmt);
+        for (old_id, new_id, kind) in legacy_migrations {
+            migrate_starred_id(&conn, scope, &old_id, &new_id, kind)?;
         }
 
         Ok(BackendResponse::Starred(StarredSet {
@@ -521,6 +562,58 @@ fn starred_scope(key: Option<String>, identity: Option<&str>) -> String {
             .map(|identity| format!("identity:{identity}"))
             .unwrap_or_else(|| "legacy".to_owned()),
     }
+}
+
+fn find_legacy_track<'a>(library: &'a LibraryIndex, id: &str) -> Option<&'a protocol::Track> {
+    library.tracks.values().find(|track| {
+        let album_artist = track.album_artist.as_deref().unwrap_or(&track.artist);
+        legacy_id(&format!(
+            "{}:{}:{}",
+            album_artist,
+            track.album,
+            track.relative_path.display()
+        )) == id
+    })
+}
+
+fn find_legacy_album<'a>(library: &'a LibraryIndex, id: &str) -> Option<&'a protocol::Album> {
+    library
+        .albums
+        .values()
+        .find(|album| legacy_id(&format!("{}:{}", album.artist, album.title)) == id)
+}
+
+fn find_legacy_artist<'a>(library: &'a LibraryIndex, id: &str) -> Option<&'a protocol::Artist> {
+    library
+        .artists
+        .values()
+        .find(|artist| legacy_id(&artist.name) == id)
+}
+
+fn migrate_starred_id(
+    conn: &Connection,
+    scope: &str,
+    old_id: &str,
+    new_id: &str,
+    kind: &str,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT OR IGNORE INTO starred_items (scope, id, kind, starred_unix)
+            SELECT scope, ?1, ?2, starred_unix
+            FROM starred_items
+            WHERE scope = ?3 AND id = ?4
+        "#,
+        params![new_id, kind, scope, old_id],
+    )?;
+    conn.execute(
+        "DELETE FROM starred_items WHERE scope = ?1 AND id = ?2",
+        params![scope, old_id],
+    )?;
+    eprintln!(
+        "[starred] migrated legacy id scope={scope} old_id={old_id} new_id={new_id} kind={kind}"
+    );
+    Ok(())
 }
 
 fn now_unix() -> i64 {

@@ -1184,6 +1184,10 @@ fn slugify(input: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+pub(crate) fn legacy_id(input: &str) -> String {
+    slugify(input)
+}
+
 fn stable_id(prefix: &str, input: &str) -> String {
     let slug = slugify(input);
     if !slug.is_empty() && input.is_ascii() {
