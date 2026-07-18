@@ -1,14 +1,14 @@
-<p align="center">
-  <img src="extra/iroh-fm.png" width="180" height="180" alt="iroh-fm project icon" />
-</p>
+# iroh-fm
 
-<h1 align="center">iroh-fm</h1>
+<img src="extra/iroh-fm.png" align="right" width="180" height="180" alt="iroh-fm project icon" />
 
-**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a ticket. They open the website, paste the ticket, and your library is ready to play—no account, native app, public IP address, or port forwarding required.
+**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, or port forwarding is required.
+
+The setup URL stores the server ticket and optional client secret in its `#` fragment. That part of the URL stays inside the browser and is never included in the request sent to GitHub Pages or another static host.
 
 Host it on practically any device and listen from anywhere on any modern browser. It is your unstoppable personal music server: your files stay on your hardware while iroh provides the private, end-to-end encrypted connection.
 
-**The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your—or your friend's—device.
+**The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your or your friend's device.
 
 ## [Open the web player](https://usagi-coffee.github.io/iroh-fm/)
 
@@ -138,6 +138,6 @@ The architecture deliberately keeps the music library and iroh operations protoc
 
 ## Credits
 
+- **[iroh](https://iroh.computer/)** provides the peer-to-peer networking, endpoint tickets, relays, and end-to-end encrypted transport that make `iroh-fm` possible.
 - The interface uses the **[Catppuccin](https://catppuccin.com/) Mocha** palette.
 - The library layout and player experience are inspired by **[Tauon Music Box](https://tauonmusicbox.rocks/)**.
-
