@@ -655,10 +655,6 @@
 		if (firstTrack) await playAlbum(album);
 	}
 
-	function clearAlbum() {
-		activeAlbumId = null;
-	}
-
 	async function toggleStar(track, event) {
 		event?.stopPropagation();
 		const shouldStar = !starredTrackIds.has(track.id);
@@ -955,7 +951,7 @@
 			</section>
 
 			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden'} lg:flex">
-				<div class="flex h-10 shrink-0 items-center justify-between border-b border-surface0 px-3"><div><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{albums.length}</span></div>{#if activeAlbum}<button onclick={clearAlbum} class="font-mono text-[10px] text-mauve hover:text-pink">CLEAR SELECTION</button>{/if}</div>
+				<div class="flex h-10 shrink-0 items-center border-b border-surface0 px-3"><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{albums.length}</span></div>
 				<div bind:this={albumGridElement} class="min-h-0 flex-1">
 					<VList data={albumRows} getKey={(row) => `${albumColumns}:${row.map((album) => album.id).join('|')}`} bufferSize={400} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(row, rowIndex)}
