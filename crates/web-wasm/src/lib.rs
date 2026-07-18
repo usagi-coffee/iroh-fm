@@ -1,7 +1,10 @@
-use std::str::FromStr;
+use std::{fmt::Write, str::FromStr};
 
 use futures_util::StreamExt;
-use iroh::{Endpoint, endpoint::Connection, endpoint::presets};
+use iroh::{
+    Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, endpoint::Connection,
+    endpoint::presets,
+};
 use iroh_tickets::endpoint::EndpointTicket;
 use js_sys::Uint8Array;
 use protocol::{BackendRequest, BackendResponse, CoverArtId, IROH_ALPN, TrackId};
@@ -32,23 +35,36 @@ pub struct IrohFmClient {
 impl IrohFmClient {
     /// Create a browser endpoint and connect using an iroh endpoint ticket.
     #[wasm_bindgen(js_name = connect)]
-    pub async fn connect(ticket: String) -> Result<IrohFmClient, JsError> {
+    pub async fn connect(ticket: String, secret: Option<String>) -> Result<IrohFmClient, JsError> {
         let ticket = EndpointTicket::from_str(ticket.trim())
             .map_err(|error| js_error(format!("invalid endpoint ticket: {error}")))?;
-        let remote_id = ticket.endpoint_addr().id.to_string();
-        let endpoint = Endpoint::builder(presets::N0)
-            .bind()
-            .await
-            .map_err(to_js_error)?;
-        let connection = endpoint
-            .connect(ticket.endpoint_addr().clone(), IROH_ALPN)
-            .await
-            .map_err(to_js_error)?;
-        Ok(Self {
-            endpoint,
-            connection,
-            remote_id,
-        })
+        Self::connect_addr(ticket.endpoint_addr().clone(), secret).await
+    }
+
+    /// Connect from the two address components exposed by an endpoint ticket.
+    /// Browser connections require a relay because direct UDP is unavailable.
+    #[wasm_bindgen(js_name = connectAdvanced)]
+    pub async fn connect_advanced(
+        endpoint_id: String,
+        relays_json: String,
+        secret: Option<String>,
+    ) -> Result<IrohFmClient, JsError> {
+        let endpoint_id = EndpointId::from_str(endpoint_id.trim())
+            .map_err(|error| js_error(format!("invalid server endpoint ID: {error}")))?;
+        let relays: Vec<String> = serde_json::from_str(&relays_json)
+            .map_err(|error| js_error(format!("invalid relay list: {error}")))?;
+        if relays.is_empty() {
+            return Err(js_error(
+                "browser connections require at least one relay URL",
+            ));
+        }
+        let mut address = EndpointAddr::new(endpoint_id);
+        for relay in relays {
+            let relay = RelayUrl::from_str(relay.trim())
+                .map_err(|error| js_error(format!("invalid relay URL: {error}")))?;
+            address = address.with_relay_url(relay);
+        }
+        Self::connect_addr(address, secret).await
     }
 
     #[wasm_bindgen(getter, js_name = endpointId)]
@@ -124,6 +140,73 @@ impl IrohFmClient {
     }
 }
 
+/// A persistent browser identity generated locally. The secret never needs to
+/// leave the browser; its endpoint ID is safe to use in server allowlists.
+#[wasm_bindgen]
+pub struct ClientIdentity {
+    secret: String,
+    endpoint_id: String,
+}
+
+#[wasm_bindgen]
+impl ClientIdentity {
+    #[wasm_bindgen(getter)]
+    pub fn secret(&self) -> String {
+        self.secret.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = endpointId)]
+    pub fn endpoint_id(&self) -> String {
+        self.endpoint_id.clone()
+    }
+}
+
+#[wasm_bindgen(js_name = generateIdentity)]
+pub fn generate_identity() -> Result<ClientIdentity, JsError> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| js_error(format!("could not generate a browser identity: {error}")))?;
+    let secret = SecretKey::from_bytes(&bytes);
+    let mut encoded_secret = String::with_capacity(64);
+    for byte in bytes {
+        write!(encoded_secret, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    Ok(ClientIdentity {
+        endpoint_id: secret.public().to_string(),
+        secret: encoded_secret,
+    })
+}
+
+#[wasm_bindgen(js_name = endpointIdForSecret)]
+pub fn endpoint_id_for_secret(secret: String) -> Result<String, JsError> {
+    SecretKey::from_str(secret.trim())
+        .map(|secret| secret.public().to_string())
+        .map_err(|error| js_error(format!("invalid client secret: {error}")))
+}
+
+/// Decode the address fields from a ticket without opening a connection.
+#[wasm_bindgen(js_name = parseEndpointTicket)]
+pub fn parse_endpoint_ticket(ticket: String) -> Result<String, JsError> {
+    let ticket = EndpointTicket::from_str(ticket.trim())
+        .map_err(|error| js_error(format!("invalid endpoint ticket: {error}")))?;
+    serde_json::to_string(&ticket_address(&ticket)).map_err(to_js_error)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TicketAddress {
+    endpoint_id: String,
+    relays: Vec<String>,
+}
+
+fn ticket_address(ticket: &EndpointTicket) -> TicketAddress {
+    let address = ticket.endpoint_addr();
+    TicketAddress {
+        endpoint_id: address.id.to_string(),
+        relays: address.relay_urls().map(ToString::to_string).collect(),
+    }
+}
+
 #[wasm_bindgen]
 pub struct MediaStream {
     content_type: String,
@@ -166,6 +249,29 @@ impl MediaBytes {
 }
 
 impl IrohFmClient {
+    async fn connect_addr(
+        address: EndpointAddr,
+        secret: Option<String>,
+    ) -> Result<IrohFmClient, JsError> {
+        let remote_id = address.id.to_string();
+        let mut builder = Endpoint::builder(presets::N0);
+        if let Some(secret) = secret.filter(|secret| !secret.trim().is_empty()) {
+            let secret = SecretKey::from_str(secret.trim())
+                .map_err(|error| js_error(format!("invalid client secret: {error}")))?;
+            builder = builder.secret_key(secret);
+        }
+        let endpoint = builder.bind().await.map_err(to_js_error)?;
+        let connection = endpoint
+            .connect(address, IROH_ALPN)
+            .await
+            .map_err(to_js_error)?;
+        Ok(Self {
+            endpoint,
+            connection,
+            remote_id,
+        })
+    }
+
     async fn rpc(&self, request: BackendRequest) -> Result<BackendResponse, JsError> {
         let (mut send, mut recv) = self.connection.open_bi().await.map_err(to_js_error)?;
         write_json(&mut send, &request).await?;
@@ -216,4 +322,23 @@ fn js_error(message: impl AsRef<str>) -> JsError {
 
 fn to_js_error(error: impl std::fmt::Display) -> JsError {
     js_error(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ticket_address_preserves_all_relays() {
+        let endpoint_id = SecretKey::from_bytes(&[7; 32]).public();
+        let address = EndpointAddr::new(endpoint_id)
+            .with_relay_url("https://one.example".parse().unwrap())
+            .with_relay_url("https://two.example".parse().unwrap());
+        let details = ticket_address(&EndpointTicket::from(address));
+
+        assert_eq!(details.endpoint_id, endpoint_id.to_string());
+        assert_eq!(details.relays.len(), 2);
+        assert!(details.relays.iter().any(|url| url.contains("one.example")));
+        assert!(details.relays.iter().any(|url| url.contains("two.example")));
+    }
 }

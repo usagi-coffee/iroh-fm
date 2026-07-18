@@ -1,46 +1,75 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #171816;
-  --color-paper: #f3f1ea;
-  --color-acid: #d7ff64;
-  --color-coral: #ff826c;
-  --color-mist: #dddcd4;
-  --font-sans: "DM Sans", "Avenir Next", "Segoe UI", sans-serif;
-  --font-display: "Cormorant Garamond", Georgia, serif;
-  --shadow-float: 0 24px 70px rgb(14 15 13 / 0.18);
+  --color-rosewater: #f5e0dc;
+  --color-flamingo: #f2cdcd;
+  --color-pink: #f5c2e7;
+  --color-mauve: #cba6f7;
+  --color-red: #f38ba8;
+  --color-maroon: #eba0ac;
+  --color-peach: #fab387;
+  --color-yellow: #f9e2af;
+  --color-green: #a6e3a1;
+  --color-teal: #94e2d5;
+  --color-sky: #89dceb;
+  --color-sapphire: #74c7ec;
+  --color-blue: #89b4fa;
+  --color-lavender: #b4befe;
+  --color-text: #cdd6f4;
+  --color-subtext1: #bac2de;
+  --color-subtext0: #a6adc8;
+  --color-overlay2: #9399b2;
+  --color-overlay1: #7f849c;
+  --color-overlay0: #6c7086;
+  --color-surface2: #585b70;
+  --color-surface1: #45475a;
+  --color-surface0: #313244;
+  --color-base: #1e1e2e;
+  --color-mantle: #181825;
+  --color-crust: #11111b;
+  --font-sans: "Inter", "Noto Sans", "Segoe UI", sans-serif;
+  --font-display: "Inter", "Noto Sans", "Segoe UI", sans-serif;
+  --shadow-float: 0 24px 70px rgb(0 0 0 / 0.45);
 }
 
 @layer base {
   :root {
-    color-scheme: light;
+    color-scheme: dark;
     font-family: var(--font-sans);
-    background: var(--color-paper);
-    color: var(--color-ink);
+    background: var(--color-crust);
+    color: var(--color-text);
   }
+
   html {
     min-width: 320px;
-    background: var(--color-paper);
+    background: var(--color-crust);
   }
+
   body {
     min-height: 100vh;
     margin: 0;
-    background: var(--color-paper);
+    overflow: hidden;
+    background: var(--color-crust);
   }
+
   button,
   input,
   textarea {
     font: inherit;
   }
-  button {
+
+  button,
+  summary {
     cursor: pointer;
   }
+
   ::selection {
-    background: var(--color-acid);
-    color: var(--color-ink);
+    background: var(--color-mauve);
+    color: var(--color-crust);
   }
+
   * {
     scrollbar-width: thin;
-    scrollbar-color: #aaa99f transparent;
+    scrollbar-color: var(--color-surface2) var(--color-mantle);
   }
 }

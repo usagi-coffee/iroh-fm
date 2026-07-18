@@ -4,6 +4,8 @@ The web player is a fully static, client-rendered Svelte SPA. It has no HTTP API
 
 Browser iroh connections are end-to-end encrypted but relay-only. Start `iroh-fm` with a reachable relay and use the ticket it prints.
 
+The connection screen also accepts an optional client secret. This keeps the browser endpoint ID stable between sessions, allowing the ID shown in the player to be passed to `iroh-fm --peer`. The ticket and secret are stored in localStorage and can be changed later from the in-app connection settings.
+
 ## Prerequisites
 
 - Bun

@@ -3,9 +3,9 @@
 	let { client, id = null, title = '', class: className = '' } = $props();
 	let element = $state();
 	let visible = $state(false);
-	let src = $state('');
-	let failed = $state(false);
+	let imageFailed = $state(false);
 	let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
+	let coverPromise = $derived(visible && client && id ? client.coverUrl(id) : null);
 
 	$effect(() => {
 		if (!element) return;
@@ -24,29 +24,35 @@
 	});
 
 	$effect(() => {
-		let cancelled = false;
-		src = '';
-		failed = false;
-		if (visible && client && id) {
-			client.coverUrl(id).then((url) => {
-				if (!cancelled) src = url;
-			}).catch(() => {
-				if (!cancelled) failed = true;
-			});
-		}
-		return () => { cancelled = true; };
+		id;
+		imageFailed = false;
 	});
+
 </script>
 
-<div bind:this={element} class:has-image={src && !failed} class={`cover ${className}`} style={`--cover-hue: ${hue}`}>
-	{#if src && !failed}
-		<img src={src} alt={`${title} cover`} onerror={() => (failed = true)} />
-	{:else}
-		<div class="cover-fallback" aria-hidden="true">
-			<span>{title.trim().slice(0, 1).toUpperCase() || '♪'}</span>
-			<div class="groove one"></div><div class="groove two"></div>
-		</div>
-	{/if}
+{#snippet fallback()}
+	<div class="cover-fallback" aria-hidden="true">
+		<span>{title.trim().slice(0, 1).toUpperCase() || '♪'}</span>
+		<div class="groove one"></div><div class="groove two"></div>
+	</div>
+{/snippet}
+
+<div bind:this={element} class={`cover ${className}`} style={`--cover-hue: ${hue}`}>
+	<svelte:boundary>
+		{#if coverPromise && !imageFailed}
+			<img src={await coverPromise} alt={`${title} cover`} onerror={() => (imageFailed = true)} />
+		{:else}
+			{@render fallback()}
+		{/if}
+
+		{#snippet pending()}
+			{@render fallback()}
+		{/snippet}
+
+		{#snippet failed()}
+			{@render fallback()}
+		{/snippet}
+	</svelte:boundary>
 </div>
 
 <style>

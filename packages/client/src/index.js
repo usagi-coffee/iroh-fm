@@ -16,10 +16,38 @@ export class MusicClient {
     this.coverCache = new Map();
   }
 
-  /** @param {string} ticket */
-  static async connect(ticket) {
+  /**
+   * @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} connection
+   */
+  static async connect({ ticket = "", endpoint = "", relays = [], secret = "" }) {
     const { IrohFmClient } = await loadWasm();
-    return new MusicClient(await IrohFmClient.connect(ticket));
+    const identity = secret.trim() || undefined;
+    const inner = endpoint.trim()
+      ? await IrohFmClient.connectAdvanced(endpoint.trim(), JSON.stringify(relays), identity)
+      : await IrohFmClient.connect(ticket.trim(), identity);
+    return new MusicClient(inner);
+  }
+
+  /** @param {string} ticket */
+  static async parseTicket(ticket) {
+    const { parseEndpointTicket } = await loadWasm();
+    return JSON.parse(parseEndpointTicket(ticket));
+  }
+
+  static async generateIdentity() {
+    const { generateIdentity } = await loadWasm();
+    const identity = generateIdentity();
+    try {
+      return { secret: identity.secret, endpointId: identity.endpointId };
+    } finally {
+      identity.free();
+    }
+  }
+
+  /** @param {string} secret */
+  static async endpointIdForSecret(secret) {
+    const { endpointIdForSecret } = await loadWasm();
+    return endpointIdForSecret(secret);
   }
 
   get endpointId() {
@@ -36,13 +64,14 @@ export class MusicClient {
   }
 
   async bootstrap() {
-    const [summary, albums, artists, starred] = await Promise.all([
+    const [summary, albums, artists, tracks, starred] = await Promise.all([
       this.request("GetLibrarySummary"),
       this.request("ListAlbums"),
       this.request("ListArtists"),
+      this.request("ListTracks"),
       this.request("GetStarred"),
     ]);
-    return { summary, albums, artists, starred };
+    return { summary, albums, artists, tracks, starred };
   }
 
   /** @param {string} id */
