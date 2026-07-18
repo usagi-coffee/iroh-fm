@@ -186,7 +186,7 @@
 				});
 				previousAlbumKey = albumKey;
 			}
-			items.push({ kind: 'track', key: `track:${track.id}`, track, trackIndex, entry: trackEntries.get(track.id) });
+			items.push({ kind: 'track', key: `track:${track.id}`, track, trackIndex });
 		}
 		return items;
 	});
@@ -1161,7 +1161,7 @@
 		<header class="flex min-w-0 items-center border-b border-surface0 bg-crust text-[11px]">
 			<div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="iroh.fm" class="size-6" /></div>
 			<nav class="flex h-full min-w-0 items-stretch">
-				<button type="button" onclick={(event) => showTrackView(false, event)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">SONGS</button>
+				<button type="button" onclick={(event) => showTrackView(false, event)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">TRACKS</button>
 				<button type="button" onclick={showAlbumView} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
 				<button type="button" onclick={(event) => showTrackView(true, event)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">STARRED</button>
 			</nav>
@@ -1195,7 +1195,7 @@
 								</button>
 							{:else}
 								{@const track = item.track}
-								{@const entry = item.entry}
+								{@const entry = trackEntries.get(track.id)}
 								<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} oncontextmenu={(event) => openTrackMenu(track, event)} onpointerdown={(event) => beginLongPress(track, event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
 									<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if entry?.downloading}<span class="h-1 w-4 overflow-hidden bg-surface1"><span class="block h-full bg-mauve transition-[width] duration-150" style={`width:${entry.progress * 100}%`}></span></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else if entry?.cached}<span class="text-green" title="Cached">{track.track_number || item.trackIndex + 1}</span>{:else}<span class="group-hover:hidden">{track.track_number || item.trackIndex + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
 									<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.album}</div>
