@@ -1,54 +1,67 @@
 # iroh-fm
 
-`iroh-fm` is a personal music server built around `iroh`.
+**Your unstoppable personal music server.** Host your library on practically any device, then listen from anywhere on any device with a modern browser.
 
-The core idea is simple: the music library lives behind an `iroh` endpoint, and client protocols are added as thin frontends on top.
+## [Open the web player](https://usagi-coffee.github.io/iroh-fm/)
 
-## Why
+`iroh-fm` serves your music over [iroh](https://iroh.computer/) instead of tying it to a public IP address, domain, HTTP server, or one specific player protocol. Start the server, copy its endpoint ticket, and paste that ticket into the web player.
 
-Most music servers make the client protocol the center of the system. `iroh-fm` does the opposite.
+The web player is a fully static SPA hosted on GitHub Pages. Your browser connects to your music server directly through iroh; GitHub does not proxy your library, credentials, artwork, or audio.
 
-- the backend is protocol-agnostic
-- the transport is `iroh`
-- Subsonic is one of multiple possible compatibility layers (e.g jellyfin, subsonic, plex)
-- more frontends can be added without changing the server model
+## Why “unstoppable”?
 
-That means one music library, one backend, many possible client-facing APIs.
+- **Host it anywhere:** a desktop, laptop, NAS, home server, VPS, or any other device that can run the `iroh-fm` binary and read your music directory.
+- **Listen from anywhere:** the endpoint ticket carries the information needed to reach the server without port forwarding or a public HTTP endpoint.
+- **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop - there is no native client to install.
+- **No application middleman:** the browser talks to your iroh endpoint, not to a hosted iroh-fm API service.
+- **End-to-end encrypted:** browser connections travel through an iroh relay because browsers cannot open UDP sockets, but the relay cannot decrypt the connection.
+- **Portable client:** the web player is just static files and can be hosted on GitHub Pages, another static host, or locally.
+- **Stable identity and access control:** optionally give clients a persistent secret and allowlist their endpoint IDs on the server.
 
-## What It Does
+## Quick start
 
-- scans a local music directory
-- extracts tags and builds an indexed library
-- caches metadata in SQLite for fast warm starts
-- watches the library for real changes
-- serves metadata, cover art, and audio over `iroh`
-- exposes a Subsonic-compatible HTTP facade for existing players
+Install the server:
 
-## Workspace
-
-```text
-crates/
-  client/
-  protocol/
-  server/
-  subsonic/
-  web-wasm/
-packages/
-  client/
-  web/
+```sh
+cargo install --git https://github.com/usagi-coffee/iroh-fm server
 ```
 
-- `client`: `iroh` RPC client for talking to the backend server
-- `protocol`: shared backend request and response types
-- `server`: the actual music server
-- `subsonic`: Subsonic facade over the backend
-- `web-wasm`: browser-only `wasm-bindgen` bridge around the backend protocol
-- `packages/client`: reusable browser client and generated WASM bindings
-- `packages/web`: fully static Svelte/Tailwind music player
+Point it at your music library:
+
+```sh
+iroh-fm --music-dir /path/to/music
+```
+
+The server scans and indexes the library, watches it for changes, and prints an iroh endpoint ticket. Open the [iroh-fm web player](https://usagi-coffee.github.io/iroh-fm/), paste the ticket, and connect.
+
+For a stable server identity, a custom relay, or a client allowlist:
+
+```sh
+iroh-fm \
+  --music-dir /path/to/music \
+  --secret your-server-secret \
+  --relay https://relay.example.com \
+  --peer allowed-client-endpoint-id
+```
+
+`--peer` is repeatable. Leave it out to accept any client that has the server ticket. The web player can generate and retain its own client secret; its endpoint ID is available in Settings for allowlisting.
 
 ## Web player
 
-The web player is a client-rendered static site suitable for GitHub Pages. It connects directly from the browser to the server ticket through an iroh relay; it does not use SSR or an HTTP application backend.
+The first-party player is a client-rendered Svelte SPA with no SSR and no HTTP application backend. It includes:
+
+- a virtualized song list and album browser
+- progressive playback with next-track prefetching
+- persistent Cache Storage for songs and covers
+- an offline-only media mode
+- per-identity or custom-key starred collections
+- shareable ticket links that keep credentials in the URL fragment
+- installable PWA support
+- responsive desktop and mobile layouts
+
+Browser iroh connections are currently relay-only. The server ticket must contain a reachable relay, or you can configure relay addresses in the advanced connection editor.
+
+To run the web player locally:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -57,36 +70,60 @@ bun install
 bun run dev
 ```
 
-See [`packages/web/README.md`](packages/web/README.md) for build and deployment details.
+See [`packages/web/README.md`](packages/web/README.md) for static builds and GitHub Pages deployment.
 
-## Usage
+## Existing players through Subsonic
 
-### Server
+The first-party iroh web client is the main way to use `iroh-fm`. Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
 
-```sh
-# Install iroh-fm binary
-cargo install --git https://github.com/usagi-coffee/iroh-fm server
-
-iroh-fm \
-  --music-dir /path/to/music \        # required; root music directory
-  --secret your-secret-key \          # optional; fixed iroh identity
-  --relay https://relay.example.com \ # optional; advertised relay URL
-  --peer peer-endpoint-id-1 \         # optional; allowlist peer, repeatable
-  --peer peer-endpoint-id-2           # optional; omit all --peer flags for open access
-```
-
-### Subsonic frontend
+Install and run the adapter:
 
 ```sh
-# Install iroh-fm-subsonic binary
 cargo install --git https://github.com/usagi-coffee/iroh-fm subsonic
 
 iroh-fm-subsonic \
-  --bind 127.0.0.1:4040 \                 # optional; default 127.0.0.1:4040
-  --ticket your-endpoint-ticket \         # required unless --endpoint is used; backend ticket
-  --endpoint your-backend-endpoint-id \   # required unless --ticket is used; backend endpoint id
-  --relay https://relay.example.com \     # optional; overrides relay from ticket
-  --secret your-secret-key \              # optional; fixed local iroh identity
-  --username admin \                      # optional; default admin
-  --password admin                        # optional; default admin
+  --ticket your-iroh-fm-server-ticket \
+  --bind 127.0.0.1:4040 \
+  --username admin \
+  --password admin
 ```
+
+Then add `http://127.0.0.1:4040` as a Subsonic server in your player with the configured username and password. The adapter translates Subsonic HTTP requests into calls to the remote iroh music server and bridges audio back to the player.
+
+The Subsonic service is only a compatibility facade. It does not own the library index or its semantics, and the core server contains no Subsonic route or authentication logic.
+
+Additional adapter options:
+
+```text
+--endpoint <ID>       connect using an endpoint ID instead of a ticket
+--relay <URL>         provide or override the backend relay
+--secret <SECRET>     use a stable identity for the adapter
+--bind <ADDRESS>      HTTP listen address; defaults to 127.0.0.1:4040
+```
+
+Be careful when binding the Subsonic adapter beyond localhost: unlike the iroh transport, it exposes an HTTP service that you must secure appropriately.
+
+## What the server does
+
+- scans a local music directory and extracts tags
+- builds a normalized artist, album, track, and artwork index
+- persists metadata in SQLite for fast warm starts
+- watches the library for real filesystem changes
+- serves library operations, cover art, and audio over iroh
+- keeps protocol-specific frontends outside the core server
+
+## Workspace
+
+```text
+crates/
+  client/       native iroh RPC client
+  protocol/     shared backend request and response types
+  server/       music scanner, index, and iroh server
+  subsonic/     optional Subsonic compatibility facade
+  web-wasm/     browser wasm-bindgen bridge
+packages/
+  client/       reusable JavaScript/WASM browser client
+  web/          fully static Svelte/Tailwind player
+```
+
+The architecture deliberately keeps the music library and iroh operations protocol-agnostic. Subsonic and any future compatibility service remain sibling adapters rather than becoming the source of truth.
