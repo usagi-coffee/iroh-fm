@@ -1,6 +1,8 @@
 let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
+const MAX_CONCURRENT_COVER_FETCHES = 2;
+const CONNECT_TIMEOUT_MS = 10_000;
 
 /** @param {string} remoteId @param {string} coverId */
 function coverCacheRequest(remoteId, coverId) {
@@ -8,6 +10,35 @@ function coverCacheRequest(remoteId, coverId) {
   url.searchParams.set("server", String(remoteId));
   url.searchParams.set("id", coverId);
   return new Request(url);
+}
+
+/** @param {Promise<any>} pending */
+async function connectionWithTimeout(pending) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("connection timed out after 10 seconds")),
+          CONNECT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    pending
+      .then(async (inner) => {
+        try {
+          await inner.close();
+        } finally {
+          inner.free();
+        }
+      })
+      .catch(() => {});
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function loadWasm() {
@@ -24,6 +55,10 @@ export class MusicClient {
     this.inner = inner;
     /** @type {Map<string, Promise<string>>} */
     this.coverCache = new Map();
+    /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
+    this.coverFetchQueue = [];
+    this.activeCoverFetches = 0;
+    this.closed = false;
   }
 
   /**
@@ -32,9 +67,10 @@ export class MusicClient {
   static async connect({ ticket = "", endpoint = "", relays = [], secret = "" }) {
     const { IrohFmClient } = await loadWasm();
     const identity = secret.trim() || undefined;
-    const inner = endpoint.trim()
-      ? await IrohFmClient.connectAdvanced(endpoint.trim(), JSON.stringify(relays), identity)
-      : await IrohFmClient.connect(ticket.trim(), identity);
+    const pending = endpoint.trim()
+      ? IrohFmClient.connectAdvanced(endpoint.trim(), JSON.stringify(relays), identity)
+      : IrohFmClient.connect(ticket.trim(), identity);
+    const inner = await connectionWithTimeout(pending);
     return new MusicClient(inner);
   }
 
@@ -118,7 +154,7 @@ export class MusicClient {
       }
     }
 
-    const media = await this.inner.fetchCover(id);
+    const media = await this.enqueueCoverFetch(id);
     let blob;
     try {
       blob = new Blob([media.bytes], { type: media.contentType });
@@ -145,6 +181,34 @@ export class MusicClient {
     return URL.createObjectURL(blob);
   }
 
+  /** @param {string} id @returns {Promise<any>} */
+  enqueueCoverFetch(id) {
+    if (this.closed) return Promise.reject(new Error("music client is closed"));
+    return new Promise((resolve, reject) => {
+      this.coverFetchQueue.push({ id, resolve, reject });
+      this.drainCoverFetchQueue();
+    });
+  }
+
+  drainCoverFetchQueue() {
+    while (
+      !this.closed &&
+      this.activeCoverFetches < MAX_CONCURRENT_COVER_FETCHES &&
+      this.coverFetchQueue.length > 0
+    ) {
+      const job = this.coverFetchQueue.shift();
+      if (!job) return;
+      this.activeCoverFetches += 1;
+      Promise.resolve()
+        .then(() => this.inner.fetchCover(job.id))
+        .then(job.resolve, job.reject)
+        .finally(() => {
+          this.activeCoverFetches -= 1;
+          this.drainCoverFetchQueue();
+        });
+    }
+  }
+
   /** @param {string} id */
   async trackSource(id) {
     const media = await this.inner.openTrack(id);
@@ -168,6 +232,9 @@ export class MusicClient {
   }
 
   async close() {
+    this.closed = true;
+    const closeError = new Error("music client is closed");
+    for (const job of this.coverFetchQueue.splice(0)) job.reject(closeError);
     for (const pending of this.coverCache.values()) {
       pending.then(URL.revokeObjectURL).catch(() => {});
     }

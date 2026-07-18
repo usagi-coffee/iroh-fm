@@ -42,7 +42,7 @@
 	let showSecret = $state(false);
 	let loginTab = $state('ticket');
 	let connecting = $state(false);
-	let connectionStep = $state('Starting browser endpoint…');
+	let connectionStep = $state('Connecting to the iroh server…');
 	let connectionError = $state('');
 	let client = $state(null);
 
@@ -51,7 +51,7 @@
 	let artists = $state([]);
 	let tracks = $state([]);
 	let starred = $state({ artists: [], albums: [], tracks: [] });
-	let starredIds = $state(new Set());
+	let starredTrackIds = $state(new Set());
 
 	let query = $state('');
 	let favoriteOnly = $state(false);
@@ -60,6 +60,7 @@
 	let mobilePane = $state('tracks');
 
 	let trackList = $state();
+	let trackViewRevision = $state(0);
 	let albumGridElement = $state();
 	let albumColumns = $state(3);
 
@@ -97,10 +98,13 @@
 
 	const activeAlbum = $derived(albums.find((album) => album.id === activeAlbumId) ?? null);
 	const lovedTrackIds = $derived.by(() => {
-		const ids = new Set(tracks.filter((track) => starredIds.has(track.id)).map((track) => track.id));
-		const lovedAlbumIds = new Set(albums.filter((album) => starredIds.has(album.id)).map((album) => album.id));
-		for (const artist of artists) {
-			if (!starredIds.has(artist.id)) continue;
+		const ids = new Set(starredTrackIds);
+		const lovedAlbumIds = new Set();
+		for (const album of starred.albums) {
+			lovedAlbumIds.add(album.id);
+			for (const trackId of album.track_ids) ids.add(trackId);
+		}
+		for (const artist of starred.artists) {
 			for (const albumId of artist.album_ids) lovedAlbumIds.add(albumId);
 		}
 		for (const album of albums) {
@@ -339,7 +343,7 @@
 		if (!canConnect(forceTicket) || connecting) return;
 		connecting = true;
 		connectionError = '';
-		connectionStep = 'Loading the iroh WebAssembly client…';
+		connectionStep = 'Connecting to the iroh server…';
 		let nextClient;
 		try {
 			if (!secret.trim()) {
@@ -362,11 +366,7 @@
 			artists = variant(data.artists, 'Artists', []);
 			tracks = variant(data.tracks, 'Tracks', []).sort(trackSort);
 			starred = variant(data.starred, 'Starred', starred);
-			starredIds = new Set([
-				...starred.artists.map((item) => item.id),
-				...starred.albums.map((item) => item.id),
-				...starred.tracks.map((item) => item.id)
-			]);
+			starredTrackIds = new Set(starred.tracks.map((item) => item.id));
 		} catch (error) {
 			await nextClient?.close().catch(() => {});
 			connectionError = friendlyError(error, 'Could not reach this iroh-fm server.');
@@ -490,7 +490,7 @@
 
 	function updateQuery(event) {
 		query = event.currentTarget.value;
-		resetTrackScroll();
+		trackViewRevision += 1;
 	}
 
 	function resetTrackScroll() {
@@ -500,7 +500,9 @@
 	async function showTrackView(lovedOnly) {
 		favoriteOnly = lovedOnly;
 		activeAlbumId = null;
+		query = '';
 		mobilePane = 'tracks';
+		trackViewRevision += 1;
 		await tick();
 		resetTrackScroll();
 	}
@@ -510,6 +512,7 @@
 		mobilePane = 'tracks';
 		favoriteOnly = false;
 		query = '';
+		trackViewRevision += 1;
 		const albumTrackIds = new Set(album.track_ids);
 		const firstTrack = tracks.find((track) => albumTrackIds.has(track.id));
 		if (!firstTrack) return;
@@ -525,13 +528,14 @@
 
 	async function toggleStar(track, event) {
 		event?.stopPropagation();
-		const shouldStar = !starredIds.has(track.id);
+		const shouldStar = !starredTrackIds.has(track.id);
 		try {
 			await client.request({ SetStarred: { id: track.id, starred: shouldStar } });
-			const next = new Set(starredIds);
+			const next = new Set(starredTrackIds);
 			if (shouldStar) next.add(track.id);
 			else next.delete(track.id);
-			starredIds = next;
+			starredTrackIds = next;
+			if (favoriteOnly) trackViewRevision += 1;
 		} catch (error) {
 			connectionError = friendlyError(error, 'Could not update the favorite.');
 		}
@@ -755,17 +759,19 @@
 				<div class="hidden h-7 shrink-0 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0 sm:grid"><span>#</span><span>Artist</span><span>Title</span><span>Album</span><span class="text-right">Time</span></div>
 
 				<div class="min-h-0 flex-1">
+					{#key trackViewRevision}
 					<VList data={filteredTracks} getKey={(track) => track.id} itemSize={ROW_HEIGHT} bufferSize={ROW_HEIGHT * 10} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(track, index)}
 							<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
 								<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="size-2.5 animate-spin rounded-full border border-overlay0 border-t-mauve"></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || index + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
 								<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.artist}</div>
-								<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
+								<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredTrackIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
 								<div class="hidden min-w-0 truncate pr-2 text-subtext0 sm:block">{track.album}</div>
 								<div class="text-right font-mono text-[10px] text-overlay0">{formatTime(track.duration_seconds)}</div>
 							</div>
 						{/snippet}
 					</VList>
+					{/key}
 				</div>
 			</section>
 
