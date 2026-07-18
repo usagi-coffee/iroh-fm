@@ -4,22 +4,21 @@
 
 **Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, or port forwarding is required.
 
-The setup URL stores the server ticket and optional client secret in its `#` fragment. That part of the URL stays inside the browser and is never included in the request sent to GitHub Pages or another static host.
+The main point is that the real music server runs on your own bare metal at home, even when that machine is behind NAT. You do not need to expose ports, obtain a public IP address, configure a reverse proxy, or move your library into somebody else's cloud. iroh makes the server reachable while your files remain on your hardware.
 
-Host it on practically any device and listen from anywhere on any modern browser. It is your unstoppable personal music server: your files stay on your hardware while iroh provides the private, end-to-end encrypted connection.
-
-**The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your or your friend's device.
+The host does not need to be a traditional server. Run `iroh-fm` on a desktop, laptop, NAS, home server, or even an Android phone, then listen from anywhere using any modern browser. It is your unstoppable personal music server with a private, end-to-end encrypted connection.
 
 ## [Open the web player](https://usagi-coffee.github.io/iroh-fm/)
 
 Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and share it with the people you trust. The same ticket works from a phone, tablet, laptop, or desktop wherever they can open the web player.
 
-GitHub only serves the static player files. It does not run an `iroh-fm` service and does not proxy, process, or store your library, credentials, artwork, or audio.
+**The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your or your friend's device.
 
 ## Why “unstoppable”?
 
-- **Host it anywhere:** a desktop, laptop, NAS, android smartphone, home server, VPS, or any other device that can run the `iroh-fm` binary and read your music directory.
-- **Listen from anywhere:** the endpoint ticket carries the information needed to reach the server without port forwarding or a public HTTP endpoint.
+- **Run it on your own bare metal:** keep the server and music library on hardware you control at home.
+- **Stay behind NAT:** the endpoint ticket carries the information needed to reach the server without port forwarding, a public IP address, or a public HTTP endpoint.
+- **Host it almost anywhere:** use a desktop, laptop, NAS, home server, VPS, Android phone, or any other device that can run the `iroh-fm` binary and read your music directory.
 - **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop - there is no native client to install.
 - **No application middleman:** the browser talks to your iroh endpoint, not to a hosted iroh-fm API service.
 - **End-to-end encrypted:** browser connections travel through an iroh relay because browsers cannot open UDP sockets, but the relay cannot decrypt the connection.
@@ -41,6 +40,8 @@ iroh-fm --music-dir /path/to/music
 ```
 
 The server scans and indexes the library, watches it for changes, and prints an iroh endpoint ticket. Open the [iroh-fm web player](https://usagi-coffee.github.io/iroh-fm/), paste the ticket, and connect.
+
+From the web player, use **Copy** to create a setup URL for someone else. The URL stores the server ticket and optional client secret in its `#` fragment. That part stays inside the browser and is never included in the request sent to GitHub Pages or another static host.
 
 For a stable server identity, a custom relay, or a client allowlist:
 
