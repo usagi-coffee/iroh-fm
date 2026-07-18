@@ -6,10 +6,15 @@ const START_TIMEOUT_MS = 30_000;
 let startupPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
+let reloadRequired = false;
 /** @type {Set<(ready: boolean) => void>} */
 const updateListeners = new Set();
 /** @type {WeakSet<ServiceWorkerRegistration>} */
 const watchedRegistrations = new WeakSet();
+
+function notifyUpdateListeners() {
+	for (const listener of updateListeners) listener(Boolean(waitingWorker) || reloadRequired);
+}
 
 function registerServiceWorker() {
 	return navigator.serviceWorker.register(workerUrl, {
@@ -28,12 +33,15 @@ export function attach() {
 /** @param {(ready: boolean) => void} listener */
 export function subscribeToServiceWorkerUpdates(listener) {
 	updateListeners.add(listener);
-	listener(Boolean(waitingWorker));
+	listener(Boolean(waitingWorker) || reloadRequired);
 	return () => updateListeners.delete(listener);
 }
 
 export function activateServiceWorkerUpdate() {
-	if (!waitingWorker) return;
+	if (!waitingWorker) {
+		if (reloadRequired) location.reload();
+		return;
+	}
 	navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
 	waitingWorker.postMessage({ type: 'skip-waiting' });
 }
@@ -61,8 +69,16 @@ async function startServiceWorker() {
 		target = await waitForActiveWorker(registration);
 	}
 
-	await pingWorker(target);
+	const workerInfo = await pingWorker(target);
+	if (workerInfo.buildVersion && workerInfo.buildVersion !== __BUILD_VERSION__) {
+		reloadRequired = true;
+		notifyUpdateListeners();
+	}
 	registration.update().catch((error) => console.warn('[sw] update check failed', error));
+	const checkForUpdate = () => {
+		if (document.visibilityState === 'visible') registration.update().catch((error) => console.warn('[sw] update check failed', error));
+	};
+	document.addEventListener('visibilitychange', checkForUpdate);
 	return true;
 }
 
@@ -75,7 +91,7 @@ function watchRegistration(registration) {
 	const announceWaitingWorker = (worker) => {
 		if (!worker || !navigator.serviceWorker.controller) return;
 		waitingWorker = worker;
-		for (const listener of updateListeners) listener(true);
+		notifyUpdateListeners();
 	};
 
 	announceWaitingWorker(registration.waiting);
@@ -133,7 +149,7 @@ function pingWorker(target) {
 			console.info(`[sw] version: ${event.data.version}`);
 			clearTimeout(timeout);
 			channel.port1.close();
-			resolve(undefined);
+			resolve(event.data);
 		};
 
 		target.postMessage({ type: 'version' }, [channel.port2]);

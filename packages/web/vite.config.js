@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const commitHash = (process.env.GITHUB_SHA ?? "development").slice(0, 12);
+const buildVersion = process.env.GITHUB_SHA ?? String(Date.now());
 
 export default defineConfig({
   define: {
     __BUILD_COMMIT__: JSON.stringify(commitHash),
+    __BUILD_VERSION__: JSON.stringify(buildVersion),
   },
   plugins: [
     tailwindcss(),

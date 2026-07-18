@@ -75,6 +75,7 @@
 	let updateReady = $state(false);
 	let updateDismissed = $state(false);
 	let updateApplying = $state(false);
+	let disconnectConfirmOpen = $state(false);
 	let trackMenu = $state(null);
 	let albumMenu = $state(null);
 	let longPressTimer;
@@ -494,6 +495,11 @@
 		const previous = client;
 		client = null;
 		if (previous) await previous.close().catch(() => {});
+	}
+
+	async function confirmDisconnect() {
+		disconnectConfirmOpen = false;
+		await disconnect();
 	}
 
 	function openSettings() {
@@ -1130,7 +1136,7 @@
 				{#if updateReady}<button onclick={activateServiceWorkerUpdate} class="grid h-full w-9 place-items-center border-l border-surface0 bg-mauve/15 text-mauve hover:bg-mauve hover:text-crust" title="Update ready. Click to install and reload" aria-label="Install application update"><Icon name="refresh" size={15}/></button>{/if}
 				<button onclick={toggleOfflineOnly} class="grid h-full w-9 place-items-center border-l border-surface0 hover:bg-surface0 {offlineOnly ? 'bg-surface0 text-mauve' : 'text-overlay1 hover:text-mauve'}" title={offlineOnly ? 'Offline-only mode enabled' : 'Use cached music only'} aria-pressed={offlineOnly}><Icon name="offline" size={15}/></button>
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
-				<button onclick={disconnect} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
+				<button onclick={() => (disconnectConfirmOpen = true)} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
 			</div>
 		</header>
 
@@ -1267,12 +1273,22 @@
 	</div>
 {/if}
 
+{#if disconnectConfirmOpen}
+	<div class="fixed inset-0 z-[90] grid place-items-center bg-crust/75 p-4 backdrop-blur-sm" role="presentation" onclick={() => (disconnectConfirmOpen = false)} onkeydown={(event) => { if (event.key === 'Escape') disconnectConfirmOpen = false; }}>
+		<div class="w-full max-w-sm border border-surface1 bg-base shadow-float" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="disconnect-title" aria-describedby="disconnect-description" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+			<div class="border-b border-surface0 bg-mantle px-5 py-4"><p class="font-mono text-[10px] uppercase tracking-[.16em] text-red">Disconnect</p><h2 id="disconnect-title" class="mt-1 text-lg font-semibold text-text">Leave this library?</h2></div>
+			<div class="p-5"><p id="disconnect-description" class="text-xs leading-5 text-overlay1">Playback will stop and you will return to the connection screen.</p></div>
+			<div class="flex justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button onclick={() => (disconnectConfirmOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button onclick={confirmDisconnect} class="bg-red px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-maroon">DISCONNECT</button></div>
+		</div>
+	</div>
+{/if}
+
 {#if updateReady && !updateDismissed}
 	<div class="fixed inset-0 z-[100] grid place-items-center bg-crust/75 p-4 backdrop-blur-sm" role="presentation">
 		<div class="w-full max-w-sm border border-surface1 bg-base shadow-float" role="dialog" aria-modal="true" aria-labelledby="update-title" aria-describedby="update-description">
-			<div class="border-b border-surface0 bg-mantle px-5 py-4"><p class="font-mono text-[10px] uppercase tracking-[.16em] text-mauve">Update ready</p><h2 id="update-title" class="mt-1 text-lg font-semibold text-text">A new version is available</h2></div>
-			<div class="p-5"><p id="update-description" class="text-xs leading-5 text-overlay1">The update has finished downloading. Upgrade now to reload the player with the latest version, or continue using the current version for this session.</p></div>
-			<div class="flex justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button onclick={() => (updateDismissed = true)} disabled={updateApplying} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0 disabled:opacity-40">LATER</button><button onclick={installApplicationUpdate} disabled={updateApplying} class="flex items-center gap-2 bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">{#if updateApplying}<span class="size-3 animate-spin rounded-full border-2 border-crust/25 border-t-crust"></span>UPGRADING…{:else}<Icon name="refresh" size={12}/>UPGRADE{/if}</button></div>
+			<div class="border-b border-surface0 bg-mantle px-5 py-4"><h2 id="update-title" class="text-lg font-semibold text-text">Update available</h2></div>
+			<div class="p-5"><p id="update-description" class="text-xs leading-5 text-overlay1">Reload to use the latest version.</p></div>
+			<div class="flex justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button onclick={() => (updateDismissed = true)} disabled={updateApplying} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0 disabled:opacity-40">LATER</button><button onclick={installApplicationUpdate} disabled={updateApplying} class="flex items-center gap-2 bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">{#if updateApplying}<span class="size-3 animate-spin rounded-full border-2 border-crust/25 border-t-crust"></span>UPDATING…{:else}<Icon name="refresh" size={12}/>UPDATE{/if}</button></div>
 		</div>
 	</div>
 {/if}

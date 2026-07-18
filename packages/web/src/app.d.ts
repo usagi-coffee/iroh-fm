@@ -2,6 +2,7 @@
 // for information about these interfaces
 declare global {
   const __BUILD_COMMIT__: string;
+  const __BUILD_VERSION__: string;
 
   namespace App {
     // interface Error {}

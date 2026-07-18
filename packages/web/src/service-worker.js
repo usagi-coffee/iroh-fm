@@ -74,7 +74,7 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (event.data?.type !== "version" && event.data?.type !== "user") return;
-  event.ports[0]?.postMessage({ type: "version", version });
+  event.ports[0]?.postMessage({ type: "version", version, buildVersion: __BUILD_VERSION__ });
 });
 
 self.addEventListener("fetch", (event) => {
@@ -91,6 +91,18 @@ self.addEventListener("fetch", (event) => {
         // Cache Storage can fail temporarily or after the origin reaches its
         // quota. Continue as a transparent network proxy in that case.
         console.warn("[sw] app cache is unavailable", error);
+      }
+
+      if (event.request.mode === "navigate") {
+        try {
+          const response = await fetch(event.request, { cache: "no-store" });
+          if (response.ok) {
+            if (cache) await cache.put(event.request, response.clone()).catch(() => {});
+            return response;
+          }
+        } catch {
+          // Fall through to the cached application shell while offline.
+        }
       }
 
       if (cache && APP_SHELL.includes(url.pathname)) {
