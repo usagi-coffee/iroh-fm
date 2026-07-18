@@ -91,6 +91,7 @@ export class MusicClient {
     this.coverFetchPaused = false;
     this.audioOpenRequests = 0;
     this.activeAudioSources = 0;
+    this.offlineOnly = false;
     this.closed = false;
   }
 
@@ -153,6 +154,30 @@ export class MusicClient {
     return JSON.parse(this.inner.connectionInfo());
   }
 
+  /** @param {boolean} offlineOnly */
+  setOfflineOnly(offlineOnly) {
+    this.offlineOnly = Boolean(offlineOnly);
+    if (!this.offlineOnly) this.drainCoverFetchQueue();
+  }
+
+  async cachedTrackIds() {
+    const ids = new Set();
+    if (!("caches" in globalThis)) return ids;
+    try {
+      const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
+      for (const request of await cache.keys()) {
+        const url = new URL(request.url);
+        if (url.searchParams.get("server") === String(this.remoteId)) {
+          const id = url.searchParams.get("id");
+          if (id) ids.add(id);
+        }
+      }
+    } catch {
+      // Cache Storage can be unavailable in private browsing contexts.
+    }
+    return ids;
+  }
+
   /** @param {unknown} request */
   async request(request) {
     return JSON.parse(await this.inner.request(JSON.stringify(request)));
@@ -205,6 +230,8 @@ export class MusicClient {
       }
     }
 
+    if (this.offlineOnly) throw new Error("cover is not available offline");
+
     const media = await this.enqueueCoverFetch(id);
     let blob;
     try {
@@ -235,6 +262,7 @@ export class MusicClient {
   /** @param {string} id @returns {Promise<any>} */
   enqueueCoverFetch(id) {
     if (this.closed) return Promise.reject(new Error("music client is closed"));
+    if (this.offlineOnly) return Promise.reject(new Error("cover is not available offline"));
     return new Promise((resolve, reject) => {
       this.coverFetchQueue.push({ id, resolve, reject });
       this.drainCoverFetchQueue();
@@ -247,6 +275,7 @@ export class MusicClient {
       : MAX_CONCURRENT_COVER_FETCHES;
     while (
       !this.closed &&
+      !this.offlineOnly &&
       !this.coverFetchPaused &&
       this.activeCoverFetches < concurrency &&
       this.coverFetchQueue.length > 0
@@ -274,6 +303,7 @@ export class MusicClient {
       onProgress(cached.size, cached.size);
       return new BlobTrackSource(cached, () => {});
     }
+    if (this.offlineOnly) throw new Error("track is not available offline");
 
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
@@ -338,6 +368,7 @@ export class MusicClient {
 
     const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
       if (cached) return cached;
+      if (this.offlineOnly) throw new Error("track is not available offline");
       const blob = await this.downloadTrackBlob(id);
       await this.persistTrackBlob(id, blob);
       return blob;

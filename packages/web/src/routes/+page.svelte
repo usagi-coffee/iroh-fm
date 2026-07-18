@@ -55,6 +55,12 @@
 	let tracks = $state([]);
 	let starred = $state({ artists: [], albums: [], tracks: [] });
 	let starredTrackIds = $state(new Set());
+	let cachedTrackIds = $state(new Set());
+	let cachingTrackIds = $state(new Set());
+	let offlineOnly = $state(false);
+	let trackMenu = $state(null);
+	let longPressTimer;
+	let longPressOrigin;
 
 	let query = $state('');
 	let favoriteOnly = $state(false);
@@ -104,6 +110,9 @@
 	let autoConnectAttempted = false;
 
 	const activeAlbum = $derived(albums.find((album) => album.id === activeAlbumId) ?? null);
+	const cachedAlbumIds = $derived(new Set(albums.filter((album) => album.track_ids.length > 0 && album.track_ids.every((id) => cachedTrackIds.has(id))).map((album) => album.id)));
+	const playableLibraryTracks = $derived(offlineOnly ? tracks.filter((track) => cachedTrackIds.has(track.id)) : tracks);
+	const visibleAlbums = $derived(offlineOnly ? albums.filter((album) => cachedAlbumIds.has(album.id)) : albums);
 	const starredTracks = $derived.by(() => {
 		const byId = new Map(starred.tracks.map((track) => [track.id, track]));
 		const tracksById = new Map(tracks.map((track) => [track.id, track]));
@@ -121,7 +130,7 @@
 		}
 		return [...byId.values()];
 	});
-	const filteredTracks = $derived(filterTracks(favoriteOnly ? starredTracks : tracks, query));
+	const filteredTracks = $derived(filterTracks((favoriteOnly ? starredTracks : playableLibraryTracks).filter((track) => !offlineOnly || cachedTrackIds.has(track.id)), query));
 	const trackListItems = $derived.by(() => {
 		const albumByTrackId = new Map();
 		for (const album of albums) {
@@ -129,7 +138,7 @@
 		}
 		const durationByAlbum = new Map();
 		const tracksByAlbum = new Map();
-		for (const track of tracks) {
+		for (const track of playableLibraryTracks) {
 			const album = albumByTrackId.get(track.id);
 			const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
 			durationByAlbum.set(albumKey, (durationByAlbum.get(albumKey) ?? 0) + (track.duration_seconds ?? 0));
@@ -160,8 +169,8 @@
 	});
 	const albumRows = $derived.by(() => {
 		const rows = [];
-		for (let index = 0; index < albums.length; index += albumColumns) {
-			rows.push(albums.slice(index, index + albumColumns));
+		for (let index = 0; index < visibleAlbums.length; index += albumColumns) {
+			rows.push(visibleAlbums.slice(index, index + albumColumns));
 		}
 		return rows;
 	});
@@ -428,6 +437,8 @@
 			connectionStep = 'Indexing the remote library…';
 			const data = await nextClient.bootstrap(starredKey);
 			client = nextClient;
+			nextClient.setOfflineOnly(offlineOnly);
+			cachedTrackIds = await nextClient.cachedTrackIds();
 			summary = variant(data.summary, 'LibrarySummary', summary);
 			albums = variant(data.albums, 'Albums', []).sort(albumSort);
 			artists = variant(data.artists, 'Artists', []);
@@ -636,7 +647,7 @@
 		query = '';
 		trackViewRevision += 1;
 		const albumTrackIds = new Set(album.track_ids);
-		const firstTrack = tracks.find((track) => albumTrackIds.has(track.id));
+		const firstTrack = playableLibraryTracks.find((track) => albumTrackIds.has(track.id));
 		if (!firstTrack) return null;
 		selectedTrackId = firstTrack.id;
 		await tick();
@@ -678,9 +689,75 @@
 		}
 	}
 
+	async function refreshCachedTracks() {
+		if (!client) return;
+		cachedTrackIds = await client.cachedTrackIds();
+	}
+
+	async function toggleOfflineOnly() {
+		const next = !offlineOnly;
+		if (next) await refreshCachedTracks();
+		offlineOnly = next;
+		client.setOfflineOnly(next);
+		if (next && currentTrack && !cachedTrackIds.has(currentTrack.id)) stopPlayback();
+		trackMenu = null;
+		trackViewRevision += 1;
+	}
+
+	function openTrackMenu(track, event) {
+		event.preventDefault();
+		event.stopPropagation();
+		cancelLongPress();
+		trackMenu = {
+			track,
+			x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
+			y: Math.max(8, Math.min(event.clientY, window.innerHeight - 112))
+		};
+	}
+
+	function beginLongPress(track, event) {
+		if (event.pointerType === 'mouse') return;
+		cancelLongPress();
+		longPressOrigin = { x: event.clientX, y: event.clientY };
+		const position = { clientX: event.clientX, clientY: event.clientY, preventDefault: () => {}, stopPropagation: () => {} };
+		longPressTimer = setTimeout(() => openTrackMenu(track, position), 500);
+	}
+
+	function moveLongPress(event) {
+		if (!longPressOrigin) return;
+		if (Math.hypot(event.clientX - longPressOrigin.x, event.clientY - longPressOrigin.y) > 10) cancelLongPress();
+	}
+
+	function cancelLongPress() {
+		clearTimeout(longPressTimer);
+		longPressTimer = undefined;
+		longPressOrigin = undefined;
+	}
+
+	async function cacheTrack(track) {
+		trackMenu = null;
+		if (offlineOnly || cachedTrackIds.has(track.id) || cachingTrackIds.has(track.id)) return;
+		cachingTrackIds = new Set(cachingTrackIds).add(track.id);
+		try {
+			await client.prefetchTrack(track.id);
+			await refreshCachedTracks();
+		} catch (error) {
+			connectionError = friendlyError(error, 'Could not cache this song.');
+		} finally {
+			const next = new Set(cachingTrackIds);
+			next.delete(track.id);
+			cachingTrackIds = next;
+		}
+	}
+
+	async function starFromMenu(track) {
+		trackMenu = null;
+		await toggleStar(track);
+	}
+
 	async function playAlbum(album) {
 		const ids = new Set(album.track_ids);
-		const albumQueue = tracks.filter((track) => ids.has(track.id)).sort(trackSort);
+		const albumQueue = playableLibraryTracks.filter((track) => ids.has(track.id)).sort(trackSort);
 		if (albumQueue[0]) await playTrack(albumQueue[0], albumQueue);
 	}
 
@@ -724,7 +801,11 @@
 			await source.start();
 			if (generation !== playGeneration) return;
 			source.done.then(
-				() => prefetchNextTrack(track, sourceQueue, generation),
+				async () => {
+					await client.prefetchTrack(track.id);
+					await refreshCachedTracks();
+					prefetchNextTrack(track, sourceQueue, generation);
+				},
 				(error) => {
 					if (audioSource === source && !source.disposed) playerError = friendlyError(error, 'Stream interrupted.');
 				}
@@ -910,6 +991,7 @@
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
 				<div class="hidden h-full min-w-0 items-center gap-2 border-l border-surface0 px-3 font-mono text-[9px] text-overlay1 lg:flex" title={`${connectionInfo.path_type}: ${connectionInfo.address || 'selecting path'} · ${formatBytes(connectionInfo.received_bytes)} received`}><span class="size-1.5 shrink-0 rounded-full {connectionInfo.address ? 'bg-green' : 'animate-pulse bg-yellow'}"></span><span class="max-w-44 truncate text-subtext0">{connectionAddressLabel(connectionInfo)}</span><span class="shrink-0 text-overlay0">↓ {formatBytes(connectionInfo.received_bytes)}</span></div>
+				<button onclick={toggleOfflineOnly} class="grid h-full w-9 place-items-center border-l border-surface0 hover:bg-surface0 {offlineOnly ? 'bg-surface0 text-mauve' : 'text-overlay1 hover:text-mauve'}" title={offlineOnly ? 'Offline-only mode enabled' : 'Use cached music only'} aria-pressed={offlineOnly}><Icon name="offline" size={15}/></button>
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
 				<button onclick={disconnect} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
 			</div>
@@ -932,11 +1014,12 @@
 								<button onclick={() => playTrack(item.tracks[0], item.tracks)} class="flex h-9 w-full items-center gap-2 border-y border-surface1 bg-mantle px-2 text-left transition hover:bg-surface0" aria-label={`Play album ${item.title}`}>
 									<Cover {client} id={item.coverArtId} title={item.title} rootMargin={TRACK_COVER_MARGIN} class="size-7 shrink-0 rounded-sm" />
 									<p class="min-w-0 flex-1 truncate text-[11px]"><span class="font-semibold text-mauve">{item.title}</span><span class="ml-2 text-[10px] text-overlay1">{item.artist}</span></p>
+									{#if item.tracks.length > 0 && item.tracks.every((track) => cachedTrackIds.has(track.id))}<span class="text-green" title="Album cached"><Icon name="cached" size={12}/></span>{/if}
 									<span class="shrink-0 font-mono text-[10px] text-overlay0">{formatTime(item.durationSeconds)}</span>
 								</button>
 							{:else}
 								{@const track = item.track}
-								<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
+								<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} oncontextmenu={(event) => openTrackMenu(track, event)} onpointerdown={(event) => beginLongPress(track, event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
 									<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="h-1 w-4 overflow-hidden bg-surface1"><span class="block h-full bg-mauve transition-[width] duration-150" style={`width:${audioDownloadProgress * 100}%`}></span></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || item.trackIndex + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
 									<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.album}</div>
 									<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredTrackIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
@@ -951,14 +1034,14 @@
 			</section>
 
 			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden'} lg:flex">
-				<div class="flex h-10 shrink-0 items-center border-b border-surface0 px-3"><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{albums.length}</span></div>
+				<div class="flex h-10 shrink-0 items-center border-b border-surface0 px-3"><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{visibleAlbums.length}{#if offlineOnly} / {albums.length}{/if}</span></div>
 				<div bind:this={albumGridElement} class="min-h-0 flex-1">
 					<VList data={albumRows} getKey={(row) => `${albumColumns}:${row.map((album) => album.id).join('|')}`} bufferSize={400} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(row, rowIndex)}
 							<div class="grid gap-3 px-3 pb-5" class:pt-3={rowIndex === 0} style={`grid-template-columns:repeat(${albumColumns},minmax(0,1fr))`}>
 								{#each row as album (album.id)}
 									<article class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
-										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
+										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button>{#if cachedAlbumIds.has(album.id)}<span class="absolute left-2 top-2 grid size-6 place-items-center rounded-full bg-crust/85 text-green shadow-lg" title="Album cached"><Icon name="cached" size={14}/></span>{/if}<button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
 										<button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
 									</article>
 								{/each}
@@ -981,6 +1064,16 @@
 		</footer>
 
 		{#if connectionError}<div class="fixed bottom-24 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-4 border border-red/40 bg-crust px-4 py-3 text-xs text-red shadow-float"><span>{connectionError}</span><button onclick={() => (connectionError = '')}><Icon name="close" size={14}/></button></div>{/if}
+
+		{#if trackMenu}
+			<div class="fixed inset-0 z-[80]" role="presentation" onclick={() => (trackMenu = null)} onkeydown={(event) => { if (event.key === 'Escape') trackMenu = null; }} oncontextmenu={(event) => event.preventDefault()}>
+				<div role="menu" tabindex="-1" aria-label={`Actions for ${trackMenu.track.title}`} class="fixed w-44 border border-surface1 bg-crust p-1 shadow-float" style={`left:${trackMenu.x}px;top:${trackMenu.y}px`} onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+					<p class="truncate border-b border-surface0 px-2 py-2 text-[10px] font-semibold text-subtext0">{trackMenu.track.title}</p>
+					<button role="menuitem" onclick={() => starFromMenu(trackMenu.track)} class="flex w-full items-center gap-2 px-2 py-2 text-left text-[11px] text-subtext0 hover:bg-surface0 hover:text-text"><Icon name="heart" size={13}/>{starredTrackIds.has(trackMenu.track.id) ? 'Unstar' : 'Star'}</button>
+					<button role="menuitem" onclick={() => cacheTrack(trackMenu.track)} disabled={offlineOnly || cachedTrackIds.has(trackMenu.track.id) || cachingTrackIds.has(trackMenu.track.id)} class="flex w-full items-center gap-2 px-2 py-2 text-left text-[11px] text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0"><Icon name={cachedTrackIds.has(trackMenu.track.id) ? 'cached' : 'download'} size={13}/>{cachedTrackIds.has(trackMenu.track.id) ? 'Cached' : cachingTrackIds.has(trackMenu.track.id) ? 'Downloading…' : offlineOnly ? 'Unavailable offline' : 'Download'}</button>
+				</div>
+			</div>
+		{/if}
 
 		{#if settingsOpen}
 			<div class="fixed inset-0 z-[70] grid place-items-center bg-crust/75 p-4 backdrop-blur-sm" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) settingsOpen = false; }}>

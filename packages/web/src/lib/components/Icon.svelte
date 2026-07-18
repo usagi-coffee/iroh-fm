@@ -58,5 +58,11 @@
 		<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
 	{:else if name === 'refresh'}
 		<path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.4-2.5L20 9M4 15l2.5 2.5A7 7 0 0 0 17.9 15"/>
+	{:else if name === 'offline'}
+		<path d="m3 3 18 18M8.5 8.5A5 5 0 0 1 17 12v1M5.4 10.2A9 9 0 0 1 6.8 7M2 6a14 14 0 0 1 2.1-1.5M8.5 16.5 12 20l3.1-3.1"/>
+	{:else if name === 'download'}
+		<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>
+	{:else if name === 'cached'}
+		<path d="m5 12 4 4L19 6"/>
 	{/if}
 </svg>
