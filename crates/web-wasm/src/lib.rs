@@ -207,6 +207,13 @@ fn ticket_address(ticket: &EndpointTicket) -> TicketAddress {
     }
 }
 
+fn with_n0_fallback_relays(mut address: EndpointAddr) -> EndpointAddr {
+    for relay in iroh::defaults::prod::default_relay_map().urls::<Vec<_>>() {
+        address = address.with_relay_url(relay);
+    }
+    address
+}
+
 #[wasm_bindgen]
 pub struct MediaStream {
     content_type: String,
@@ -253,6 +260,7 @@ impl IrohFmClient {
         address: EndpointAddr,
         secret: Option<String>,
     ) -> Result<IrohFmClient, JsError> {
+        let address = with_n0_fallback_relays(address);
         let remote_id = address.id.to_string();
         let mut builder = Endpoint::builder(presets::N0);
         if let Some(secret) = secret.filter(|secret| !secret.trim().is_empty()) {
@@ -340,5 +348,19 @@ mod tests {
         assert_eq!(details.relays.len(), 2);
         assert!(details.relays.iter().any(|url| url.contains("one.example")));
         assert!(details.relays.iter().any(|url| url.contains("two.example")));
+    }
+
+    #[test]
+    fn client_address_includes_custom_and_n0_fallback_relays() {
+        let endpoint_id = SecretKey::from_bytes(&[8; 32]).public();
+        let custom: RelayUrl = "https://custom.example".parse().unwrap();
+        let address =
+            with_n0_fallback_relays(EndpointAddr::new(endpoint_id).with_relay_url(custom.clone()));
+        let relays = address.relay_urls().cloned().collect::<Vec<_>>();
+
+        assert!(relays.contains(&custom));
+        for relay in iroh::defaults::prod::default_relay_map().urls::<Vec<_>>() {
+            assert!(relays.contains(&relay));
+        }
     }
 }
