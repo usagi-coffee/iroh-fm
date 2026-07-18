@@ -1,7 +1,7 @@
 let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
-const MAX_CONCURRENT_COVER_FETCHES = 2;
+const MAX_CONCURRENT_COVER_FETCHES = 8;
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /** @param {string} remoteId @param {string} coverId */

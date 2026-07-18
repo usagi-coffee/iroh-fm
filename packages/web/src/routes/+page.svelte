@@ -97,23 +97,24 @@
 	let autoConnectAttempted = false;
 
 	const activeAlbum = $derived(albums.find((album) => album.id === activeAlbumId) ?? null);
-	const lovedTrackIds = $derived.by(() => {
-		const ids = new Set(starredTrackIds);
-		const lovedAlbumIds = new Set();
-		for (const album of starred.albums) {
-			lovedAlbumIds.add(album.id);
-			for (const trackId of album.track_ids) ids.add(trackId);
-		}
+	const lovedTracks = $derived.by(() => {
+		const byId = new Map(starred.tracks.map((track) => [track.id, track]));
+		const tracksById = new Map(tracks.map((track) => [track.id, track]));
+		const albumsById = new Map(albums.map((album) => [album.id, album]));
+		const addAlbum = (album) => {
+			if (!album) return;
+			for (const trackId of album.track_ids) {
+				const track = tracksById.get(trackId);
+				if (track) byId.set(track.id, track);
+			}
+		};
+		for (const album of starred.albums) addAlbum(album);
 		for (const artist of starred.artists) {
-			for (const albumId of artist.album_ids) lovedAlbumIds.add(albumId);
+			for (const albumId of artist.album_ids) addAlbum(albumsById.get(albumId));
 		}
-		for (const album of albums) {
-			if (!lovedAlbumIds.has(album.id)) continue;
-			for (const trackId of album.track_ids) ids.add(trackId);
-		}
-		return ids;
+		return [...byId.values()];
 	});
-	const filteredTracks = $derived(filterTracks(tracks, query, favoriteOnly, lovedTrackIds));
+	const filteredTracks = $derived(filterTracks(favoriteOnly ? lovedTracks : tracks, query));
 	const albumRows = $derived.by(() => {
 		const rows = [];
 		for (let index = 0; index < albums.length; index += albumColumns) {
@@ -505,6 +506,19 @@
 		trackViewRevision += 1;
 		await tick();
 		resetTrackScroll();
+		if (!lovedOnly) return;
+		try {
+			const response = await client.request('GetStarred');
+			starred = variant(response, 'Starred', starred);
+			starredTrackIds = new Set(starred.tracks.map((track) => track.id));
+			if (favoriteOnly) {
+				trackViewRevision += 1;
+				await tick();
+				resetTrackScroll();
+			}
+		} catch (error) {
+			connectionError = friendlyError(error, 'Could not refresh loved tracks.');
+		}
 	}
 
 	async function selectAlbum(album) {
@@ -535,6 +549,12 @@
 			if (shouldStar) next.add(track.id);
 			else next.delete(track.id);
 			starredTrackIds = next;
+			starred = {
+				...starred,
+				tracks: shouldStar
+					? [track, ...starred.tracks.filter((item) => item.id !== track.id)]
+					: starred.tracks.filter((item) => item.id !== track.id)
+			};
 			if (favoriteOnly) trackViewRevision += 1;
 		} catch (error) {
 			connectionError = friendlyError(error, 'Could not update the favorite.');
@@ -657,10 +677,9 @@
 		if (audio) audio.volume = volume;
 	}
 
-	function filterTracks(list, term, lovedOnly, lovedIds) {
+	function filterTracks(list, term) {
 		const needle = term.trim().toLocaleLowerCase();
 		return list.filter((track) => {
-			if (lovedOnly && !lovedIds.has(track.id)) return false;
 			if (!needle) return true;
 			return `${track.artist}\n${track.title}\n${track.album}`.toLocaleLowerCase().includes(needle);
 		});
@@ -741,8 +760,6 @@
 				<button onclick={() => (mobilePane = 'albums')} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 lg:hidden {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
-				<span class="hidden max-w-48 truncate px-3 font-mono text-overlay0 md:block">{client.endpointId}</span>
-				<button onclick={copyEndpointId} class="h-full border-l border-surface0 px-3 font-mono text-overlay1 hover:bg-surface0 hover:text-teal" title={client.endpointId}><span class="sm:hidden">{endpointCopied ? 'OK' : 'ID'}</span><span class="hidden sm:inline">{endpointCopied ? 'COPIED' : 'ENDPOINT'}</span></button>
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
 				<button onclick={disconnect} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
 			</div>
