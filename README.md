@@ -1,4 +1,4 @@
-# iroh-fm - Unstoppable music server
+# iroh-fm - unstoppable music server
 
 <img src="extra/iroh-fm.png" align="right" width="180" height="180" alt="iroh-fm project icon" />
 
