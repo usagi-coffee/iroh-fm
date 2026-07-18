@@ -1,7 +1,7 @@
 import { build, files, prerendered, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-${version}`;
-const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1"]);
+const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => {
   if (!SCOPE_PATH || path.startsWith(`${SCOPE_PATH}/`)) return path;

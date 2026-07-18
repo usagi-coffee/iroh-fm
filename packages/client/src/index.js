@@ -1,6 +1,8 @@
 let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
+const TRACK_CACHE_NAME = "iroh-fm-track-audio-v1";
+const TRACK_CACHE_ORIGIN = "https://track-cache.iroh-fm.invalid";
 const MAX_CONCURRENT_COVER_FETCHES = 8;
 const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -11,6 +13,31 @@ function coverCacheRequest(remoteId, coverId) {
   url.searchParams.set("server", String(remoteId));
   url.searchParams.set("id", coverId);
   return new Request(url);
+}
+
+/** @param {string} remoteId @param {string} trackId */
+function trackCacheRequest(remoteId, trackId) {
+  const url = new URL("/track", TRACK_CACHE_ORIGIN);
+  url.searchParams.set("server", String(remoteId));
+  url.searchParams.set("id", trackId);
+  return new Request(url);
+}
+
+/** @param {string} name */
+async function cacheUsage(name) {
+  if (!("caches" in globalThis)) return { count: 0, size: 0 };
+  try {
+    const cache = await globalThis.caches.open(name);
+    const requests = await cache.keys();
+    let size = 0;
+    for (const request of requests) {
+      const response = await cache.match(request);
+      if (response) size += (await response.blob()).size;
+    }
+    return { count: requests.length, size };
+  } catch {
+    return { count: 0, size: 0 };
+  }
 }
 
 /** @param {Promise<any>} pending */
@@ -57,7 +84,7 @@ export class MusicClient {
     /** @type {Map<string, Promise<string>>} */
     this.coverCache = new Map();
     /** @type {Map<string, Promise<Blob>>} */
-    this.trackPrefetchCache = new Map();
+    this.activeTrackRequests = new Map();
     /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
@@ -100,6 +127,18 @@ export class MusicClient {
   static async endpointIdForSecret(secret) {
     const { endpointIdForSecret } = await loadWasm();
     return endpointIdForSecret(secret);
+  }
+
+  static async cacheStats() {
+    const [tracks, covers] = await Promise.all([
+      cacheUsage(TRACK_CACHE_NAME),
+      cacheUsage(COVER_CACHE_NAME),
+    ]);
+    return { tracks, covers };
+  }
+
+  async cacheStats() {
+    return MusicClient.cacheStats();
   }
 
   get endpointId() {
@@ -230,17 +269,10 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   async trackSource(id, onProgress = () => {}) {
-    const prefetched = this.trackPrefetchCache.get(id);
-    if (prefetched) {
-      try {
-        const blob = await prefetched;
-        if (this.trackPrefetchCache.get(id) === prefetched) this.trackPrefetchCache.delete(id);
-        onProgress(blob.size, blob.size);
-        return new BlobTrackSource(blob, () => {});
-      } catch {
-        if (this.trackPrefetchCache.get(id) === prefetched) this.trackPrefetchCache.delete(id);
-        // Retry through the normal streaming path when speculative loading failed.
-      }
+    const cached = await this.cachedTrackBlob(id);
+    if (cached) {
+      onProgress(cached.size, cached.size);
+      return new BlobTrackSource(cached, () => {});
     }
 
     this.audioOpenRequests += 1;
@@ -277,12 +309,14 @@ export class MusicClient {
             fileSize,
             onProgress,
             releaseAudioPriority,
+            (blob) => this.rememberTrackBlob(id, blob),
           );
         }
 
         const blob = await new Response(trackDownload(stream, fileSize, onProgress), {
           headers: { "content-type": contentType },
         }).blob();
+        this.rememberTrackBlob(id, blob);
         return new BlobTrackSource(blob, releaseAudioPriority);
       } catch (error) {
         releaseAudioPriority();
@@ -299,23 +333,80 @@ export class MusicClient {
 
   /** @param {string} id */
   prefetchTrack(id) {
-    const existing = this.trackPrefetchCache.get(id);
+    const existing = this.activeTrackRequests.get(id);
     if (existing) return existing.then(() => undefined);
 
-    // Lookahead is intentionally shallow so large libraries do not become an
-    // unbounded in-memory audio cache when the user changes queues frequently.
-    while (this.trackPrefetchCache.size >= 2) {
-      const oldest = this.trackPrefetchCache.keys().next().value;
-      if (oldest === undefined) break;
-      this.trackPrefetchCache.delete(oldest);
+    const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
+      if (cached) return cached;
+      const blob = await this.downloadTrackBlob(id);
+      await this.persistTrackBlob(id, blob);
+      return blob;
+    });
+    this.activeTrackRequests.set(id, pending);
+    pending.finally(() => {
+      if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+    }).catch(() => {});
+    return pending.then(() => undefined);
+  }
+
+  /** @param {string} id */
+  async cachedTrackBlob(id) {
+    const existing = this.activeTrackRequests.get(id);
+    if (existing) {
+      try {
+        return await existing;
+      } catch {
+        if (this.activeTrackRequests.get(id) === existing) this.activeTrackRequests.delete(id);
+      }
     }
 
-    const pending = this.downloadTrackBlob(id);
-    this.trackPrefetchCache.set(id, pending);
-    pending.catch(() => {
-      if (this.trackPrefetchCache.get(id) === pending) this.trackPrefetchCache.delete(id);
-    });
-    return pending.then(() => undefined);
+    return this.readPersistentTrackBlob(id);
+  }
+
+  /** @param {string} id */
+  async readPersistentTrackBlob(id) {
+    if (!("caches" in globalThis)) return null;
+    try {
+      const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
+      const request = trackCacheRequest(this.remoteId, id);
+      const response = await cache.match(request);
+      if (!response) return null;
+      const blob = await response.blob();
+      if (blob.size > 0) return blob;
+      await cache.delete(request);
+    } catch {
+      // Cache Storage can be unavailable in private browsing contexts.
+    }
+    return null;
+  }
+
+  /** @param {string} id @param {Blob} blob */
+  rememberTrackBlob(id, blob) {
+    const pending = this.persistTrackBlob(id, blob).then(() => blob);
+    this.activeTrackRequests.set(id, pending);
+    pending.finally(() => {
+      if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+    }).catch(() => {});
+  }
+
+  /** @param {string} id @param {Blob} blob */
+  async persistTrackBlob(id, blob) {
+    if (!("caches" in globalThis) || blob.size === 0) return;
+    try {
+      const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
+      await cache.put(
+        trackCacheRequest(this.remoteId, id),
+        new Response(blob, {
+          headers: {
+            "content-type": blob.type || "application/octet-stream",
+            "content-length": String(blob.size),
+            "x-iroh-fm-track-id": id,
+          },
+        }),
+      );
+    } catch {
+      // Storage quotas and private browsing can reject persistent writes.
+    }
   }
 
   /** @param {string} id */
@@ -362,7 +453,7 @@ export class MusicClient {
       pending.then(URL.revokeObjectURL).catch(() => {});
     }
     this.coverCache.clear();
-    this.trackPrefetchCache.clear();
+    this.activeTrackRequests.clear();
     await this.inner.close();
     this.inner.free();
   }
@@ -388,8 +479,8 @@ class BlobTrackSource {
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority */
-  constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority) {
+  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => void} onComplete */
+  constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority, onComplete) {
     this.stream = stream;
     this.contentType = contentType;
     this.mediaSource = new MediaSource();
@@ -398,6 +489,9 @@ class ProgressiveTrackSource {
     this.fileSize = fileSize;
     this.received = 0;
     this.onProgress = onProgress;
+    this.onComplete = onComplete;
+    /** @type {Uint8Array[]} */
+    this.chunks = [];
     this.done = Promise.resolve();
     this.disposed = false;
     this.releaseAudioPriority = releaseAudioPriority;
@@ -414,6 +508,7 @@ class ProgressiveTrackSource {
     const first = await this.reader.read();
     if (first.done) {
       this.onProgress(this.fileSize, this.fileSize);
+      this.completeCache();
       this.finishMediaSource();
       return;
     }
@@ -433,6 +528,7 @@ class ProgressiveTrackSource {
       }
       if (!this.disposed) {
         this.onProgress(this.fileSize, this.fileSize);
+        this.completeCache();
         this.finishMediaSource();
       }
     } catch (error) {
@@ -443,7 +539,14 @@ class ProgressiveTrackSource {
   /** @param {Uint8Array} chunk */
   reportChunk(chunk) {
     this.received += chunk.byteLength;
+    this.chunks.push(chunk);
     this.onProgress(this.received, this.fileSize);
+  }
+
+  completeCache() {
+    const chunks = this.chunks;
+    this.chunks = [];
+    this.onComplete(new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer), { type: this.contentType }));
   }
 
   /** @returns {Promise<void>} */
@@ -484,6 +587,7 @@ class ProgressiveTrackSource {
     this.releaseAudioPriority();
     this.cancelOpen?.();
     this.reader.cancel().catch(() => {});
+    this.chunks = [];
     this.finishMediaSource();
     URL.revokeObjectURL(this.url);
   }

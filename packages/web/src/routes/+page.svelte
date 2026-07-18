@@ -75,6 +75,7 @@
 	let starredKey = $state('');
 	let settingsStarredKey = $state('');
 	let settingsShowSecret = $state(false);
+	let settingsStorage = $state({ loading: false, requesting: false, tracks: 0, trackSize: 0, covers: 0, coverSize: 0, usage: 0, quota: 0, persisted: false, supported: false });
 	let endpointCopied = $state(false);
 	let ticketLinkCopied = $state(false);
 
@@ -469,7 +470,44 @@
 		settingsStarredKey = starredKey;
 		settingsShowSecret = false;
 		settingsOpen = true;
+		refreshStorageInfo();
 		if (settingsTicket.trim()) syncSettingsTicketAddress(settingsTicket);
+	}
+
+	async function refreshStorageInfo() {
+		settingsStorage = { ...settingsStorage, loading: true, supported: Boolean(navigator.storage) };
+		try {
+			const [cacheStats, estimate, persisted] = await Promise.all([
+				client?.cacheStats() ?? MusicClient.cacheStats(),
+				navigator.storage?.estimate?.() ?? Promise.resolve({}),
+				navigator.storage?.persisted?.() ?? Promise.resolve(false)
+			]);
+			settingsStorage = {
+				...settingsStorage,
+				loading: false,
+				tracks: cacheStats.tracks.count,
+				trackSize: cacheStats.tracks.size,
+				covers: cacheStats.covers.count,
+				coverSize: cacheStats.covers.size,
+				usage: estimate.usage ?? 0,
+				quota: estimate.quota ?? 0,
+				persisted
+			};
+		} catch (error) {
+			console.warn('[storage] could not read cache statistics', error);
+			settingsStorage = { ...settingsStorage, loading: false };
+		}
+	}
+
+	async function requestPersistentStorage() {
+		if (!navigator.storage?.persist) return;
+		settingsStorage = { ...settingsStorage, requesting: true };
+		try {
+			await navigator.storage.persist();
+		} finally {
+			settingsStorage = { ...settingsStorage, requesting: false };
+			await refreshStorageInfo();
+		}
 	}
 
 	async function applySettings() {
@@ -960,6 +998,11 @@
 							<div><div class="mb-2 flex items-center justify-between"><label for="settings-relay-0" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Relay URLs</label><button type="button" onclick={() => addRelay(true)} class="font-mono text-[10px] text-mauve hover:text-pink">+ ADD RELAY</button></div><div class="space-y-2">{#each settingsRelays as relayUrl, index}<div class="relative"><input id={`settings-relay-${index}`} bind:value={settingsRelays[index]} spellcheck="false" autocomplete="url" placeholder="https://relay.example" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-10 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/>{#if settingsRelays.length > 1}<button type="button" onclick={() => removeRelay(index, true)} class="absolute inset-y-0 right-2 grid w-7 place-items-center text-overlay0 hover:text-red" aria-label={`Remove relay ${index + 1}`}><Icon name="close" size={12}/></button>{/if}</div>{/each}</div></div>
 							<div><label for="settings-secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="settings-secret" bind:value={settingsSecret} type={settingsShowSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (settingsShowSecret = !settingsShowSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{settingsShowSecret ? 'HIDE' : 'SHOW'}</button></div></div>
 							<div><label for="settings-starred-key" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Starred collection key</label><input id="settings-starred-key" bind:value={settingsStarredKey} spellcheck="false" autocomplete="off" placeholder="Default: this client identity" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/><p class="mt-1.5 text-[10px] leading-4 text-overlay0">Leave empty for a private collection tied to the Client Endpoint ID. Use the same custom key on multiple clients to share one collection.</p></div>
+							<section class="border border-surface0 bg-mantle p-3" aria-labelledby="storage-title">
+								<div class="flex items-center justify-between gap-3"><div><p id="storage-title" class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Offline cache</p><p class="mt-1 text-[10px] text-overlay1">Played and prefetched songs are reused across visits.</p></div><button type="button" onclick={refreshStorageInfo} disabled={settingsStorage.loading} class="shrink-0 font-mono text-[9px] text-mauve hover:text-pink disabled:opacity-40">{settingsStorage.loading ? 'READING…' : 'REFRESH'}</button></div>
+								<div class="mt-3 grid grid-cols-2 gap-2"><div class="border border-surface0 bg-base p-2"><p class="font-mono text-[9px] uppercase text-overlay0">Songs</p><p class="mt-1 text-xs text-text">{settingsStorage.tracks} · {formatBytes(settingsStorage.trackSize)}</p><p class="mt-1 text-[9px] text-overlay0">Cache API</p></div><div class="border border-surface0 bg-base p-2"><p class="font-mono text-[9px] uppercase text-overlay0">Covers</p><p class="mt-1 text-xs text-text">{settingsStorage.covers} · {formatBytes(settingsStorage.coverSize)}</p><p class="mt-1 text-[9px] text-overlay0">Cache API</p></div></div>
+								<div class="mt-3 flex items-center justify-between gap-3 border-t border-surface0 pt-3"><div class="min-w-0"><p class="text-[10px] text-subtext0">Browser storage: {formatBytes(settingsStorage.usage)} / {formatBytes(settingsStorage.quota)}</p><p class="mt-1 text-[9px] text-overlay0">{settingsStorage.persisted ? 'Persistent storage granted; the browser should not evict this cache automatically.' : 'Storage may be evicted under pressure. Browser quota is managed automatically.'}</p></div>{#if settingsStorage.supported && !settingsStorage.persisted}<button type="button" onclick={requestPersistentStorage} disabled={settingsStorage.requesting} class="shrink-0 border border-mauve px-2 py-1.5 font-mono text-[9px] text-mauve hover:bg-mauve hover:text-crust disabled:opacity-40">{settingsStorage.requesting ? 'REQUESTING…' : 'KEEP OFFLINE'}</button>{/if}</div>
+							</section>
 							<div class="border border-surface0 bg-mantle p-3"><p class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Current client endpoint ID</p><code class="mt-2 block break-all text-[11px] leading-5 text-subtext0">{client.endpointId}</code></div><p class="text-[11px] leading-5 text-overlay1">Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
 						</div>
 						<div class="flex shrink-0 justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button type="button" onclick={() => (settingsOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button type="submit" disabled={!(settingsEndpoint.trim() ? cleanRelays(settingsRelays).length : settingsTicket.trim()) || connecting} class="bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">SAVE & RECONNECT</button></div>
