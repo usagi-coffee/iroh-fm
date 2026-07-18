@@ -1,12 +1,15 @@
 <script>
 	// @ts-nocheck
 	import { MusicClient } from '@iroh-fm/client';
+	import { base } from '$app/paths';
 	import { onMount, tick } from 'svelte';
 	import { VList } from 'virtua/svelte';
 	import Cover from '$lib/components/Cover.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 
 	const ROW_HEIGHT = 30;
+	const ALBUM_MIN_WIDTH = 125;
+	const ALBUM_GAP = 12;
 	const DEMO_TRACKS = [
 		['01', 'Nacre', 'Anywhere Between', 'Still Light', '3:42'],
 		['02', 'Nacre', 'Glass Relay', 'Still Light', '4:16'],
@@ -57,6 +60,8 @@
 	let mobilePane = $state('tracks');
 
 	let trackList = $state();
+	let albumGridElement = $state();
+	let albumColumns = $state(3);
 
 	let settingsOpen = $state(false);
 	let settingsTicket = $state('');
@@ -65,6 +70,7 @@
 	let settingsSecret = $state('');
 	let settingsShowSecret = $state(false);
 	let endpointCopied = $state(false);
+	let ticketLinkCopied = $state(false);
 
 	let audio = $state();
 	let audioSrc = $state('');
@@ -87,18 +93,70 @@
 	let qrFrame;
 	let ticketParseGeneration = 0;
 	let settingsTicketParseGeneration = 0;
+	let autoConnectAttempted = false;
 
 	const activeAlbum = $derived(albums.find((album) => album.id === activeAlbumId) ?? null);
-	const activeAlbumTrackIds = $derived(activeAlbum ? new Set(activeAlbum.track_ids) : null);
-	const filteredTracks = $derived(filterTracks(tracks, query, activeAlbumTrackIds, favoriteOnly, starredIds));
+	const lovedTrackIds = $derived.by(() => {
+		const ids = new Set(tracks.filter((track) => starredIds.has(track.id)).map((track) => track.id));
+		const lovedAlbumIds = new Set(albums.filter((album) => starredIds.has(album.id)).map((album) => album.id));
+		for (const artist of artists) {
+			if (!starredIds.has(artist.id)) continue;
+			for (const albumId of artist.album_ids) lovedAlbumIds.add(albumId);
+		}
+		for (const album of albums) {
+			if (!lovedAlbumIds.has(album.id)) continue;
+			for (const trackId of album.track_ids) ids.add(trackId);
+		}
+		return ids;
+	});
+	const filteredTracks = $derived(filterTracks(tracks, query, favoriteOnly, lovedTrackIds));
+	const albumRows = $derived.by(() => {
+		const rows = [];
+		for (let index = 0; index < albums.length; index += albumColumns) {
+			rows.push(albums.slice(index, index + albumColumns));
+		}
+		return rows;
+	});
 
 	onMount(() => {
 		ticket = localStorage.getItem('iroh-fm-ticket') ?? '';
 		endpoint = localStorage.getItem('iroh-fm-endpoint') ?? '';
 		relays = readStoredRelays();
 		secret = localStorage.getItem('iroh-fm-secret') ?? '';
-		initializeIdentity();
-		return stopQrScanner;
+		const importConnection = () => {
+			const linked = connectionFromHash(location.hash);
+			if (linked.ticket) ticket = linked.ticket;
+			if (linked.secret) {
+				secret = linked.secret;
+				localStorage.setItem('iroh-fm-secret', secret);
+				updateIdentity(secret);
+			}
+			if (loginTab === 'advanced') syncTicketAddress(ticket);
+		};
+		importConnection();
+		window.addEventListener('hashchange', importConnection);
+		let mounted = true;
+		initializeIdentity().then(() => {
+			if (mounted) autoConnectOnce();
+		});
+		return () => {
+			mounted = false;
+			window.removeEventListener('hashchange', importConnection);
+			stopQrScanner();
+		};
+	});
+
+	$effect(() => {
+		if (!albumGridElement) return;
+		const update = (width) => {
+			if (width <= 0) return;
+			const available = Math.max(0, width - 24);
+			albumColumns = Math.max(1, Math.floor((available + ALBUM_GAP) / (ALBUM_MIN_WIDTH + ALBUM_GAP)));
+		};
+		update(albumGridElement.clientWidth);
+		const observer = new ResizeObserver((entries) => update(entries[0]?.contentRect.width ?? 0));
+		observer.observe(albumGridElement);
+		return () => observer.disconnect();
 	});
 
 	function variant(response, key, fallback) {
@@ -117,6 +175,49 @@
 
 	function cleanRelays(values) {
 		return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+	}
+
+	function connectionFromHash(hash) {
+		const fragment = hash.replace(/^#/, '').trim();
+		if (!fragment) return { ticket: '', secret: '' };
+		const parameters = new URLSearchParams(fragment);
+		const ticketParameter = parameters.get('ticket')?.trim() ?? '';
+		const secretParameter = parameters.get('secret')?.trim() ?? '';
+		if (ticketParameter || secretParameter) {
+			return { ticket: ticketParameter, secret: secretParameter };
+		}
+		try {
+			const raw = decodeURIComponent(fragment);
+			return { ticket: raw.startsWith('endpoint') ? raw : '', secret: '' };
+		} catch {
+			return { ticket: '', secret: '' };
+		}
+	}
+
+	function connectionFromScannedValue(value) {
+		try {
+			const url = new URL(value);
+			const linked = connectionFromHash(url.hash);
+			return linked.ticket || linked.secret ? linked : { ticket: value.trim(), secret: '' };
+		} catch {
+			const linked = connectionFromHash(value);
+			return linked.ticket || linked.secret ? linked : { ticket: value.trim(), secret: '' };
+		}
+	}
+
+	async function copyTicketLink() {
+		if (!ticket.trim()) return;
+		try {
+			const url = new URL(location.href);
+			const setup = new URLSearchParams({ ticket: ticket.trim() });
+			if (secret.trim()) setup.set('secret', secret.trim());
+			url.hash = setup.toString();
+			await navigator.clipboard.writeText(url.toString());
+			ticketLinkCopied = true;
+			setTimeout(() => (ticketLinkCopied = false), 1600);
+		} catch (error) {
+			connectionError = friendlyError(error, 'Could not copy the ticket link.');
+		}
 	}
 
 	function selectLoginTab(tab) {
@@ -204,6 +305,29 @@
 		} catch {
 			// Validation is reported when the user connects or saves settings.
 		}
+	}
+
+	async function generateClientIdentity() {
+		if (identityLoading || connecting) return;
+		identityLoading = true;
+		connectionError = '';
+		try {
+			const identity = await MusicClient.generateIdentity();
+			secret = identity.secret;
+			clientEndpointId = identity.endpointId;
+			localStorage.setItem('iroh-fm-secret', secret);
+			endpointCopied = false;
+		} catch (error) {
+			connectionError = friendlyError(error, 'Could not generate a new client identity.');
+		} finally {
+			identityLoading = false;
+		}
+	}
+
+	async function autoConnectOnce() {
+		if (autoConnectAttempted || !ticket.trim() || !clientEndpointId) return;
+		autoConnectAttempted = true;
+		await connect(true);
 	}
 
 	function canConnect(forceTicket = loginTab === 'ticket') {
@@ -331,7 +455,14 @@
 				try {
 					const codes = await detector.detect(qrVideo);
 					if (codes[0]?.rawValue) {
-						ticket = codes[0].rawValue.trim();
+						const linked = connectionFromScannedValue(codes[0].rawValue);
+						if (linked.ticket) ticket = linked.ticket;
+						if (linked.secret) {
+							secret = linked.secret;
+							localStorage.setItem('iroh-fm-secret', secret);
+							updateIdentity(secret);
+						}
+						if (loginTab === 'advanced') syncTicketAddress(ticket);
 						stopQrScanner();
 						return;
 					}
@@ -366,15 +497,30 @@
 		trackList?.scrollToIndex(0);
 	}
 
-	function selectAlbum(album) {
-		activeAlbumId = activeAlbumId === album.id ? null : album.id;
+	async function showTrackView(lovedOnly) {
+		favoriteOnly = lovedOnly;
+		activeAlbumId = null;
 		mobilePane = 'tracks';
+		await tick();
 		resetTrackScroll();
+	}
+
+	async function selectAlbum(album) {
+		activeAlbumId = album.id;
+		mobilePane = 'tracks';
+		favoriteOnly = false;
+		query = '';
+		const albumTrackIds = new Set(album.track_ids);
+		const firstTrack = tracks.find((track) => albumTrackIds.has(track.id));
+		if (!firstTrack) return;
+		selectedTrackId = firstTrack.id;
+		await tick();
+		const index = filteredTracks.findIndex((track) => track.id === firstTrack.id);
+		if (index >= 0) trackList?.scrollToIndex(index, { align: 'start' });
 	}
 
 	function clearAlbum() {
 		activeAlbumId = null;
-		resetTrackScroll();
 	}
 
 	async function toggleStar(track, event) {
@@ -443,6 +589,15 @@
 		else await playTrack(track, sourceQueue);
 	}
 
+	async function playFromTrackList(track, sourceQueue = filteredTracks) {
+		const playback = playOrToggle(track, sourceQueue);
+		selectedTrackId = track.id;
+		await tick();
+		const index = filteredTracks.findIndex((entry) => entry.id === track.id);
+		if (index >= 0) trackList?.scrollToIndex(index, { align: 'center' });
+		await playback;
+	}
+
 	function stopPlayback() {
 		playGeneration += 1;
 		audio?.pause();
@@ -498,10 +653,9 @@
 		if (audio) audio.volume = volume;
 	}
 
-	function filterTracks(list, term, albumIds, lovedOnly, lovedIds) {
+	function filterTracks(list, term, lovedOnly, lovedIds) {
 		const needle = term.trim().toLocaleLowerCase();
 		return list.filter((track) => {
-			if (albumIds && !albumIds.has(track.id)) return false;
 			if (lovedOnly && !lovedIds.has(track.id)) return false;
 			if (!needle) return true;
 			return `${track.artist}\n${track.title}\n${track.album}`.toLocaleLowerCase().includes(needle);
@@ -539,8 +693,8 @@
 
 {#if !client}
 	<main class="relative h-dvh overflow-hidden bg-base text-text">
-		<div class="absolute inset-0 grid grid-rows-[34px_minmax(0,1fr)_72px] select-none opacity-65" aria-hidden="true">
-			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="flex h-full items-center border-r border-surface0 px-3 text-mauve"><Icon name="music" size={15}/><strong class="ml-2">iroh.fm</strong></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">ALL TRACKS</span><span class="px-4 font-semibold text-overlay1">LOVED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
+		<div class="absolute inset-0 hidden grid-rows-[34px_minmax(0,1fr)_72px] select-none opacity-65 sm:grid" aria-hidden="true">
+			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-6" /></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">ALL TRACKS</span><span class="px-4 font-semibold text-overlay1">LOVED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
 			<div class="grid min-h-0 grid-cols-[minmax(0,2fr)_minmax(330px,1fr)]">
 				<section class="min-h-0 border-r border-surface0 bg-base"><div class="flex h-10 items-center gap-3 border-b border-surface0 bg-mantle px-3 text-overlay0"><Icon name="search" size={14}/><span class="font-mono text-xs">Filter artist, title, album…</span><span class="ml-auto font-mono text-[10px]">128 TRACKS</span></div><div class="grid h-7 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0"><span>#</span><span>Artist</span><span>Title</span><span>Album</span><span>Time</span></div>{#each DEMO_TRACKS as track}<div class="grid h-[30px] grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0/40 px-2 text-[11px]"><span class="font-mono text-overlay0">{track[0]}</span><span class="truncate pr-2 text-mauve">{track[1]}</span><span class="truncate pr-2 text-teal">{track[2]}</span><span class="truncate pr-2 text-subtext0">{track[3]}</span><span class="font-mono text-overlay0">{track[4]}</span></div>{/each}</section>
 				<aside class="min-h-0 bg-mantle p-3"><div class="mb-3 flex h-7 items-center justify-between"><strong class="text-xs">ALBUMS</strong><span class="font-mono text-[10px] text-overlay0">24</span></div><div class="grid grid-cols-3 gap-x-3 gap-y-5">{#each DEMO_ALBUMS as album, index}<article class="min-w-0"><div class={`grid aspect-square place-items-center bg-gradient-to-br ${album[2]}`}><div class="grid size-1/2 place-items-center rounded-full border border-crust/20 bg-crust/25"><div class="size-2 rounded-full bg-text/50"></div></div></div><h3 class="mt-2 truncate text-[11px] font-semibold">{album[0]}</h3><p class="truncate text-[10px] text-overlay1">{album[1]}</p></article>{/each}</div></aside>
@@ -548,13 +702,13 @@
 			<footer class="border-t border-surface1 bg-crust"><div class="h-1 bg-surface0"><div class="h-full w-1/3 bg-mauve"></div></div><div class="grid h-[68px] grid-cols-[auto_1fr_auto] items-center gap-4 px-5"><div class="flex items-center gap-2 text-overlay1"><Icon name="previous" size={16}/><span class="grid size-10 place-items-center bg-text text-crust"><Icon name="play" size={14}/></span><Icon name="next" size={16}/></div><div><p class="text-xs font-semibold">Anywhere Between</p><p class="mt-1 text-[10px] text-overlay1">Nacre · Still Light</p></div><span class="font-mono text-[10px] text-overlay0">1:12 / 3:42</span></div></footer>
 		</div>
 
-		<div class="absolute inset-0 bg-crust/35 backdrop-blur-[3px]"></div>
+		<div class="absolute inset-0 bg-crust sm:bg-crust/35 sm:backdrop-blur-[3px]"></div>
 		<section class="absolute inset-0 z-10 grid place-items-center overflow-y-auto p-4 sm:p-8">
 			<form onsubmit={(event) => { event.preventDefault(); connect(loginTab === 'ticket'); }} class="my-auto w-[calc(100vw-2rem)] max-w-[29rem] border border-surface1 bg-base shadow-float">
-				<div class="border-b border-surface0 bg-mantle px-5 pt-5"><div class="mb-5 flex items-center gap-3"><span class="grid size-9 place-items-center bg-mauve text-crust"><Icon name="music" size={17} stroke={2.2}/></span><div><h1 class="text-[16px] font-semibold text-text">Enter your library</h1><p class="mt-0.5 text-[11px] text-overlay1">Connect privately with iroh</p></div></div><div class="flex gap-5 font-mono text-[10px] font-bold uppercase tracking-wider"><button type="button" onclick={() => selectLoginTab('ticket')} class="border-b-2 pb-3 {loginTab === 'ticket' ? 'border-mauve text-mauve' : 'border-transparent text-overlay1 hover:text-text'}">Ticket</button><button type="button" onclick={() => selectLoginTab('advanced')} class="border-b-2 pb-3 {loginTab === 'advanced' ? 'border-mauve text-mauve' : 'border-transparent text-overlay1 hover:text-text'}">Advanced</button></div></div>
+				<div class="border-b border-surface0 bg-mantle px-5 pt-5"><div class="mb-5 flex items-center gap-3"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-9" /><div><h1 class="text-[16px] font-semibold text-text">Enter your library</h1><p class="mt-0.5 text-[11px] text-overlay1">Connect privately with iroh</p></div></div><div class="flex gap-5 font-mono text-[10px] font-bold uppercase tracking-wider"><button type="button" onclick={() => selectLoginTab('ticket')} class="border-b-2 pb-3 {loginTab === 'ticket' ? 'border-mauve text-mauve' : 'border-transparent text-overlay1 hover:text-text'}">Ticket</button><button type="button" onclick={() => selectLoginTab('advanced')} class="border-b-2 pb-3 {loginTab === 'advanced' ? 'border-mauve text-mauve' : 'border-transparent text-overlay1 hover:text-text'}">Advanced</button></div></div>
 
 				<div class="space-y-4 p-5">
-					<div><div class="mb-2 flex items-center justify-between"><label for="ticket" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server ticket</label>{#if loginTab === 'ticket'}<button type="button" onclick={startQrScanner} class="flex items-center gap-1.5 font-mono text-[10px] text-mauve hover:text-pink"><Icon name="qr" size={13}/> SCAN QR</button>{/if}</div><textarea id="ticket" value={ticket} oninput={updateLoginTicket} rows={loginTab === 'ticket' ? 3 : 2} spellcheck="false" autocomplete="off" placeholder="endpointaa…" class="w-full resize-none border border-surface1 bg-mantle px-3 py-3 font-mono text-xs leading-5 text-text outline-none placeholder:text-overlay0 focus:border-mauve"></textarea></div>
+					<div><div class="mb-2 flex items-center justify-between gap-3"><label for="ticket" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server ticket</label><div class="flex items-center gap-3"><button type="button" onclick={copyTicketLink} disabled={!ticket.trim()} title="Copy setup link including the client secret" class="flex items-center gap-1.5 font-mono text-[10px] text-mauve hover:text-pink disabled:text-overlay0"><Icon name="copy" size={12}/>{ticketLinkCopied ? 'COPIED' : 'COPY'}</button>{#if loginTab === 'ticket'}<button type="button" onclick={startQrScanner} class="flex items-center gap-1.5 font-mono text-[10px] text-mauve hover:text-pink"><Icon name="qr" size={13}/> SCAN QR</button>{/if}</div></div><textarea id="ticket" value={ticket} oninput={updateLoginTicket} rows={loginTab === 'ticket' ? 3 : 2} spellcheck="false" autocomplete="off" placeholder="endpointaa…" class="w-full resize-none border border-surface1 bg-mantle px-3 py-3 font-mono text-xs leading-5 text-text outline-none placeholder:text-overlay0 focus:border-mauve"></textarea></div>
 
 					{#if loginTab === 'advanced'}
 						<div class="flex items-center gap-3 text-[9px] uppercase tracking-wider text-overlay0"><span class="h-px flex-1 bg-surface0"></span>or manual address<span class="h-px flex-1 bg-surface0"></span></div>
@@ -563,7 +717,7 @@
 						<div><label for="secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="secret" value={secret} oninput={(event) => updateIdentity(event.currentTarget.value)} type={showSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-10 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (showSecret = !showSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{showSecret ? 'HIDE' : 'SHOW'}</button></div></div>
 					{/if}
 
-					<div class="border border-surface0 bg-mantle/70 px-3 py-2.5"><div class="flex items-center justify-between gap-3"><div class="min-w-0"><p class="font-mono text-[9px] uppercase tracking-[.13em] text-overlay0">This browser's endpoint ID</p><code class="mt-1 block truncate text-[10px] text-subtext0">{identityLoading ? 'Generating secure identity…' : clientEndpointId || 'Invalid client secret'}</code></div><button type="button" onclick={copyEndpointId} disabled={!clientEndpointId} class="shrink-0 font-mono text-[9px] text-mauve hover:text-pink disabled:text-overlay0">{endpointCopied ? 'COPIED' : 'COPY'}</button></div></div>
+					<div><div class="mb-2 flex items-center justify-between gap-3"><p class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client endpoint ID</p><div class="flex items-center gap-3"><button type="button" onclick={generateClientIdentity} disabled={identityLoading || connecting} class="flex items-center gap-1.5 font-mono text-[10px] text-mauve hover:text-pink disabled:text-overlay0"><Icon name="refresh" size={12}/>GENERATE</button><button type="button" onclick={copyEndpointId} disabled={!clientEndpointId} class="flex items-center gap-1.5 font-mono text-[10px] text-mauve hover:text-pink disabled:text-overlay0"><Icon name="copy" size={12}/>{endpointCopied ? 'COPIED' : 'COPY'}</button></div></div><div class="border border-surface0 bg-mantle/70 px-3 py-2.5"><code class="block truncate text-[10px] text-subtext0">{identityLoading ? 'Generating secure identity…' : clientEndpointId || 'Invalid client secret'}</code></div></div>
 
 					{#if connectionError}<div class="border-l-2 border-red bg-red/10 px-3 py-2 text-xs leading-5 text-red"><strong>Connection failed.</strong> {connectionError}</div>{/if}
 					<button type="submit" disabled={!canConnect() || connecting || identityLoading} class="flex h-11 w-full items-center justify-center gap-3 bg-mauve font-mono text-xs font-bold tracking-wide text-crust transition hover:bg-pink disabled:cursor-not-allowed disabled:opacity-40">{#if connecting}<span class="size-3 animate-spin rounded-full border-2 border-crust/25 border-t-crust"></span>{connectionStep}{:else}CONNECT <Icon name="arrow" size={15}/>{/if}</button>
@@ -576,10 +730,10 @@
 {:else}
 	<div class="grid h-dvh grid-rows-[34px_minmax(0,1fr)_72px] overflow-hidden bg-base text-text">
 		<header class="flex min-w-0 items-center border-b border-surface0 bg-crust text-[11px]">
-			<div class="flex h-full shrink-0 items-center border-r border-surface0 px-3 text-mauve"><Icon name="music" size={15} stroke={2.2}/><strong class="ml-2 hidden sm:inline">iroh.fm</strong></div>
+			<div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="iroh.fm" class="size-6" /></div>
 			<nav class="flex h-full min-w-0 items-stretch">
-				<button onclick={() => { favoriteOnly = false; mobilePane = 'tracks'; resetTrackScroll(); }} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">ALL TRACKS</button>
-				<button onclick={() => { favoriteOnly = !favoriteOnly; mobilePane = 'tracks'; resetTrackScroll(); }} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">LOVED</button>
+				<button onclick={() => showTrackView(false)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">ALL TRACKS</button>
+				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">LOVED</button>
 				<button onclick={() => (mobilePane = 'albums')} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 lg:hidden {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
@@ -603,8 +757,8 @@
 				<div class="min-h-0 flex-1">
 					<VList data={filteredTracks} getKey={(track) => track.id} itemSize={ROW_HEIGHT} bufferSize={ROW_HEIGHT * 10} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(track, index)}
-							<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playOrToggle(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playOrToggle(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
-								<button onclick={(event) => { event.stopPropagation(); playOrToggle(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="size-2.5 animate-spin rounded-full border border-overlay0 border-t-mauve"></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || index + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
+							<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
+								<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="size-2.5 animate-spin rounded-full border border-overlay0 border-t-mauve"></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || index + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
 								<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.artist}</div>
 								<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
 								<div class="hidden min-w-0 truncate pr-2 text-subtext0 sm:block">{track.album}</div>
@@ -616,16 +770,20 @@
 			</section>
 
 			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden'} lg:flex">
-				<div class="flex h-10 shrink-0 items-center justify-between border-b border-surface0 px-3"><div><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{albums.length}</span></div>{#if activeAlbum}<button onclick={clearAlbum} class="font-mono text-[10px] text-mauve hover:text-pink">CLEAR FILTER</button>{/if}</div>
-				<div class="min-h-0 flex-1 overflow-y-auto p-3">
-					<div class="grid grid-cols-[repeat(auto-fill,minmax(125px,1fr))] gap-x-3 gap-y-5">
-						{#each albums as album (album.id)}
-							<article class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
-								<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => selectAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
-								<button onclick={() => selectAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
-							</article>
-						{/each}
-					</div>
+				<div class="flex h-10 shrink-0 items-center justify-between border-b border-surface0 px-3"><div><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{albums.length}</span></div>{#if activeAlbum}<button onclick={clearAlbum} class="font-mono text-[10px] text-mauve hover:text-pink">CLEAR SELECTION</button>{/if}</div>
+				<div bind:this={albumGridElement} class="min-h-0 flex-1">
+					<VList data={albumRows} getKey={(row) => `${albumColumns}:${row.map((album) => album.id).join('|')}`} bufferSize={400} style="height: 100%; overscroll-behavior: contain;">
+						{#snippet children(row, rowIndex)}
+							<div class="grid gap-3 px-3 pb-5" class:pt-3={rowIndex === 0} style={`grid-template-columns:repeat(${albumColumns},minmax(0,1fr))`}>
+								{#each row as album (album.id)}
+									<article class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
+										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => selectAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
+										<button onclick={() => selectAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
+									</article>
+								{/each}
+							</div>
+						{/snippet}
+					</VList>
 				</div>
 			</aside>
 		</div>

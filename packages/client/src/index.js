@@ -1,4 +1,14 @@
 let modulePromise;
+const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
+const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
+
+/** @param {string} remoteId @param {string} coverId */
+function coverCacheRequest(remoteId, coverId) {
+  const url = new URL("/cover", COVER_CACHE_ORIGIN);
+  url.searchParams.set("server", String(remoteId));
+  url.searchParams.set("id", coverId);
+  return new Request(url);
+}
 
 async function loadWasm() {
   modulePromise ??= import("./wasm/iroh_fm_web_wasm.js").then(async (module) => {
@@ -78,17 +88,61 @@ export class MusicClient {
   coverUrl(id) {
     let pending = this.coverCache.get(id);
     if (!pending) {
-      const created = this.inner.fetchCover(id).then((/** @type {any} */ media) => {
-        try {
-          return URL.createObjectURL(new Blob([media.bytes], { type: media.contentType }));
-        } finally {
-          media.free();
-        }
-      });
+      const created = this.loadCoverUrl(id);
       this.coverCache.set(id, created);
+      created.catch(() => {
+        if (this.coverCache.get(id) === created) this.coverCache.delete(id);
+      });
       pending = created;
     }
     return pending;
+  }
+
+  /** @param {string} id */
+  async loadCoverUrl(id) {
+    let cache;
+    let request;
+    if ("caches" in globalThis) {
+      try {
+        cache = await globalThis.caches.open(COVER_CACHE_NAME);
+        request = coverCacheRequest(this.remoteId, id);
+        const cached = await cache.match(request);
+        if (cached) {
+          const blob = await cached.blob();
+          if (blob.size > 0) return URL.createObjectURL(blob);
+          await cache.delete(request);
+        }
+      } catch {
+        cache = undefined;
+        request = undefined;
+      }
+    }
+
+    const media = await this.inner.fetchCover(id);
+    let blob;
+    try {
+      blob = new Blob([media.bytes], { type: media.contentType });
+    } finally {
+      media.free();
+    }
+
+    if (cache && request) {
+      try {
+        await cache.put(
+          request,
+          new Response(blob, {
+            headers: {
+              "content-type": blob.type || "application/octet-stream",
+              "x-iroh-fm-cover-id": id,
+            },
+          }),
+        );
+      } catch {
+        // Private browsing and storage quotas may make Cache Storage unavailable.
+      }
+    }
+
+    return URL.createObjectURL(blob);
   }
 
   /** @param {string} id */
