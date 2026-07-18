@@ -41,6 +41,10 @@ async fn run() -> server::Result<()> {
     let server = MusicServer::load(config)?;
     let summary = server.handle(BackendRequest::GetLibrarySummary)?;
     let handle = spawn_iroh_server(server, &iroh).await?;
+    // A browser can only reach an iroh endpoint through a relay. Wait until
+    // the endpoint has one before printing the shareable ticket so the static
+    // web client always receives usable dialing information.
+    handle.endpoint.online().await;
     let endpoint = handle.endpoint.id();
     let mut ticket_addr = handle.endpoint.addr();
     if let Some(relay) = iroh.relay.as_deref() {

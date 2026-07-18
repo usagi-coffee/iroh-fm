@@ -1,0 +1,19 @@
+{
+  "name": "iroh-fm",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --cwd packages/web dev",
+    "build": "bun run --cwd packages/web build",
+    "check": "bun run --cwd packages/web check"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^6"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@iroh-fm/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "build:wasm": "cd ../../crates/web-wasm && cargo build --target wasm32-unknown-unknown --profile wasm-release && wasm-bindgen ../../target/wasm32-unknown-unknown/wasm-release/iroh_fm_web_wasm.wasm --out-dir ../../packages/client/src/wasm --target web --weak-refs && wasm-opt --enable-nontrapping-float-to-int --enable-bulk-memory -Os -o ../../packages/client/src/wasm/iroh_fm_web_wasm_bg.wasm ../../packages/client/src/wasm/iroh_fm_web_wasm_bg.wasm"
+  }
+}

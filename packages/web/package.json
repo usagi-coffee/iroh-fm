@@ -1,0 +1,31 @@
+{
+  "name": "web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "bun run --cwd ../client build:wasm",
+    "dev": "bun run build:wasm && vite dev",
+    "build": "bun run build:wasm && vite build",
+    "preview": "vite preview",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "bun run build:wasm && svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch"
+  },
+  "dependencies": {
+    "@iroh-fm/client": "workspace:*",
+    "oxfmt": "^0.59.0"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.63.0",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.1.14",
+    "oxlint": "^1.74.0",
+    "svelte": "^5.56.1",
+    "svelte-check": "^4.6.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}

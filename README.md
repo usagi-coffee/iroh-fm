@@ -32,12 +32,32 @@ crates/
   protocol/
   server/
   subsonic/
+  web-wasm/
+packages/
+  client/
+  web/
 ```
 
 - `client`: `iroh` RPC client for talking to the backend server
 - `protocol`: shared backend request and response types
 - `server`: the actual music server
 - `subsonic`: Subsonic facade over the backend
+- `web-wasm`: browser-only `wasm-bindgen` bridge around the backend protocol
+- `packages/client`: reusable browser client and generated WASM bindings
+- `packages/web`: fully static Svelte/Tailwind music player
+
+## Web player
+
+The web player is a client-rendered static site suitable for GitHub Pages. It connects directly from the browser to the server ticket through an iroh relay; it does not use SSR or an HTTP application backend.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.125 --locked
+bun install
+bun run dev
+```
+
+See [`packages/web/README.md`](packages/web/README.md) for build and deployment details.
 
 ## Usage
 
