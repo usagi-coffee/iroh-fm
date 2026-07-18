@@ -770,6 +770,20 @@
 		trackEntries.set(track.id, entry);
 	}
 
+	function markTrackCached(track) {
+		if (!cachedTrackIds.has(track.id)) cachedTrackIds = new Set(cachedTrackIds).add(track.id);
+		const previous = trackEntries.get(track.id);
+		const entry = new TrackEntryState(track, true);
+		if (previous) Object.assign(entry, previous);
+		entry.track = track;
+		entry.cached = true;
+		entry.downloading = false;
+		entry.progress = 1;
+		entry.total = Number(track.file_size) || entry.total;
+		entry.received = entry.total;
+		trackEntries.set(track.id, entry);
+	}
+
 	async function toggleOfflineOnly() {
 		const next = !offlineOnly;
 		if (next) await refreshCachedTracks();
@@ -842,7 +856,7 @@
 		startTrackProgress(track);
 		try {
 			await client.prefetchTrack(track.id, (received, total) => updateTrackProgress(track, received, total));
-			await refreshCachedTracks();
+			markTrackCached(track);
 		} catch (error) {
 			stopTrackProgress(track);
 			connectionError = friendlyError(error, 'Could not cache this song.');
@@ -889,7 +903,7 @@
 			for (const track of missing) {
 				startTrackProgress(track);
 				await client.prefetchTrack(track.id, (received, total) => updateTrackProgress(track, received, total));
-				await refreshCachedTracks();
+				markTrackCached(track);
 			}
 		} catch (error) {
 			for (const track of missing) stopTrackProgress(track);
@@ -933,10 +947,12 @@
 		if (index < 0) return;
 		const next = sourceQueue[(index + 1) % sourceQueue.length];
 		if (!next || next.id === track.id) return;
-		client.prefetchTrack(next.id, (received, total) => updateTrackProgress(next, received, total)).catch((error) => {
-			stopTrackProgress(next);
-			console.warn('[player] next-track prefetch failed', error);
-		});
+		client.prefetchTrack(next.id, (received, total) => updateTrackProgress(next, received, total))
+			.then(() => markTrackCached(next))
+			.catch((error) => {
+				stopTrackProgress(next);
+				console.warn('[player] next-track prefetch failed', error);
+			});
 	}
 
 	async function playTrack(track, sourceQueue = filteredTracks) {
@@ -970,10 +986,10 @@
 			audio.load();
 			await source.start();
 			if (generation !== playGeneration) return;
-			source.done.then(
-				async () => {
-					await client.prefetchTrack(track.id);
-					await refreshCachedTracks();
+				source.done.then(
+					async () => {
+						await client.prefetchTrack(track.id);
+						markTrackCached(track);
 					prefetchNextTrack(track, sourceQueue, generation);
 				},
 				(error) => {
