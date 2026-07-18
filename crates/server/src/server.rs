@@ -56,6 +56,14 @@ impl MusicServer {
     }
 
     pub fn handle(&self, request: BackendRequest) -> Result<BackendResponse> {
+        self.handle_for_identity(request, None)
+    }
+
+    pub fn handle_for_identity(
+        &self,
+        request: BackendRequest,
+        identity: Option<&str>,
+    ) -> Result<BackendResponse> {
         let library = self.library.read().expect("library lock poisoned");
 
         match request {
@@ -73,8 +81,18 @@ impl MusicServer {
             BackendRequest::ListTracks => Ok(BackendResponse::Tracks(
                 library.tracks.values().cloned().collect(),
             )),
-            BackendRequest::GetStarred => self.get_starred(&library),
-            BackendRequest::SetStarred { id, starred } => self.set_starred(&library, id, starred),
+            BackendRequest::GetStarred => {
+                self.get_starred(&library, &starred_scope(None, identity))
+            }
+            BackendRequest::GetStarredWithKey { key } => {
+                self.get_starred(&library, &starred_scope(Some(key), identity))
+            }
+            BackendRequest::SetStarred { id, starred } => {
+                self.set_starred(&library, &starred_scope(None, identity), id, starred)
+            }
+            BackendRequest::SetStarredWithKey { id, starred, key } => {
+                self.set_starred(&library, &starred_scope(Some(key), identity), id, starred)
+            }
             BackendRequest::GetArtist { artist_id } => Self::get_artist(&library, artist_id),
             BackendRequest::GetAlbum { album_id } => Self::get_album(&library, album_id),
             BackendRequest::GetAlbumTracks { album_id } => {
@@ -99,14 +117,15 @@ impl MusicServer {
         Ok(BackendResponse::Artist(artist))
     }
 
-    fn get_starred(&self, library: &LibraryIndex) -> Result<BackendResponse> {
+    fn get_starred(&self, library: &LibraryIndex, scope: &str) -> Result<BackendResponse> {
         let conn = self.starred_db.lock().expect("starred db lock poisoned");
-        let mut stmt =
-            conn.prepare("SELECT id, kind FROM starred_items ORDER BY starred_unix DESC, id ASC")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, kind FROM starred_items WHERE scope = ?1 ORDER BY starred_unix DESC, id ASC",
+        )?;
         let mut artists = Vec::new();
         let mut albums = Vec::new();
         let mut tracks = Vec::new();
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([scope], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
@@ -177,6 +196,7 @@ impl MusicServer {
     fn set_starred(
         &self,
         library: &LibraryIndex,
+        scope: &str,
         id: String,
         starred: bool,
     ) -> Result<BackendResponse> {
@@ -194,16 +214,19 @@ impl MusicServer {
         if starred {
             conn.execute(
                 r#"
-                INSERT INTO starred_items (id, kind, starred_unix)
-                VALUES (?1, ?2, ?3)
-                ON CONFLICT(id) DO UPDATE SET
+                INSERT INTO starred_items (scope, id, kind, starred_unix)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(scope, id) DO UPDATE SET
                     kind = excluded.kind,
                     starred_unix = excluded.starred_unix
                 "#,
-                params![id, kind, now_unix()],
+                params![scope, id, kind, now_unix()],
             )?;
         } else {
-            conn.execute("DELETE FROM starred_items WHERE id = ?1", params![id])?;
+            conn.execute(
+                "DELETE FROM starred_items WHERE scope = ?1 AND id = ?2",
+                params![scope, id],
+            )?;
         }
 
         Ok(BackendResponse::Empty)
@@ -434,18 +457,70 @@ fn spawn_library_watcher(
 
 fn open_state_db(root: &std::path::Path) -> Result<Connection> {
     let conn = Connection::open(root.join(STATE_DB_FILE))?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
+    let table_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'starred_items')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table_exists {
+        create_starred_table(&conn)?;
+    } else {
+        let mut columns = conn.prepare("PRAGMA table_info(starred_items)")?;
+        let has_scope = columns
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .iter()
+            .any(|column| column == "scope");
+        drop(columns);
+        if !has_scope {
+            conn.execute_batch(
+                r#"
+                BEGIN IMMEDIATE;
+                ALTER TABLE starred_items RENAME TO starred_items_legacy;
+                CREATE TABLE starred_items (
+                    scope TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    starred_unix INTEGER NOT NULL,
+                    PRIMARY KEY (scope, id)
+                );
+                INSERT INTO starred_items (scope, id, kind, starred_unix)
+                    SELECT 'legacy', id, kind, starred_unix FROM starred_items_legacy;
+                DROP TABLE starred_items_legacy;
+                COMMIT;
+                "#,
+            )?;
+        }
+    }
+    Ok(conn)
+}
+
+fn create_starred_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
-        PRAGMA synchronous = NORMAL;
-
-        CREATE TABLE IF NOT EXISTS starred_items (
-            id TEXT PRIMARY KEY NOT NULL,
+        CREATE TABLE starred_items (
+            scope TEXT NOT NULL,
+            id TEXT NOT NULL,
             kind TEXT NOT NULL,
-            starred_unix INTEGER NOT NULL
+            starred_unix INTEGER NOT NULL,
+            PRIMARY KEY (scope, id)
         );
         "#,
     )?;
-    Ok(conn)
+    Ok(())
+}
+
+fn starred_scope(key: Option<String>, identity: Option<&str>) -> String {
+    match key
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty())
+    {
+        Some(key) => format!("key:{key}"),
+        None => identity
+            .map(|identity| format!("identity:{identity}"))
+            .unwrap_or_else(|| "legacy".to_owned()),
+    }
 }
 
 fn now_unix() -> i64 {

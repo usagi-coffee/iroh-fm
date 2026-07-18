@@ -120,15 +120,42 @@ pub enum BackendRequest {
     ListAlbums,
     ListTracks,
     GetStarred,
-    SetStarred { id: String, starred: bool },
-    GetArtist { artist_id: ArtistId },
-    GetAlbum { album_id: AlbumId },
-    GetAlbumTracks { album_id: AlbumId },
-    GetTrack { track_id: TrackId },
-    GetCoverArt { cover_art_id: CoverArtId },
-    ResolveId { id: String },
-    Search { query: SearchQuery },
-    OpenStream { track_id: TrackId },
+    GetStarredWithKey {
+        key: String,
+    },
+    SetStarred {
+        id: String,
+        starred: bool,
+    },
+    SetStarredWithKey {
+        id: String,
+        starred: bool,
+        key: String,
+    },
+    GetArtist {
+        artist_id: ArtistId,
+    },
+    GetAlbum {
+        album_id: AlbumId,
+    },
+    GetAlbumTracks {
+        album_id: AlbumId,
+    },
+    GetTrack {
+        track_id: TrackId,
+    },
+    GetCoverArt {
+        cover_art_id: CoverArtId,
+    },
+    ResolveId {
+        id: String,
+    },
+    Search {
+        query: SearchQuery,
+    },
+    OpenStream {
+        track_id: TrackId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

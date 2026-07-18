@@ -296,9 +296,11 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
                                 match conn.accept_bi().await {
                                     Ok((send, recv)) => {
                                         let server = Arc::clone(&server);
+                                        let remote_id = remote_id.to_string();
                                         tokio::spawn(async move {
                                             if let Err(error) =
-                                                handle_rpc_stream(server, send, recv).await
+                                                handle_rpc_stream(server, remote_id, send, recv)
+                                                    .await
                                             {
                                                 eprintln!("iroh rpc stream failed: {error}");
                                             }
@@ -328,6 +330,7 @@ pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Resu
 
 async fn handle_rpc_stream(
     server: Arc<MusicServer>,
+    remote_identity: String,
     mut send: SendStream,
     mut recv: RecvStream,
 ) -> Result<()> {
@@ -340,7 +343,10 @@ async fn handle_rpc_stream(
     }
     match request {
         BackendRequest::OpenStream { track_id } => {
-            let response = match server.handle(BackendRequest::OpenStream { track_id }) {
+            let response = match server.handle_for_identity(
+                BackendRequest::OpenStream { track_id },
+                Some(&remote_identity),
+            ) {
                 Ok(response) => response,
                 Err(error) => {
                     eprintln!("[server-rpc] stream request failed: {error}");
@@ -379,7 +385,7 @@ async fn handle_rpc_stream(
             send.finish()?;
         }
         other => {
-            let response = match server.handle(other) {
+            let response = match server.handle_for_identity(other, Some(&remote_identity)) {
                 Ok(response) => response,
                 Err(error) => {
                     eprintln!("[server-rpc] request failed: {error}");
@@ -501,7 +507,9 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::ListAlbums => "ListAlbums",
         BackendRequest::ListTracks => "ListTracks",
         BackendRequest::GetStarred => "GetStarred",
+        BackendRequest::GetStarredWithKey { .. } => "GetStarredWithKey",
         BackendRequest::SetStarred { .. } => "SetStarred",
+        BackendRequest::SetStarredWithKey { .. } => "SetStarredWithKey",
         BackendRequest::GetArtist { .. } => "GetArtist",
         BackendRequest::GetAlbum { .. } => "GetAlbum",
         BackendRequest::GetAlbumTracks { .. } => "GetAlbumTracks",

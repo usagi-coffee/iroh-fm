@@ -113,13 +113,15 @@ export class MusicClient {
     return JSON.parse(await this.inner.request(JSON.stringify(request)));
   }
 
-  async bootstrap() {
+  async bootstrap(starredKey = "") {
     const [summary, albums, artists, tracks, starred] = await Promise.all([
       this.request("GetLibrarySummary"),
       this.request("ListAlbums"),
       this.request("ListArtists"),
       this.request("ListTracks"),
-      this.request("GetStarred"),
+      starredKey.trim()
+        ? this.request({ GetStarredWithKey: { key: starredKey.trim() } })
+        : this.request("GetStarred"),
     ]);
     return { summary, albums, artists, tracks, starred };
   }

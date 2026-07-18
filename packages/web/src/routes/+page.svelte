@@ -69,6 +69,8 @@
 	let settingsEndpoint = $state('');
 	let settingsRelays = $state(['']);
 	let settingsSecret = $state('');
+	let lovedKey = $state('');
+	let settingsLovedKey = $state('');
 	let settingsShowSecret = $state(false);
 	let endpointCopied = $state(false);
 	let ticketLinkCopied = $state(false);
@@ -128,6 +130,7 @@
 		endpoint = localStorage.getItem('iroh-fm-endpoint') ?? '';
 		relays = readStoredRelays();
 		secret = localStorage.getItem('iroh-fm-secret') ?? '';
+		lovedKey = localStorage.getItem('iroh-fm-loved-key') ?? '';
 		const importConnection = () => {
 			const linked = connectionFromHash(location.hash);
 			if (linked.ticket) ticket = linked.ticket;
@@ -360,7 +363,7 @@
 				secret
 			});
 			connectionStep = 'Indexing the remote library…';
-			const data = await nextClient.bootstrap();
+			const data = await nextClient.bootstrap(lovedKey);
 			client = nextClient;
 			summary = variant(data.summary, 'LibrarySummary', summary);
 			albums = variant(data.albums, 'Albums', []).sort(albumSort);
@@ -401,6 +404,7 @@
 		settingsEndpoint = endpoint;
 		settingsRelays = [...relays];
 		settingsSecret = secret;
+		settingsLovedKey = lovedKey;
 		settingsShowSecret = false;
 		settingsOpen = true;
 		if (settingsTicket.trim()) syncSettingsTicketAddress(settingsTicket);
@@ -424,6 +428,9 @@
 		endpoint = settingsEndpoint.trim();
 		relays = [...settingsRelays];
 		secret = nextSecret;
+		lovedKey = settingsLovedKey.trim();
+		if (lovedKey) localStorage.setItem('iroh-fm-loved-key', lovedKey);
+		else localStorage.removeItem('iroh-fm-loved-key');
 		persistConnection(ticket, endpoint, relays, secret);
 		settingsOpen = false;
 		await disconnect();
@@ -508,7 +515,7 @@
 		resetTrackScroll();
 		if (!lovedOnly) return;
 		try {
-			const response = await client.request('GetStarred');
+			const response = await client.request(lovedKey ? { GetStarredWithKey: { key: lovedKey } } : 'GetStarred');
 			starred = variant(response, 'Starred', starred);
 			starredTrackIds = new Set(starred.tracks.map((track) => track.id));
 			if (favoriteOnly) {
@@ -555,7 +562,9 @@
 		event?.stopPropagation();
 		const shouldStar = !starredTrackIds.has(track.id);
 		try {
-			await client.request({ SetStarred: { id: track.id, starred: shouldStar } });
+			await client.request(lovedKey
+				? { SetStarredWithKey: { id: track.id, starred: shouldStar, key: lovedKey } }
+				: { SetStarred: { id: track.id, starred: shouldStar } });
 			const next = new Set(starredTrackIds);
 			if (shouldStar) next.add(track.id);
 			else next.delete(track.id);
@@ -833,18 +842,19 @@
 
 		{#if settingsOpen}
 			<div class="fixed inset-0 z-[70] grid place-items-center bg-crust/75 p-4 backdrop-blur-sm" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) settingsOpen = false; }}>
-				<div class="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto border border-surface1 bg-base shadow-float" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-					<form onsubmit={(event) => { event.preventDefault(); applySettings(); }}>
-						<div class="flex items-center justify-between border-b border-surface0 bg-mantle px-5 py-4"><div><p class="font-mono text-[10px] uppercase tracking-[.16em] text-overlay0">Connection</p><h2 id="settings-title" class="mt-1 text-lg font-semibold">Client settings</h2></div><button type="button" onclick={() => (settingsOpen = false)} class="grid size-8 place-items-center text-overlay1 hover:bg-surface0 hover:text-text"><Icon name="close" size={16}/></button></div>
-						<div class="space-y-5 p-5">
+				<div class="w-full max-w-xl overflow-hidden border border-surface1 bg-base shadow-float" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+					<form onsubmit={(event) => { event.preventDefault(); applySettings(); }} class="flex max-h-[calc(100dvh-2rem)] flex-col">
+						<div class="flex shrink-0 items-center justify-between border-b border-surface0 bg-mantle px-5 py-4"><div><p class="font-mono text-[10px] uppercase tracking-[.16em] text-overlay0">Connection</p><h2 id="settings-title" class="mt-1 text-lg font-semibold">Client settings</h2></div><button type="button" onclick={() => (settingsOpen = false)} class="grid size-8 place-items-center text-overlay1 hover:bg-surface0 hover:text-text"><Icon name="close" size={16}/></button></div>
+						<div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-5">
 							<div><label for="settings-ticket" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server ticket</label><textarea id="settings-ticket" value={settingsTicket} oninput={updateSettingsTicket} rows="3" spellcheck="false" autocomplete="off" class="w-full resize-none border border-surface1 bg-mantle px-3 py-3 font-mono text-xs leading-5 outline-none focus:border-mauve"></textarea></div>
 							<div class="flex items-center gap-3 text-[9px] uppercase tracking-wider text-overlay0"><span class="h-px flex-1 bg-surface0"></span>manual address override<span class="h-px flex-1 bg-surface0"></span></div>
 							<div><label for="settings-endpoint" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server endpoint ID</label><input id="settings-endpoint" bind:value={settingsEndpoint} spellcheck="false" autocomplete="off" placeholder="Leave empty to use ticket" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/></div>
 							<div><div class="mb-2 flex items-center justify-between"><label for="settings-relay-0" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Relay URLs</label><button type="button" onclick={() => addRelay(true)} class="font-mono text-[10px] text-mauve hover:text-pink">+ ADD RELAY</button></div><div class="space-y-2">{#each settingsRelays as relayUrl, index}<div class="relative"><input id={`settings-relay-${index}`} bind:value={settingsRelays[index]} spellcheck="false" autocomplete="url" placeholder="https://relay.example" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-10 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/>{#if settingsRelays.length > 1}<button type="button" onclick={() => removeRelay(index, true)} class="absolute inset-y-0 right-2 grid w-7 place-items-center text-overlay0 hover:text-red" aria-label={`Remove relay ${index + 1}`}><Icon name="close" size={12}/></button>{/if}</div>{/each}</div></div>
 							<div><label for="settings-secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="settings-secret" bind:value={settingsSecret} type={settingsShowSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (settingsShowSecret = !settingsShowSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{settingsShowSecret ? 'HIDE' : 'SHOW'}</button></div></div>
+							<div><label for="settings-loved-key" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Loved collection key</label><input id="settings-loved-key" bind:value={settingsLovedKey} spellcheck="false" autocomplete="off" placeholder="Default: this client identity" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/><p class="mt-1.5 text-[10px] leading-4 text-overlay0">Leave empty for a private collection tied to the Client Endpoint ID. Use the same custom key on multiple clients to share one collection.</p></div>
 							<div class="border border-surface0 bg-mantle p-3"><p class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Current client endpoint ID</p><code class="mt-2 block break-all text-[11px] leading-5 text-subtext0">{client.endpointId}</code></div><p class="text-[11px] leading-5 text-overlay1">Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
 						</div>
-						<div class="flex justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button type="button" onclick={() => (settingsOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button type="submit" disabled={!(settingsEndpoint.trim() ? cleanRelays(settingsRelays).length : settingsTicket.trim()) || connecting} class="bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">SAVE & RECONNECT</button></div>
+						<div class="flex shrink-0 justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button type="button" onclick={() => (settingsOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button type="submit" disabled={!(settingsEndpoint.trim() ? cleanRelays(settingsRelays).length : settingsTicket.trim()) || connecting} class="bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">SAVE & RECONNECT</button></div>
 					</form>
 				</div>
 			</div>
