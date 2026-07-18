@@ -118,6 +118,7 @@ pub enum BackendRequest {
     GetLibrarySummary,
     ListArtists,
     ListAlbums,
+    ListTracks,
     GetStarred,
     SetStarred { id: String, starred: bool },
     GetArtist { artist_id: ArtistId },
