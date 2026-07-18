@@ -3,6 +3,7 @@
 	import { MusicClient } from '@iroh-fm/client';
 	import { base } from '$app/paths';
 	import { onMount, tick } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { VList } from 'virtua/svelte';
 	import Cover from '$lib/components/Cover.svelte';
 	import Icon from '$lib/components/Icon.svelte';
@@ -70,7 +71,7 @@
 	let cachedTrackIds = $state(new Set());
 	let cachingTrackIds = $state(new Set());
 	let cachingAlbumIds = $state(new Set());
-	let trackEntries = $state(new Map());
+	const trackEntries = new SvelteMap();
 	let offlineOnly = $state(false);
 	let updateReady = $state(false);
 	let updateDismissed = $state(false);
@@ -184,7 +185,7 @@
 				});
 				previousAlbumKey = albumKey;
 			}
-			items.push({ kind: 'track', key: `track:${track.id}`, track, trackIndex });
+			items.push({ kind: 'track', key: `track:${track.id}`, track, trackIndex, entry: trackEntries.get(track.id) });
 		}
 		return items;
 	});
@@ -725,32 +726,55 @@
 	}
 
 	function syncTrackEntries() {
-		const next = new Map();
+		const present = new Set();
 		for (const track of tracks) {
-			const entry = trackEntries.get(track.id) ?? new TrackEntryState(track);
+			present.add(track.id);
+			const previous = trackEntries.get(track.id);
+			const entry = new TrackEntryState(track);
+			if (previous) Object.assign(entry, previous);
 			entry.track = track;
 			entry.cached = cachedTrackIds.has(track.id);
 			if (entry.cached && !entry.downloading) entry.progress = 1;
-			next.set(track.id, entry);
+			trackEntries.set(track.id, entry);
 		}
-		trackEntries = next;
+		for (const id of trackEntries.keys()) {
+			if (!present.has(id)) trackEntries.delete(id);
+		}
+	}
+
+	function startTrackProgress(track) {
+		const previous = trackEntries.get(track.id);
+		const entry = new TrackEntryState(track, cachedTrackIds.has(track.id));
+		if (previous) Object.assign(entry, previous);
+		entry.track = track;
+		entry.received = 0;
+		entry.total = Number(track.file_size) || 0;
+		entry.progress = 0;
+		entry.downloading = true;
+		trackEntries.set(track.id, entry);
 	}
 
 	function updateTrackProgress(track, received, total) {
-		const entry = trackEntries.get(track.id) ?? new TrackEntryState(track, cachedTrackIds.has(track.id));
-		entry.received = received;
-		entry.total = total;
-		entry.progress = total > 0 ? Math.min(1, received / total) : 0;
-		entry.downloading = total > 0 && received < total;
-		trackEntries = new Map(trackEntries).set(track.id, entry);
+		const previous = trackEntries.get(track.id);
+		const entry = new TrackEntryState(track, cachedTrackIds.has(track.id));
+		if (previous) Object.assign(entry, previous);
+		const knownTotal = Number(total) > 0 ? Number(total) : Number(track.file_size) || 0;
+		entry.track = track;
+		entry.received = Number(received) || 0;
+		entry.total = knownTotal;
+		entry.progress = knownTotal > 0 ? Math.min(1, entry.received / knownTotal) : 0;
+		entry.downloading = knownTotal <= 0 || entry.received < knownTotal;
+		trackEntries.set(track.id, entry);
 	}
 
 	function stopTrackProgress(track) {
 		if (!track) return;
-		const entry = trackEntries.get(track.id);
-		if (!entry) return;
+		const previous = trackEntries.get(track.id);
+		if (!previous) return;
+		const entry = new TrackEntryState(track, previous.cached);
+		Object.assign(entry, previous);
 		entry.downloading = false;
-		trackEntries = new Map(trackEntries).set(track.id, entry);
+		trackEntries.set(track.id, entry);
 	}
 
 	async function toggleOfflineOnly() {
@@ -822,6 +846,7 @@
 		trackMenu = null;
 		if (offlineOnly || cachedTrackIds.has(track.id) || cachingTrackIds.has(track.id)) return;
 		cachingTrackIds = new Set(cachingTrackIds).add(track.id);
+		startTrackProgress(track);
 		try {
 			await client.prefetchTrack(track.id, (received, total) => updateTrackProgress(track, received, total));
 			await refreshCachedTracks();
@@ -852,10 +877,11 @@
 		if (missing.length === 0) return;
 		cachingAlbumIds = new Set(cachingAlbumIds).add(menu.key);
 		try {
-			for (let index = 0; index < missing.length; index += 2) {
-				await Promise.all(missing.slice(index, index + 2).map((track) => client.prefetchTrack(track.id, (received, total) => updateTrackProgress(track, received, total))));
+			for (const track of missing) {
+				startTrackProgress(track);
+				await client.prefetchTrack(track.id, (received, total) => updateTrackProgress(track, received, total));
+				await refreshCachedTracks();
 			}
-			await refreshCachedTracks();
 		} catch (error) {
 			for (const track of missing) stopTrackProgress(track);
 			connectionError = friendlyError(error, 'Could not cache this album.');
@@ -906,7 +932,6 @@
 
 	async function playTrack(track, sourceQueue = filteredTracks) {
 		const generation = ++playGeneration;
-		stopTrackProgress(currentTrack);
 		audio?.pause();
 		audioSource?.dispose();
 		audioSource = null;
@@ -1157,14 +1182,13 @@
 								<button onclick={() => playTrack(item.tracks[0], item.tracks)} oncontextmenu={(event) => openAlbumMenu(item.album, item.tracks, event)} onpointerdown={(event) => beginAlbumLongPress(item.album, item.tracks, event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} class="flex h-9 w-full items-center gap-2 border-y border-surface1 bg-mantle px-2 text-left transition hover:bg-surface0" aria-label={`Play album ${item.title}`}>
 									<Cover {client} id={item.coverArtId} title={item.title} rootMargin={TRACK_COVER_MARGIN} class="size-7 shrink-0 rounded-sm" />
 									<p class="min-w-0 flex-1 truncate text-[11px]"><span class="font-semibold text-mauve">{item.title}</span><span class="ml-2 text-[10px] text-overlay1">{item.artist}</span></p>
-									{#if item.tracks.length > 0 && item.tracks.every((track) => cachedTrackIds.has(track.id))}<span class="text-green" title="Album cached"><Icon name="cached" size={12}/></span>{/if}
 									<span class="shrink-0 font-mono text-[10px] text-overlay0">{formatTime(item.durationSeconds)}</span>
 								</button>
 							{:else}
 								{@const track = item.track}
-								{@const entry = trackEntries.get(track.id)}
+								{@const entry = item.entry}
 								<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} oncontextmenu={(event) => openTrackMenu(track, event)} onpointerdown={(event) => beginLongPress(track, event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
-									<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if entry?.downloading}<span class="h-1 w-4 overflow-hidden bg-surface1"><span class="block h-full bg-mauve transition-[width] duration-150" style={`width:${entry.progress * 100}%`}></span></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else if entry?.cached}<span class="h-1 w-4 bg-green" title="Cached"></span>{:else}<span class="group-hover:hidden">{track.track_number || item.trackIndex + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
+									<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if entry?.downloading}<span class="h-1 w-4 overflow-hidden bg-surface1"><span class="block h-full bg-mauve transition-[width] duration-150" style={`width:${entry.progress * 100}%`}></span></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else if entry?.cached}<span class="text-green" title="Cached">{track.track_number || item.trackIndex + 1}</span>{:else}<span class="group-hover:hidden">{track.track_number || item.trackIndex + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
 									<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.album}</div>
 									<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredTrackIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
 									<div class="hidden min-w-0 truncate pr-2 text-subtext0 sm:block">{track.artist}</div>
@@ -1185,7 +1209,7 @@
 							<div class="grid gap-3 px-3 pb-5" class:pt-3={rowIndex === 0} style={`grid-template-columns:repeat(${albumColumns},minmax(0,1fr))`}>
 								{#each row as album (album.id)}
 									<article oncontextmenu={(event) => openAlbumMenu(album, tracksForAlbum(album), event)} onpointerdown={(event) => beginAlbumLongPress(album, tracksForAlbum(album), event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
-										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button>{#if cachedAlbumIds.has(album.id)}<span class="absolute left-2 top-2 grid size-6 place-items-center rounded-full bg-crust/85 text-green shadow-lg" title="Album cached"><Icon name="cached" size={14}/></span>{/if}<button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
+										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
 										<button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
 									</article>
 								{/each}
@@ -1211,11 +1235,11 @@
 
 		{#if trackMenu}
 			<div class="fixed inset-0 z-[80] grid place-items-center bg-crust/70 p-4 backdrop-blur-sm" role="presentation" onclick={() => (trackMenu = null)} onkeydown={(event) => { if (event.key === 'Escape') trackMenu = null; }} oncontextmenu={(event) => event.preventDefault()}>
-				<div role="menu" tabindex="-1" aria-label={`Actions for ${trackMenu.track.title}`} class="w-full max-w-md border border-surface1 bg-crust p-2 shadow-float" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
-					<div class="flex gap-4 border-b border-surface0 p-3">
+				<div role="menu" tabindex="-1" aria-label={`Actions for ${trackMenu.track.title}`} class="min-w-0 w-full max-w-md overflow-hidden border border-surface1 bg-crust p-2 shadow-float" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+					<div class="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 border-b border-surface0 p-3">
 						<Cover {client} id={trackMenu.track.cover_art_id} title={trackMenu.track.album} class="size-24 shrink-0 rounded-sm" />
-						<div class="min-w-0 self-center">
-							<p class="truncate text-sm font-semibold text-text">{trackMenu.track.title}</p>
+						<div class="min-w-0 overflow-hidden self-center">
+							<p class="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold text-text" title={trackMenu.track.title}>{trackMenu.track.title}</p>
 							<p class="mt-1 truncate text-xs text-mauve">{trackMenu.track.artist}</p>
 							<p class="mt-1 truncate text-[11px] text-overlay1">{trackMenu.track.album}</p>
 							<p class="mt-2 font-mono text-[10px] text-overlay0">{formatTime(trackMenu.track.duration_seconds)} · {formatBytes(trackMenu.track.file_size)}</p>
@@ -1229,17 +1253,17 @@
 
 		{#if albumMenu}
 			<div class="fixed inset-0 z-[80] grid place-items-center bg-crust/70 p-4 backdrop-blur-sm" role="presentation" onclick={() => (albumMenu = null)} onkeydown={(event) => { if (event.key === 'Escape') albumMenu = null; }} oncontextmenu={(event) => event.preventDefault()}>
-				<div role="menu" tabindex="-1" aria-label={`Actions for ${albumMenu.title}`} class="w-full max-w-md border border-surface1 bg-crust p-2 shadow-float" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
-					<div class="flex gap-4 border-b border-surface0 p-3">
+				<div role="menu" tabindex="-1" aria-label={`Actions for ${albumMenu.title}`} class="min-w-0 w-full max-w-md overflow-hidden border border-surface1 bg-crust p-2 shadow-float" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+					<div class="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 border-b border-surface0 p-3">
 						<Cover {client} id={albumMenu.album?.cover_art_id ?? albumMenu.tracks[0]?.cover_art_id} title={albumMenu.title} class="size-24 shrink-0 rounded-sm" />
-						<div class="min-w-0 self-center">
-							<p class="truncate text-sm font-semibold text-text">{albumMenu.title}</p>
+						<div class="min-w-0 overflow-hidden self-center">
+							<p class="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold text-text" title={albumMenu.title}>{albumMenu.title}</p>
 							<p class="mt-1 truncate text-xs text-mauve">{albumMenu.album?.album_artist ?? albumMenu.album?.artist ?? albumMenu.tracks[0]?.album_artist ?? albumMenu.tracks[0]?.artist}</p>
 							<p class="mt-2 font-mono text-[10px] leading-5 text-overlay0">{albumMenu.tracks.length} {albumMenu.tracks.length === 1 ? 'track' : 'tracks'} · {formatTime(albumMenu.tracks.reduce((total, track) => total + (track.duration_seconds ?? 0), 0))}<br/>{formatBytes(albumMenu.tracks.reduce((total, track) => total + (track.file_size ?? 0), 0))}</p>
 						</div>
 					</div>
 					<button role="menuitem" onclick={() => starAlbumFromMenu(albumMenu.album)} disabled={!albumMenu.album} class="flex w-full items-center gap-3 px-3 py-3 text-left text-xs text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0"><Icon name="heart" size={15}/>{albumMenu.album && starredAlbumIds.has(albumMenu.album.id) ? 'Unstar album' : 'Star album'}</button>
-					<button role="menuitem" onclick={() => cacheAlbumFromMenu(albumMenu)} disabled={offlineOnly || albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) || cachingAlbumIds.has(albumMenu.key)} class="flex w-full items-center gap-3 px-3 py-3 text-left text-xs text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0"><Icon name={albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) ? 'cached' : 'download'} size={15}/>{albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) ? 'Album cached' : cachingAlbumIds.has(albumMenu.key) ? 'Downloading album…' : offlineOnly ? 'Unavailable offline' : 'Download album'}</button>
+					<button role="menuitem" onclick={() => cacheAlbumFromMenu(albumMenu)} disabled={offlineOnly || albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) || cachingAlbumIds.has(albumMenu.key)} class="flex w-full items-center gap-3 px-3 py-3 text-left text-xs text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0 {albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) ? '!text-green' : ''}">{#if !albumMenu.tracks.every((track) => cachedTrackIds.has(track.id))}<Icon name="download" size={15}/>{/if}{albumMenu.tracks.every((track) => cachedTrackIds.has(track.id)) ? 'Album cached' : cachingAlbumIds.has(albumMenu.key) ? 'Downloading album…' : offlineOnly ? 'Unavailable offline' : 'Download album'}</button>
 				</div>
 			</div>
 		{/if}
