@@ -1,6 +1,7 @@
 import { build, files, prerendered, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-${version}`;
+const APP_CACHE_PREFIX = "iroh-fm-";
 const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => {
@@ -22,25 +23,49 @@ const APP_SHELL = build.length === 0 ? [] : [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting()),
+    (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.addAll(APP_SHELL);
+      } catch (error) {
+        // Offline support is optional. A quota or transient Cache API failure
+        // must never prevent a newer network-safe worker from activating.
+        console.warn("[sw] app shell could not be cached", error);
+      }
+      await self.skipWaiting();
+    })(),
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
+    (async () => {
+      try {
+        const keys = await caches.keys();
+        const previous = keys
+          .filter(
+            (key) =>
+              key !== CACHE_NAME &&
+              key.startsWith(APP_CACHE_PREFIX) &&
+              !DATA_CACHE_NAMES.has(key),
+          )
+          .at(-1);
+        await Promise.all(
           keys
-            .filter((key) => key !== CACHE_NAME && !DATA_CACHE_NAMES.has(key))
+            .filter(
+              (key) =>
+                key !== CACHE_NAME &&
+                key !== previous &&
+                key.startsWith(APP_CACHE_PREFIX) &&
+                !DATA_CACHE_NAMES.has(key),
+            )
             .map((key) => caches.delete(key)),
-        ),
-      )
-      .then(() => self.clients.claim()),
+        );
+      } catch (error) {
+        console.warn("[sw] old app caches could not be cleaned", error);
+      }
+      await self.clients.claim();
+    })(),
   );
 });
 
@@ -55,25 +80,65 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       const url = new URL(event.request.url);
-      const cache = await caches.open(CACHE_NAME);
+      let cache;
 
-      if (APP_SHELL.includes(url.pathname)) {
-        const cached = await cache.match(url.pathname);
-        if (cached) return cached;
+      try {
+        cache = await caches.open(CACHE_NAME);
+      } catch (error) {
+        // Cache Storage can fail temporarily or after the origin reaches its
+        // quota. Continue as a transparent network proxy in that case.
+        console.warn("[sw] app cache is unavailable", error);
+      }
+
+      if (cache && APP_SHELL.includes(url.pathname)) {
+        try {
+          const cached = await cache.match(event.request, { ignoreSearch: true });
+          if (cached) return cached;
+        } catch (error) {
+          console.warn("[sw] cached app resource could not be read", error);
+        }
       }
 
       try {
-        return await fetch(event.request);
+        const response = await fetch(event.request);
+        if (response.ok) return response;
+
+        // A tab can briefly receive HTML from the previous deployment. Keep
+        // one prior app cache so its hashed modules still resolve safely.
+        const previous = await safeGlobalMatch(event.request);
+        return previous ?? response;
       } catch (error) {
-        const cached = await cache.match(event.request);
+        const cached = await safeGlobalMatch(event.request);
         if (cached) return cached;
 
         if (event.request.mode === "navigate") {
-          return (await cache.match(scoped("/"))) || cache.match(scoped("/index.html"));
+          const fallback =
+            (cache && (await safeCacheMatch(cache, scoped("/")))) ||
+            (cache && (await safeCacheMatch(cache, scoped("/index.html"))));
+          if (fallback) return fallback;
         }
 
-        throw error;
+        return new Response("This resource is temporarily unavailable.", {
+          status: 503,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
       }
     })(),
   );
 });
+
+async function safeGlobalMatch(request) {
+  try {
+    return (await caches.match(request, { ignoreSearch: true })) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function safeCacheMatch(cache, request) {
+  try {
+    return (await cache.match(request, { ignoreSearch: true })) ?? null;
+  } catch {
+    return null;
+  }
+}
