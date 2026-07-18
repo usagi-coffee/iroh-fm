@@ -92,6 +92,7 @@
 	let trackViewRevision = $state(0);
 	let albumGridElement = $state();
 	let albumColumns = $state(3);
+	let albumViewRevision = $state(0);
 
 	let settingsOpen = $state(false);
 	let settingsTicket = $state('');
@@ -647,27 +648,19 @@
 		trackList?.scrollToIndex(0);
 	}
 
-	async function showTrackView(starredOnly) {
+	function showAlbumView() {
+		albumViewRevision += 1;
+		mobilePane = 'albums';
+	}
+
+	function showTrackView(starredOnly, event) {
+		event?.preventDefault();
+		event?.stopPropagation();
 		favoriteOnly = starredOnly;
 		activeAlbumId = null;
 		query = '';
 		mobilePane = 'tracks';
-		trackViewRevision += 1;
-		await tick();
-		resetTrackScroll();
-		if (!starredOnly) return;
-		try {
-			const response = await client.request(starredKey ? { GetStarredWithKey: { key: starredKey } } : 'GetStarred');
-			starred = variant(response, 'Starred', starred);
-			starredTrackIds = new Set(starred.tracks.map((track) => track.id));
-			if (favoriteOnly) {
-				trackViewRevision += 1;
-				await tick();
-				resetTrackScroll();
-			}
-		} catch (error) {
-			connectionError = friendlyError(error, 'Could not refresh starred tracks.');
-		}
+		tick().then(resetTrackScroll);
 	}
 
 	async function selectAlbum(album) {
@@ -868,6 +861,22 @@
 	function tracksForAlbum(album) {
 		const ids = new Set(album.track_ids);
 		return tracks.filter((track) => ids.has(track.id)).sort(trackSort);
+	}
+
+	function cacheAlbumFromCard(album, event) {
+		event.stopPropagation();
+		const albumTracks = tracksForAlbum(album);
+		return cacheAlbumFromMenu({
+			album,
+			tracks: albumTracks,
+			title: album.title,
+			key: album.id
+		});
+	}
+
+	function starAlbumFromCard(album, event) {
+		event.stopPropagation();
+		return starAlbumFromMenu(album);
 	}
 
 	async function cacheAlbumFromMenu(menu) {
@@ -1152,9 +1161,9 @@
 		<header class="flex min-w-0 items-center border-b border-surface0 bg-crust text-[11px]">
 			<div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="iroh.fm" class="size-6" /></div>
 			<nav class="flex h-full min-w-0 items-stretch">
-				<button onclick={() => showTrackView(false)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">SONGS</button>
-				<button onclick={() => (mobilePane = 'albums')} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 lg:hidden {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
-				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">STARRED</button>
+				<button type="button" onclick={(event) => showTrackView(false, event)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">SONGS</button>
+				<button type="button" onclick={showAlbumView} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
+				<button type="button" onclick={(event) => showTrackView(true, event)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">STARRED</button>
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
 				<div class="hidden h-full min-w-0 items-center gap-2 border-l border-surface0 px-3 font-mono text-[9px] text-overlay1 lg:flex" title={`${connectionInfo.path_type}: ${connectionInfo.address || 'selecting path'} · ${formatBytes(connectionInfo.received_bytes)} received`}><span class="size-1.5 shrink-0 rounded-full {connectionInfo.address ? 'bg-green' : 'animate-pulse bg-yellow'}"></span><span class="max-w-44 truncate text-subtext0">{connectionAddressLabel(connectionInfo)}</span><span class="shrink-0 text-overlay0">↓ {formatBytes(connectionInfo.received_bytes)}</span></div>
@@ -1204,18 +1213,27 @@
 			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden'} lg:flex">
 				<div class="flex h-10 shrink-0 items-center border-b border-surface0 px-3"><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{visibleAlbums.length}{#if offlineOnly} / {albums.length}{/if}</span></div>
 				<div bind:this={albumGridElement} class="min-h-0 flex-1">
+					{#key albumViewRevision}
 					<VList data={albumRows} getKey={(row) => `${albumColumns}:${row.map((album) => album.id).join('|')}`} bufferSize={400} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(row, rowIndex)}
 							<div class="grid gap-3 px-3 pb-5" class:pt-3={rowIndex === 0} style={`grid-template-columns:repeat(${albumColumns},minmax(0,1fr))`}>
 								{#each row as album (album.id)}
 									<article oncontextmenu={(event) => openAlbumMenu(album, tracksForAlbum(album), event)} onpointerdown={(event) => beginAlbumLongPress(album, tracksForAlbum(album), event)} onpointerup={cancelLongPress} onpointercancel={cancelLongPress} onpointermove={moveLongPress} class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
-										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
+										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}">
+											<button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button>
+											<div class="absolute bottom-2 left-2 flex items-center gap-1.5">
+												<button onclick={(event) => starAlbumFromCard(album, event)} class="grid size-7 place-items-center rounded-full bg-crust/85 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 hover:bg-crust hover:text-pink {starredAlbumIds.has(album.id) ? 'pointer-events-auto translate-y-0 text-pink opacity-100' : 'pointer-events-none translate-y-1 text-subtext0 opacity-0'}" title={starredAlbumIds.has(album.id) ? 'Unstar album' : 'Star album'} aria-label={starredAlbumIds.has(album.id) ? `Unstar ${album.title}` : `Star ${album.title}`}><Icon name="heart" size={13}/></button>
+												<button onclick={(event) => cacheAlbumFromCard(album, event)} disabled={offlineOnly || cachedAlbumIds.has(album.id) || cachingAlbumIds.has(album.id)} class="pointer-events-none grid size-7 translate-y-1 place-items-center rounded-full bg-crust/85 text-subtext0 opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 hover:bg-crust hover:text-mauve disabled:cursor-default {cachedAlbumIds.has(album.id) ? '!text-green' : ''} {cachingAlbumIds.has(album.id) ? 'animate-pulse text-mauve' : ''}" title={cachedAlbumIds.has(album.id) ? 'Album cached' : cachingAlbumIds.has(album.id) ? 'Downloading album' : 'Download album'} aria-label={cachedAlbumIds.has(album.id) ? `${album.title} is cached` : `Download ${album.title}`}><Icon name={cachedAlbumIds.has(album.id) ? 'cached' : 'download'} size={13}/></button>
+											</div>
+											<button onclick={() => playAndSelectAlbum(album)} class="pointer-events-none absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button>
+										</div>
 										<button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
 									</article>
 								{/each}
 							</div>
 						{/snippet}
 					</VList>
+					{/key}
 				</div>
 			</aside>
 		</div>
