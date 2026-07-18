@@ -85,6 +85,8 @@ export class MusicClient {
     this.coverCache = new Map();
     /** @type {Map<string, Promise<Blob>>} */
     this.activeTrackRequests = new Map();
+    /** @type {Map<string, {received: number, total: number, listeners: Set<(received: number, total: number) => void>}>} */
+    this.trackProgress = new Map();
     /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
@@ -298,11 +300,15 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   async trackSource(id, onProgress = () => {}) {
+    const active = this.activeTrackRequests.get(id);
+    const unsubscribe = active ? this.subscribeTrackProgress(id, onProgress) : () => {};
     const cached = await this.cachedTrackBlob(id);
     if (cached) {
+      unsubscribe();
       onProgress(cached.size, cached.size);
       return new BlobTrackSource(cached, () => {});
     }
+    unsubscribe();
     if (this.offlineOnly) throw new Error("track is not available offline");
 
     this.audioOpenRequests += 1;
@@ -331,19 +337,24 @@ export class MusicClient {
       };
 
       try {
-        onProgress(0, fileSize);
+        /** @param {number} received @param {number} total */
+        const reportProgress = (received, total) => {
+          onProgress(received, total);
+          this.notifyTrackProgress(id, received, total);
+        };
+        reportProgress(0, fileSize);
         if (canUseMediaSource(contentType)) {
           return new ProgressiveTrackSource(
             stream,
             contentType,
             fileSize,
-            onProgress,
+            reportProgress,
             releaseAudioPriority,
             (blob) => this.rememberTrackBlob(id, blob),
           );
         }
 
-        const blob = await new Response(trackDownload(stream, fileSize, onProgress), {
+        const blob = await new Response(trackDownload(stream, fileSize, reportProgress), {
           headers: { "content-type": contentType },
         }).blob();
         this.rememberTrackBlob(id, blob);
@@ -361,15 +372,19 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id */
-  prefetchTrack(id) {
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  prefetchTrack(id, onProgress = () => {}) {
+    const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
-    if (existing) return existing.then(() => undefined);
+    if (existing) return existing.finally(unsubscribe).then(() => undefined);
 
     const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
-      if (cached) return cached;
+      if (cached) {
+        this.notifyTrackProgress(id, cached.size, cached.size);
+        return cached;
+      }
       if (this.offlineOnly) throw new Error("track is not available offline");
-      const blob = await this.downloadTrackBlob(id);
+      const blob = await this.downloadTrackBlob(id, (received, total) => this.notifyTrackProgress(id, received, total));
       await this.persistTrackBlob(id, blob);
       return blob;
     });
@@ -377,7 +392,31 @@ export class MusicClient {
     pending.finally(() => {
       if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
     }).catch(() => {});
-    return pending.then(() => undefined);
+    return pending.finally(unsubscribe).then(() => undefined);
+  }
+
+  /** @param {string} id @param {(received: number, total: number) => void} listener */
+  subscribeTrackProgress(id, listener) {
+    let state = this.trackProgress.get(id);
+    if (!state) {
+      state = { received: 0, total: 0, listeners: new Set() };
+      this.trackProgress.set(id, state);
+    }
+    state.listeners.add(listener);
+    listener(state.received, state.total);
+    return () => state.listeners.delete(listener);
+  }
+
+  /** @param {string} id @param {number} received @param {number} total */
+  notifyTrackProgress(id, received, total) {
+    let state = this.trackProgress.get(id);
+    if (!state) {
+      state = { received: 0, total: 0, listeners: new Set() };
+      this.trackProgress.set(id, state);
+    }
+    state.received = received;
+    state.total = total;
+    for (const listener of state.listeners) listener(received, total);
   }
 
   /** @param {string} id */
@@ -440,8 +479,8 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id */
-  async downloadTrackBlob(id) {
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async downloadTrackBlob(id, onProgress = () => {}) {
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
     this.inner.prioritizeAudio();
@@ -460,7 +499,8 @@ export class MusicClient {
 
       this.activeAudioSources += 1;
       try {
-        return await new Response(trackDownload(stream, fileSize, () => {}), {
+        onProgress(0, fileSize);
+        return await new Response(trackDownload(stream, fileSize, onProgress), {
           headers: { "content-type": contentType },
         }).blob();
       } finally {
@@ -485,6 +525,7 @@ export class MusicClient {
     }
     this.coverCache.clear();
     this.activeTrackRequests.clear();
+    this.trackProgress.clear();
     await this.inner.close();
     this.inner.free();
   }
