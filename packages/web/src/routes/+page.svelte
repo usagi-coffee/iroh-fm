@@ -150,7 +150,7 @@
 		for (const artist of starred.artists) {
 			for (const albumId of artist.album_ids) addAlbum(albumsById.get(albumId));
 		}
-		return [...byId.values()];
+		return [...byId.values()].sort(trackSort);
 	});
 	const filteredTracks = $derived(filterTracks((favoriteOnly ? starredTracks : playableLibraryTracks).filter((track) => !offlineOnly || cachedTrackIds.has(track.id)), query));
 	const trackListItems = $derived.by(() => {
@@ -176,7 +176,7 @@
 			if (albumKey !== previousAlbumKey) {
 				items.push({
 					kind: 'album',
-					key: `album:${albumKey}`,
+					key: `album:${albumKey}:${track.id}`,
 					title: album?.title ?? track.album,
 					artist: album?.album_artist ?? album?.artist ?? track.album_artist ?? track.artist,
 					coverArtId: album?.cover_art_id ?? track.cover_art_id,
@@ -1174,8 +1174,8 @@
 			</div>
 		</header>
 
-		<div class="grid min-h-0 lg:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-			<section class="min-h-0 flex-col border-r border-surface0 bg-base {mobilePane === 'tracks' ? 'flex' : 'hidden'} lg:flex">
+		<div class="grid min-h-0 {mobilePane === 'albums' ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]'}">
+			<section class="min-h-0 flex-col border-r border-surface0 bg-base {mobilePane === 'tracks' ? 'flex lg:flex' : 'hidden lg:hidden'}">
 				<div class="flex h-10 shrink-0 items-center gap-3 border-b border-surface0 bg-mantle px-3">
 					<Icon name="search" size={14}/><input value={query} oninput={updateQuery} placeholder="Filter artist, title, album…" class="min-w-0 flex-1 bg-transparent font-mono text-xs text-text outline-none placeholder:text-overlay0"/>
 					<span class="shrink-0 font-mono text-[10px] text-overlay0">{filteredTracks.length} / {summary.track_count}</span>
@@ -1210,7 +1210,7 @@
 				</div>
 			</section>
 
-			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden'} lg:flex">
+			<aside class="min-h-0 flex-col bg-mantle {mobilePane === 'albums' ? 'flex' : 'hidden lg:flex'}">
 				<div class="flex h-10 shrink-0 items-center border-b border-surface0 px-3"><strong class="text-xs">ALBUMS</strong><span class="ml-2 font-mono text-[10px] text-overlay0">{visibleAlbums.length}{#if offlineOnly} / {albums.length}{/if}</span></div>
 				<div bind:this={albumGridElement} class="min-h-0 flex-1">
 					{#key albumViewRevision}
