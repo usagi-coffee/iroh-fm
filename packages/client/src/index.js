@@ -2,6 +2,7 @@ let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
 const MAX_CONCURRENT_COVER_FETCHES = 8;
+const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /** @param {string} remoteId @param {string} coverId */
@@ -58,6 +59,9 @@ export class MusicClient {
     /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
+    this.coverFetchPaused = false;
+    this.audioOpenRequests = 0;
+    this.activeAudioSources = 0;
     this.closed = false;
   }
 
@@ -191,9 +195,13 @@ export class MusicClient {
   }
 
   drainCoverFetchQueue() {
+    const concurrency = this.activeAudioSources > 0
+      ? MAX_COVER_FETCHES_DURING_AUDIO
+      : MAX_CONCURRENT_COVER_FETCHES;
     while (
       !this.closed &&
-      this.activeCoverFetches < MAX_CONCURRENT_COVER_FETCHES &&
+      !this.coverFetchPaused &&
+      this.activeCoverFetches < concurrency &&
       this.coverFetchQueue.length > 0
     ) {
       const job = this.coverFetchQueue.shift();
@@ -201,7 +209,10 @@ export class MusicClient {
       this.activeCoverFetches += 1;
       Promise.resolve()
         .then(() => this.inner.fetchCover(job.id))
-        .then(job.resolve, job.reject)
+        .then(job.resolve, (error) => {
+          if (this.coverFetchPaused && !this.closed) this.coverFetchQueue.unshift(job);
+          else job.reject(error);
+        })
         .finally(() => {
           this.activeCoverFetches -= 1;
           this.drainCoverFetchQueue();
@@ -211,24 +222,49 @@ export class MusicClient {
 
   /** @param {string} id */
   async trackSource(id) {
-    const media = await this.inner.openTrack(id);
-    let stream;
-    let contentType;
+    this.audioOpenRequests += 1;
+    this.coverFetchPaused = true;
+    this.inner.prioritizeAudio();
     try {
-      contentType = media.contentType;
-      stream = media.takeStream();
+      const media = await this.inner.openTrack(id);
+      let stream;
+      let contentType;
+      try {
+        contentType = media.contentType;
+        stream = media.takeStream();
+      } finally {
+        media.free();
+      }
+
+      this.activeAudioSources += 1;
+      let released = false;
+      const releaseAudioPriority = () => {
+        if (released) return;
+        released = true;
+        this.activeAudioSources = Math.max(0, this.activeAudioSources - 1);
+        queueMicrotask(() => this.drainCoverFetchQueue());
+      };
+
+      try {
+        if (canUseMediaSource(contentType)) {
+          return new ProgressiveTrackSource(stream, contentType, releaseAudioPriority);
+        }
+
+        const blob = await new Response(stream, {
+          headers: { "content-type": contentType },
+        }).blob();
+        return new BlobTrackSource(blob, releaseAudioPriority);
+      } catch (error) {
+        releaseAudioPriority();
+        throw error;
+      }
     } finally {
-      media.free();
+      this.audioOpenRequests -= 1;
+      if (this.audioOpenRequests === 0) {
+        this.coverFetchPaused = false;
+        this.drainCoverFetchQueue();
+      }
     }
-
-    if (canUseMediaSource(contentType)) {
-      return new ProgressiveTrackSource(stream, contentType);
-    }
-
-    const blob = await new Response(stream, {
-      headers: { "content-type": contentType },
-    }).blob();
-    return new BlobTrackSource(blob);
   }
 
   async close() {
@@ -245,11 +281,12 @@ export class MusicClient {
 }
 
 class BlobTrackSource {
-  /** @param {Blob} blob */
-  constructor(blob) {
+  /** @param {Blob} blob @param {() => void} releaseAudioPriority */
+  constructor(blob, releaseAudioPriority) {
     this.url = URL.createObjectURL(blob);
     this.done = Promise.resolve();
     this.disposed = false;
+    this.releaseAudioPriority = releaseAudioPriority;
   }
 
   async start() {}
@@ -257,13 +294,14 @@ class BlobTrackSource {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.releaseAudioPriority();
     URL.revokeObjectURL(this.url);
   }
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType */
-  constructor(stream, contentType) {
+  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {() => void} releaseAudioPriority */
+  constructor(stream, contentType, releaseAudioPriority) {
     this.stream = stream;
     this.contentType = contentType;
     this.mediaSource = new MediaSource();
@@ -271,6 +309,7 @@ class ProgressiveTrackSource {
     this.reader = stream.getReader();
     this.done = Promise.resolve();
     this.disposed = false;
+    this.releaseAudioPriority = releaseAudioPriority;
     /** @type {null | (() => void)} */
     this.cancelOpen = null;
   }
@@ -339,6 +378,7 @@ class ProgressiveTrackSource {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.releaseAudioPriority();
     this.cancelOpen?.();
     this.reader.cancel().catch(() => {});
     this.finishMediaSource();

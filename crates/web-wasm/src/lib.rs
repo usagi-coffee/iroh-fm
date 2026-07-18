@@ -1,6 +1,9 @@
-use std::{fmt::Write, str::FromStr};
+use std::{cell::RefCell, fmt::Write, rc::Rc, str::FromStr};
 
-use futures_util::StreamExt;
+use futures_util::{
+    StreamExt,
+    future::{AbortHandle, Abortable},
+};
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, endpoint::Connection,
     endpoint::presets,
@@ -29,6 +32,7 @@ pub struct IrohFmClient {
     endpoint: Endpoint,
     connection: Connection,
     remote_id: String,
+    cover_requests: Rc<RefCell<Vec<AbortHandle>>>,
 }
 
 #[wasm_bindgen]
@@ -91,17 +95,34 @@ impl IrohFmClient {
     /// Fetch artwork without expanding its byte payload across JSON/JS arrays.
     #[wasm_bindgen(js_name = fetchCover)]
     pub async fn fetch_cover(&self, cover_art_id: String) -> Result<MediaBytes, JsError> {
-        match self
-            .rpc(BackendRequest::GetCoverArt {
+        let (abort_handle, abort_registration) = AbortHandle::new_pair();
+        self.cover_requests.borrow_mut().push(abort_handle.clone());
+        let response = Abortable::new(
+            self.rpc(BackendRequest::GetCoverArt {
                 cover_art_id: CoverArtId(cover_art_id),
-            })
-            .await?
-        {
+            }),
+            abort_registration,
+        )
+        .await;
+        abort_handle.abort();
+        self.cover_requests
+            .borrow_mut()
+            .retain(|handle| !handle.is_aborted());
+        match response.map_err(|_| js_error("cover request preempted by audio playback"))?? {
             BackendResponse::CoverArt(cover) => Ok(MediaBytes {
                 content_type: cover.content_type,
                 bytes: cover.bytes,
             }),
             response => Err(unexpected_response("cover art", &response)),
+        }
+    }
+
+    /// Cancel in-flight artwork streams so an explicitly selected track can
+    /// open immediately on constrained relay connections.
+    #[wasm_bindgen(js_name = prioritizeAudio)]
+    pub fn prioritize_audio(&self) {
+        for request in self.cover_requests.borrow_mut().drain(..) {
+            request.abort();
         }
     }
 
@@ -269,6 +290,7 @@ impl IrohFmClient {
             endpoint,
             connection,
             remote_id,
+            cover_requests: Rc::new(RefCell::new(Vec::new())),
         })
     }
 

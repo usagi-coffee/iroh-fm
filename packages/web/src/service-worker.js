@@ -44,6 +44,11 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "version" && event.data?.type !== "user") return;
+  event.ports[0]?.postMessage({ type: "version", version });
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 

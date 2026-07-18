@@ -529,11 +529,22 @@
 		trackViewRevision += 1;
 		const albumTrackIds = new Set(album.track_ids);
 		const firstTrack = tracks.find((track) => albumTrackIds.has(track.id));
-		if (!firstTrack) return;
+		if (!firstTrack) return null;
 		selectedTrackId = firstTrack.id;
 		await tick();
 		const index = filteredTracks.findIndex((track) => track.id === firstTrack.id);
-		if (index >= 0) trackList?.scrollToIndex(index, { align: 'start' });
+		if (index >= 0) trackList?.scrollToIndex(index, { align: 'center' });
+		return firstTrack;
+	}
+
+	async function activateAlbum(album) {
+		const firstTrack = await selectAlbum(album);
+		if (firstTrack && window.matchMedia('(max-width: 1023px)').matches) await playAlbum(album);
+	}
+
+	async function playAndSelectAlbum(album) {
+		const firstTrack = await selectAlbum(album);
+		if (firstTrack) await playAlbum(album);
 	}
 
 	function clearAlbum() {
@@ -614,12 +625,8 @@
 	}
 
 	async function playFromTrackList(track, sourceQueue = filteredTracks) {
-		const playback = playOrToggle(track, sourceQueue);
 		selectedTrackId = track.id;
-		await tick();
-		const index = filteredTracks.findIndex((entry) => entry.id === track.id);
-		if (index >= 0) trackList?.scrollToIndex(index, { align: 'center' });
-		await playback;
+		await playOrToggle(track, sourceQueue);
 	}
 
 	function stopPlayback() {
@@ -717,7 +724,7 @@
 {#if !client}
 	<main class="relative h-dvh overflow-hidden bg-base text-text">
 		<div class="absolute inset-0 hidden grid-rows-[34px_minmax(0,1fr)_72px] select-none opacity-65 sm:grid" aria-hidden="true">
-			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-6" /></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">ALL TRACKS</span><span class="px-4 font-semibold text-overlay1">LOVED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
+			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-6" /></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">SONGS</span><span class="px-4 font-semibold text-overlay1">LOVED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
 			<div class="grid min-h-0 grid-cols-[minmax(0,2fr)_minmax(330px,1fr)]">
 				<section class="min-h-0 border-r border-surface0 bg-base"><div class="flex h-10 items-center gap-3 border-b border-surface0 bg-mantle px-3 text-overlay0"><Icon name="search" size={14}/><span class="font-mono text-xs">Filter artist, title, album…</span><span class="ml-auto font-mono text-[10px]">128 TRACKS</span></div><div class="grid h-7 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0"><span>#</span><span>Artist</span><span>Title</span><span>Album</span><span>Time</span></div>{#each DEMO_TRACKS as track}<div class="grid h-[30px] grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0/40 px-2 text-[11px]"><span class="font-mono text-overlay0">{track[0]}</span><span class="truncate pr-2 text-mauve">{track[1]}</span><span class="truncate pr-2 text-teal">{track[2]}</span><span class="truncate pr-2 text-subtext0">{track[3]}</span><span class="font-mono text-overlay0">{track[4]}</span></div>{/each}</section>
 				<aside class="min-h-0 bg-mantle p-3"><div class="mb-3 flex h-7 items-center justify-between"><strong class="text-xs">ALBUMS</strong><span class="font-mono text-[10px] text-overlay0">24</span></div><div class="grid grid-cols-3 gap-x-3 gap-y-5">{#each DEMO_ALBUMS as album, index}<article class="min-w-0"><div class={`grid aspect-square place-items-center bg-gradient-to-br ${album[2]}`}><div class="grid size-1/2 place-items-center rounded-full border border-crust/20 bg-crust/25"><div class="size-2 rounded-full bg-text/50"></div></div></div><h3 class="mt-2 truncate text-[11px] font-semibold">{album[0]}</h3><p class="truncate text-[10px] text-overlay1">{album[1]}</p></article>{/each}</div></aside>
@@ -755,9 +762,9 @@
 		<header class="flex min-w-0 items-center border-b border-surface0 bg-crust text-[11px]">
 			<div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="iroh.fm" class="size-6" /></div>
 			<nav class="flex h-full min-w-0 items-stretch">
-				<button onclick={() => showTrackView(false)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">ALL TRACKS</button>
-				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">LOVED</button>
+				<button onclick={() => showTrackView(false)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">SONGS</button>
 				<button onclick={() => (mobilePane = 'albums')} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 lg:hidden {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
+				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">LOVED</button>
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
@@ -800,8 +807,8 @@
 							<div class="grid gap-3 px-3 pb-5" class:pt-3={rowIndex === 0} style={`grid-template-columns:repeat(${albumColumns},minmax(0,1fr))`}>
 								{#each row as album (album.id)}
 									<article class="group min-w-0 {activeAlbumId === album.id ? 'text-mauve' : ''}">
-										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => selectAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
-										<button onclick={() => selectAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
+										<div class="relative border-2 bg-base transition {activeAlbumId === album.id ? 'border-mauve' : 'border-transparent hover:border-surface2'}"><button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="block w-full"><Cover {client} id={album.cover_art_id} title={album.title} class="w-full" /></button><button onclick={() => playAndSelectAlbum(album)} class="absolute bottom-2 right-2 grid size-8 translate-y-1 place-items-center rounded-full bg-mauve text-crust opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"><Icon name="play" size={13}/></button></div>
+										<button onclick={() => activateAlbum(album)} ondblclick={() => playAlbum(album)} class="mt-2 block w-full text-left"><h3 class="truncate text-[11px] font-semibold text-text">{album.title}</h3><p class="mt-0.5 truncate text-[10px] text-overlay1">{album.album_artist || album.artist}</p></button>
 									</article>
 								{/each}
 							</div>
@@ -816,7 +823,7 @@
 			<div class="grid h-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-3 pt-1 sm:px-5">
 				<div class="flex items-center gap-1 text-overlay1"><button onclick={() => (shuffle = !shuffle)} class="hidden size-8 place-items-center hover:text-text sm:grid {shuffle ? 'text-teal' : ''}" title="Shuffle"><Icon name="shuffle" size={14}/></button><button onclick={() => skip(-1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="previous" size={16}/></button><button onclick={togglePlayback} disabled={!currentTrack || audioLoading} class="grid size-10 place-items-center bg-text text-crust hover:bg-mauve disabled:opacity-30">{#if audioLoading}<span class="size-3 animate-spin rounded-full border-2 border-crust/30 border-t-crust"></span>{:else if playing}<Icon name="pause" size={15}/>{:else}<Icon name="play" size={15}/>{/if}</button><button onclick={() => skip(1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="next" size={16}/></button><button onclick={() => (repeat = !repeat)} class="hidden size-8 place-items-center hover:text-text sm:grid {repeat ? 'text-teal' : ''}" title="Repeat"><Icon name="repeat" size={14}/></button></div>
 
-				<div class="flex min-w-0 items-center gap-3">{#if currentTrack}<Cover {client} id={currentTrack.cover_art_id} title={currentTrack.album} class="hidden size-12 shrink-0 sm:block" />{/if}<div class="min-w-0"><p class="truncate text-xs font-semibold">{currentTrack?.title || 'Nothing playing'}</p><p class="mt-1 truncate text-[10px] text-overlay1">{#if playerError}<span class="text-red">{playerError}</span>{:else if currentTrack}{currentTrack.artist} · {currentTrack.album}{:else}{summary.track_count} tracks · {summary.album_count} albums{/if}</p></div></div>
+				<div class="flex min-w-0 items-center gap-3">{#if currentTrack}<Cover {client} id={currentTrack.cover_art_id} title={currentTrack.album} class="size-10 shrink-0 sm:size-12" />{/if}<div class="min-w-0"><p class="truncate text-xs font-semibold">{currentTrack?.title || 'Nothing playing'}</p><p class="mt-1 truncate text-[10px] text-overlay1">{#if playerError}<span class="text-red">{playerError}</span>{:else if currentTrack}{currentTrack.artist} · {currentTrack.album}{:else}{summary.track_count} tracks · {summary.album_count} albums{/if}</p></div></div>
 
 				<div class="flex items-center gap-3"><span class="hidden font-mono text-[10px] text-overlay0 md:block">{formatTime(currentTime)} / {formatTime(duration || currentTrack?.duration_seconds)}</span><div class="hidden items-center gap-2 text-overlay1 sm:flex"><Icon name="volume" size={14}/><input type="range" min="0" max="1" step="0.01" value={volume} oninput={changeVolume} class="h-1 w-20 cursor-pointer accent-teal" aria-label="Volume"/></div></div>
 			</div>
