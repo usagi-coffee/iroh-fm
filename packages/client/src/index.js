@@ -108,6 +108,10 @@ export class MusicClient {
     return this.inner.remoteId;
   }
 
+  connectionInfo() {
+    return JSON.parse(this.inner.connectionInfo());
+  }
+
   /** @param {unknown} request */
   async request(request) {
     return JSON.parse(await this.inner.request(JSON.stringify(request)));
@@ -222,8 +226,8 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id */
-  async trackSource(id) {
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async trackSource(id, onProgress = () => {}) {
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
     this.inner.prioritizeAudio();
@@ -231,8 +235,10 @@ export class MusicClient {
       const media = await this.inner.openTrack(id);
       let stream;
       let contentType;
+      let fileSize;
       try {
         contentType = media.contentType;
+        fileSize = Number(media.fileSize);
         stream = media.takeStream();
       } finally {
         media.free();
@@ -248,11 +254,18 @@ export class MusicClient {
       };
 
       try {
+        onProgress(0, fileSize);
         if (canUseMediaSource(contentType)) {
-          return new ProgressiveTrackSource(stream, contentType, releaseAudioPriority);
+          return new ProgressiveTrackSource(
+            stream,
+            contentType,
+            fileSize,
+            onProgress,
+            releaseAudioPriority,
+          );
         }
 
-        const blob = await new Response(stream, {
+        const blob = await new Response(trackDownload(stream, fileSize, onProgress), {
           headers: { "content-type": contentType },
         }).blob();
         return new BlobTrackSource(blob, releaseAudioPriority);
@@ -302,13 +315,16 @@ class BlobTrackSource {
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {() => void} releaseAudioPriority */
-  constructor(stream, contentType, releaseAudioPriority) {
+  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority */
+  constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority) {
     this.stream = stream;
     this.contentType = contentType;
     this.mediaSource = new MediaSource();
     this.url = URL.createObjectURL(this.mediaSource);
     this.reader = stream.getReader();
+    this.fileSize = fileSize;
+    this.received = 0;
+    this.onProgress = onProgress;
     this.done = Promise.resolve();
     this.disposed = false;
     this.releaseAudioPriority = releaseAudioPriority;
@@ -324,9 +340,11 @@ class ProgressiveTrackSource {
     const sourceBuffer = this.mediaSource.addSourceBuffer(this.contentType);
     const first = await this.reader.read();
     if (first.done) {
+      this.onProgress(this.fileSize, this.fileSize);
       this.finishMediaSource();
       return;
     }
+    this.reportChunk(first.value);
     await appendBuffer(sourceBuffer, first.value);
     this.done = this.pump(sourceBuffer);
   }
@@ -337,12 +355,22 @@ class ProgressiveTrackSource {
       while (!this.disposed) {
         const chunk = await this.reader.read();
         if (chunk.done) break;
+        this.reportChunk(chunk.value);
         await appendBuffer(sourceBuffer, chunk.value);
       }
-      if (!this.disposed) this.finishMediaSource();
+      if (!this.disposed) {
+        this.onProgress(this.fileSize, this.fileSize);
+        this.finishMediaSource();
+      }
     } catch (error) {
       if (!this.disposed) throw error;
     }
+  }
+
+  /** @param {Uint8Array} chunk */
+  reportChunk(chunk) {
+    this.received += chunk.byteLength;
+    this.onProgress(this.received, this.fileSize);
   }
 
   /** @returns {Promise<void>} */
@@ -386,6 +414,28 @@ class ProgressiveTrackSource {
     this.finishMediaSource();
     URL.revokeObjectURL(this.url);
   }
+}
+
+/** @param {ReadableStream<Uint8Array>} stream @param {number} total @param {(received: number, total: number) => void} onProgress */
+function trackDownload(stream, total, onProgress) {
+  const reader = stream.getReader();
+  let received = 0;
+  return new ReadableStream({
+    async pull(controller) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        onProgress(total, total);
+        controller.close();
+        return;
+      }
+      received += chunk.value.byteLength;
+      onProgress(received, total);
+      controller.enqueue(chunk.value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
 
 /** @param {string} contentType */

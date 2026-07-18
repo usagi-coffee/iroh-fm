@@ -4,6 +4,6 @@ export const ssr = false;
 export const prerender = true;
 
 /** @type {import('./$types').LayoutLoad} */
-export async function load() {
-	await ensure_service_worker();
+export function load() {
+	return { serviceWorkerReady: ensure_service_worker() };
 }

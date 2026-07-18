@@ -5,7 +5,7 @@ use futures_util::{
     future::{AbortHandle, Abortable},
 };
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, endpoint::Connection,
+    Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, TransportAddr, endpoint::Connection,
     endpoint::presets,
 };
 use iroh_tickets::endpoint::EndpointTicket;
@@ -81,6 +81,27 @@ impl IrohFmClient {
         self.remote_id.clone()
     }
 
+    #[wasm_bindgen(js_name = connectionInfo)]
+    pub fn connection_info(&self) -> Result<String, JsError> {
+        let paths = self.connection.paths();
+        let selected = paths.iter().find(|path| path.is_selected());
+        let (path_type, address) = match selected {
+            Some(path) => match path.remote_addr() {
+                TransportAddr::Relay(relay) => ("relay", relay.to_string()),
+                TransportAddr::Ip(address) => ("direct", address.to_string()),
+                TransportAddr::Custom(address) => ("custom", format!("{address:?}")),
+                other => ("unknown", format!("{other:?}")),
+            },
+            None => ("unknown", String::new()),
+        };
+        serde_json::to_string(&ConnectionInfo {
+            path_type,
+            address,
+            received_bytes: self.connection.stats().udp_rx.bytes,
+        })
+        .map_err(to_js_error)
+    }
+
     /// Execute any non-streaming BackendRequest. JSON keeps the JS boundary
     /// stable and exactly matches the serde protocol used by the Rust server.
     pub async fn request(&self, request_json: String) -> Result<String, JsError> {
@@ -151,6 +172,7 @@ impl IrohFmClient {
         });
         Ok(MediaStream {
             content_type: descriptor.content_type,
+            file_size: descriptor.file_size,
             stream: Some(ReadableStream::from_stream(stream).into_raw()),
         })
     }
@@ -167,6 +189,13 @@ impl IrohFmClient {
 pub struct ClientIdentity {
     secret: String,
     endpoint_id: String,
+}
+
+#[derive(serde::Serialize)]
+struct ConnectionInfo {
+    path_type: &'static str,
+    address: String,
+    received_bytes: u64,
 }
 
 #[wasm_bindgen]
@@ -231,6 +260,7 @@ fn ticket_address(ticket: &EndpointTicket) -> TicketAddress {
 #[wasm_bindgen]
 pub struct MediaStream {
     content_type: String,
+    file_size: u64,
     stream: Option<JsReadableStream>,
 }
 
@@ -239,6 +269,11 @@ impl MediaStream {
     #[wasm_bindgen(getter, js_name = contentType)]
     pub fn content_type(&self) -> String {
         self.content_type.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = fileSize)]
+    pub fn file_size(&self) -> f64 {
+        self.file_size as f64
     }
 
     /// Transfer ownership of the receive stream to JavaScript.

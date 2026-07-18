@@ -8,7 +8,7 @@ const scoped = (path) => {
   if (path === "/") return `${SCOPE_PATH}/`;
   return `${SCOPE_PATH}${path}`;
 };
-const APP_SHELL = [
+const APP_SHELL = build.length === 0 ? [] : [
   ...new Set(
     [
       ...build,

@@ -45,6 +45,7 @@
 	let connectionStep = $state('Connecting to the iroh server…');
 	let connectionError = $state('');
 	let client = $state(null);
+	let connectionInfo = $state({ path_type: 'unknown', address: '', received_bytes: 0 });
 
 	let summary = $state({ artist_count: 0, album_count: 0, track_count: 0 });
 	let albums = $state([]);
@@ -69,8 +70,8 @@
 	let settingsEndpoint = $state('');
 	let settingsRelays = $state(['']);
 	let settingsSecret = $state('');
-	let lovedKey = $state('');
-	let settingsLovedKey = $state('');
+	let starredKey = $state('');
+	let settingsStarredKey = $state('');
 	let settingsShowSecret = $state(false);
 	let endpointCopied = $state(false);
 	let ticketLinkCopied = $state(false);
@@ -82,6 +83,7 @@
 	let queue = $state([]);
 	let playing = $state(false);
 	let audioLoading = $state(false);
+	let audioDownloadProgress = $state(0);
 	let playerError = $state('');
 	let currentTime = $state(0);
 	let duration = $state(0);
@@ -99,7 +101,7 @@
 	let autoConnectAttempted = false;
 
 	const activeAlbum = $derived(albums.find((album) => album.id === activeAlbumId) ?? null);
-	const lovedTracks = $derived.by(() => {
+	const starredTracks = $derived.by(() => {
 		const byId = new Map(starred.tracks.map((track) => [track.id, track]));
 		const tracksById = new Map(tracks.map((track) => [track.id, track]));
 		const albumsById = new Map(albums.map((album) => [album.id, album]));
@@ -116,7 +118,43 @@
 		}
 		return [...byId.values()];
 	});
-	const filteredTracks = $derived(filterTracks(favoriteOnly ? lovedTracks : tracks, query));
+	const filteredTracks = $derived(filterTracks(favoriteOnly ? starredTracks : tracks, query));
+	const trackListItems = $derived.by(() => {
+		const albumByTrackId = new Map();
+		for (const album of albums) {
+			for (const trackId of album.track_ids) albumByTrackId.set(trackId, album);
+		}
+		const durationByAlbum = new Map();
+		const tracksByAlbum = new Map();
+		for (const track of tracks) {
+			const album = albumByTrackId.get(track.id);
+			const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
+			durationByAlbum.set(albumKey, (durationByAlbum.get(albumKey) ?? 0) + (track.duration_seconds ?? 0));
+			const albumTracks = tracksByAlbum.get(albumKey) ?? [];
+			albumTracks.push(track);
+			tracksByAlbum.set(albumKey, albumTracks);
+		}
+		const items = [];
+		let previousAlbumKey = null;
+		for (const [trackIndex, track] of filteredTracks.entries()) {
+			const album = albumByTrackId.get(track.id);
+			const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
+			if (albumKey !== previousAlbumKey) {
+				items.push({
+					kind: 'album',
+					key: `album:${albumKey}`,
+					title: album?.title ?? track.album,
+					artist: album?.album_artist ?? album?.artist ?? track.album_artist ?? track.artist,
+					coverArtId: album?.cover_art_id ?? track.cover_art_id,
+					durationSeconds: album?.duration_seconds ?? durationByAlbum.get(albumKey) ?? 0,
+					tracks: tracksByAlbum.get(albumKey) ?? [track]
+				});
+				previousAlbumKey = albumKey;
+			}
+			items.push({ kind: 'track', key: `track:${track.id}`, track, trackIndex });
+		}
+		return items;
+	});
 	const albumRows = $derived.by(() => {
 		const rows = [];
 		for (let index = 0; index < albums.length; index += albumColumns) {
@@ -130,7 +168,12 @@
 		endpoint = localStorage.getItem('iroh-fm-endpoint') ?? '';
 		relays = readStoredRelays();
 		secret = localStorage.getItem('iroh-fm-secret') ?? '';
-		lovedKey = localStorage.getItem('iroh-fm-loved-key') ?? '';
+		starredKey = localStorage.getItem('iroh-fm-starred-key') ?? localStorage.getItem('iroh-fm-loved-key') ?? '';
+		const storedVolume = localStorage.getItem('iroh-fm-volume');
+		if (storedVolume !== null) {
+			const parsedVolume = Number(storedVolume);
+			if (Number.isFinite(parsedVolume)) volume = Math.min(1, Math.max(0, parsedVolume));
+		}
 		const importConnection = () => {
 			const linked = connectionFromHash(location.hash);
 			if (linked.ticket) ticket = linked.ticket;
@@ -165,6 +208,23 @@
 		const observer = new ResizeObserver((entries) => update(entries[0]?.contentRect.width ?? 0));
 		observer.observe(albumGridElement);
 		return () => observer.disconnect();
+	});
+
+	$effect(() => {
+		if (!client) {
+			connectionInfo = { path_type: 'unknown', address: '', received_bytes: 0 };
+			return;
+		}
+		const update = () => {
+			try {
+				connectionInfo = client.connectionInfo();
+			} catch {
+				// The connection may be closing while the settings are being applied.
+			}
+		};
+		update();
+		const interval = setInterval(update, 1000);
+		return () => clearInterval(interval);
 	});
 
 	function variant(response, key, fallback) {
@@ -363,7 +423,7 @@
 				secret
 			});
 			connectionStep = 'Indexing the remote library…';
-			const data = await nextClient.bootstrap(lovedKey);
+			const data = await nextClient.bootstrap(starredKey);
 			client = nextClient;
 			summary = variant(data.summary, 'LibrarySummary', summary);
 			albums = variant(data.albums, 'Albums', []).sort(albumSort);
@@ -404,7 +464,7 @@
 		settingsEndpoint = endpoint;
 		settingsRelays = [...relays];
 		settingsSecret = secret;
-		settingsLovedKey = lovedKey;
+		settingsStarredKey = starredKey;
 		settingsShowSecret = false;
 		settingsOpen = true;
 		if (settingsTicket.trim()) syncSettingsTicketAddress(settingsTicket);
@@ -428,9 +488,10 @@
 		endpoint = settingsEndpoint.trim();
 		relays = [...settingsRelays];
 		secret = nextSecret;
-		lovedKey = settingsLovedKey.trim();
-		if (lovedKey) localStorage.setItem('iroh-fm-loved-key', lovedKey);
-		else localStorage.removeItem('iroh-fm-loved-key');
+		starredKey = settingsStarredKey.trim();
+		if (starredKey) localStorage.setItem('iroh-fm-starred-key', starredKey);
+		else localStorage.removeItem('iroh-fm-starred-key');
+		localStorage.removeItem('iroh-fm-loved-key');
 		persistConnection(ticket, endpoint, relays, secret);
 		settingsOpen = false;
 		await disconnect();
@@ -505,17 +566,17 @@
 		trackList?.scrollToIndex(0);
 	}
 
-	async function showTrackView(lovedOnly) {
-		favoriteOnly = lovedOnly;
+	async function showTrackView(starredOnly) {
+		favoriteOnly = starredOnly;
 		activeAlbumId = null;
 		query = '';
 		mobilePane = 'tracks';
 		trackViewRevision += 1;
 		await tick();
 		resetTrackScroll();
-		if (!lovedOnly) return;
+		if (!starredOnly) return;
 		try {
-			const response = await client.request(lovedKey ? { GetStarredWithKey: { key: lovedKey } } : 'GetStarred');
+			const response = await client.request(starredKey ? { GetStarredWithKey: { key: starredKey } } : 'GetStarred');
 			starred = variant(response, 'Starred', starred);
 			starredTrackIds = new Set(starred.tracks.map((track) => track.id));
 			if (favoriteOnly) {
@@ -524,7 +585,7 @@
 				resetTrackScroll();
 			}
 		} catch (error) {
-			connectionError = friendlyError(error, 'Could not refresh loved tracks.');
+			connectionError = friendlyError(error, 'Could not refresh starred tracks.');
 		}
 	}
 
@@ -539,7 +600,7 @@
 		if (!firstTrack) return null;
 		selectedTrackId = firstTrack.id;
 		await tick();
-		const index = filteredTracks.findIndex((track) => track.id === firstTrack.id);
+		const index = trackListItems.findIndex((item) => item.kind === 'track' && item.track.id === firstTrack.id);
 		if (index >= 0) trackList?.scrollToIndex(index, { align: 'center' });
 		return firstTrack;
 	}
@@ -562,8 +623,8 @@
 		event?.stopPropagation();
 		const shouldStar = !starredTrackIds.has(track.id);
 		try {
-			await client.request(lovedKey
-				? { SetStarredWithKey: { id: track.id, starred: shouldStar, key: lovedKey } }
+			await client.request(starredKey
+				? { SetStarredWithKey: { id: track.id, starred: shouldStar, key: starredKey } }
 				: { SetStarred: { id: track.id, starred: shouldStar } });
 			const next = new Set(starredTrackIds);
 			if (shouldStar) next.add(track.id);
@@ -600,9 +661,13 @@
 		currentTime = 0;
 		duration = track.duration_seconds || 0;
 		audioLoading = true;
+		audioDownloadProgress = 0;
 		playing = false;
 		try {
-			const source = await client.trackSource(track.id);
+			const source = await client.trackSource(track.id, (received, total) => {
+				if (generation !== playGeneration || total <= 0) return;
+				audioDownloadProgress = Math.min(1, received / total);
+			});
 			if (generation !== playGeneration) {
 				source.dispose();
 				return;
@@ -649,6 +714,7 @@
 		playing = false;
 		currentTime = 0;
 		duration = 0;
+		audioDownloadProgress = 0;
 	}
 
 	async function togglePlayback() {
@@ -689,7 +755,8 @@
 	}
 
 	function changeVolume(event) {
-		volume = Number(event.currentTarget.value);
+		volume = Math.min(1, Math.max(0, Number(event.currentTarget.value)));
+		localStorage.setItem('iroh-fm-volume', String(volume));
 		if (audio) audio.volume = volume;
 	}
 
@@ -702,8 +769,8 @@
 	}
 
 	function trackSort(left, right) {
-		return left.artist.localeCompare(right.artist, undefined, { numeric: true })
-			|| left.album.localeCompare(right.album, undefined, { numeric: true })
+		return left.album.localeCompare(right.album, undefined, { numeric: true })
+			|| left.artist.localeCompare(right.artist, undefined, { numeric: true })
 			|| (left.disc_number || 0) - (right.disc_number || 0)
 			|| (left.track_number || 0) - (right.track_number || 0)
 			|| left.title.localeCompare(right.title, undefined, { numeric: true });
@@ -717,6 +784,24 @@
 	function formatTime(seconds) {
 		if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
 		return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+	}
+
+	function formatBytes(bytes) {
+		if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+		const unit = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+		const value = bytes / 1024 ** unit;
+		return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+	}
+
+	function connectionAddressLabel(info) {
+		if (!info.address) return 'CONNECTING';
+		if (info.path_type !== 'relay') return info.path_type.toUpperCase();
+		try {
+			return new URL(info.address).host;
+		} catch {
+			return info.address;
+		}
 	}
 
 	function friendlyError(error, fallback) {
@@ -733,7 +818,7 @@
 {#if !client}
 	<main class="relative h-dvh overflow-hidden bg-base text-text">
 		<div class="absolute inset-0 hidden grid-rows-[34px_minmax(0,1fr)_72px] select-none opacity-65 sm:grid" aria-hidden="true">
-			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-6" /></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">SONGS</span><span class="px-4 font-semibold text-overlay1">LOVED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
+			<header class="flex items-center border-b border-surface0 bg-crust text-[11px]"><div class="grid h-full w-10 shrink-0 place-items-center border-r border-surface0"><img src={`${base}/pwa-icon-192.png`} alt="" class="size-6" /></div><span class="border-r border-surface0 bg-surface0 px-4 py-2 font-semibold">SONGS</span><span class="px-4 font-semibold text-overlay1">STARRED</span><span class="ml-auto px-4 font-mono text-overlay0">REMOTE LIBRARY</span></header>
 			<div class="grid min-h-0 grid-cols-[minmax(0,2fr)_minmax(330px,1fr)]">
 				<section class="min-h-0 border-r border-surface0 bg-base"><div class="flex h-10 items-center gap-3 border-b border-surface0 bg-mantle px-3 text-overlay0"><Icon name="search" size={14}/><span class="font-mono text-xs">Filter artist, title, album…</span><span class="ml-auto font-mono text-[10px]">128 TRACKS</span></div><div class="grid h-7 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0"><span>#</span><span>Artist</span><span>Title</span><span>Album</span><span>Time</span></div>{#each DEMO_TRACKS as track}<div class="grid h-[30px] grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0/40 px-2 text-[11px]"><span class="font-mono text-overlay0">{track[0]}</span><span class="truncate pr-2 text-mauve">{track[1]}</span><span class="truncate pr-2 text-teal">{track[2]}</span><span class="truncate pr-2 text-subtext0">{track[3]}</span><span class="font-mono text-overlay0">{track[4]}</span></div>{/each}</section>
 				<aside class="min-h-0 bg-mantle p-3"><div class="mb-3 flex h-7 items-center justify-between"><strong class="text-xs">ALBUMS</strong><span class="font-mono text-[10px] text-overlay0">24</span></div><div class="grid grid-cols-3 gap-x-3 gap-y-5">{#each DEMO_ALBUMS as album, index}<article class="min-w-0"><div class={`grid aspect-square place-items-center bg-gradient-to-br ${album[2]}`}><div class="grid size-1/2 place-items-center rounded-full border border-crust/20 bg-crust/25"><div class="size-2 rounded-full bg-text/50"></div></div></div><h3 class="mt-2 truncate text-[11px] font-semibold">{album[0]}</h3><p class="truncate text-[10px] text-overlay1">{album[1]}</p></article>{/each}</div></aside>
@@ -773,9 +858,10 @@
 			<nav class="flex h-full min-w-0 items-stretch">
 				<button onclick={() => showTrackView(false)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {mobilePane === 'tracks' && !favoriteOnly ? 'bg-surface0 text-text' : 'text-overlay1'}">SONGS</button>
 				<button onclick={() => (mobilePane = 'albums')} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold text-overlay1 transition hover:bg-surface0 lg:hidden {mobilePane === 'albums' ? 'bg-surface0 text-text' : ''}">ALBUMS</button>
-				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">LOVED</button>
+				<button onclick={() => showTrackView(true)} class="whitespace-nowrap border-r border-surface0 px-3 font-semibold transition hover:bg-surface0 {favoriteOnly ? 'bg-surface0 text-pink' : 'text-overlay1'}">STARRED</button>
 			</nav>
 			<div class="ml-auto flex h-full min-w-0 items-center">
+				<div class="hidden h-full min-w-0 items-center gap-2 border-l border-surface0 px-3 font-mono text-[9px] text-overlay1 lg:flex" title={`${connectionInfo.path_type}: ${connectionInfo.address || 'selecting path'} · ${formatBytes(connectionInfo.received_bytes)} received`}><span class="size-1.5 shrink-0 rounded-full {connectionInfo.address ? 'bg-green' : 'animate-pulse bg-yellow'}"></span><span class="max-w-44 truncate text-subtext0">{connectionAddressLabel(connectionInfo)}</span><span class="shrink-0 text-overlay0">↓ {formatBytes(connectionInfo.received_bytes)}</span></div>
 				<button onclick={openSettings} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve" title="Connection settings"><Icon name="settings" size={15}/></button>
 				<button onclick={disconnect} class="grid h-full w-9 place-items-center border-l border-surface0 text-overlay1 hover:bg-surface0 hover:text-red" title="Disconnect"><Icon name="disconnect" size={15}/></button>
 			</div>
@@ -785,23 +871,31 @@
 			<section class="min-h-0 flex-col border-r border-surface0 bg-base {mobilePane === 'tracks' ? 'flex' : 'hidden'} lg:flex">
 				<div class="flex h-10 shrink-0 items-center gap-3 border-b border-surface0 bg-mantle px-3">
 					<Icon name="search" size={14}/><input value={query} oninput={updateQuery} placeholder="Filter artist, title, album…" class="min-w-0 flex-1 bg-transparent font-mono text-xs text-text outline-none placeholder:text-overlay0"/>
-					{#if activeAlbum}<button onclick={clearAlbum} class="flex min-w-0 items-center gap-2 border border-surface1 bg-surface0 px-2 py-1 font-mono text-[10px] text-mauve"><span class="max-w-40 truncate">{activeAlbum.title}</span><Icon name="close" size={11}/></button>{/if}
 					<span class="shrink-0 font-mono text-[10px] text-overlay0">{filteredTracks.length} / {summary.track_count}</span>
 				</div>
 
-				<div class="hidden h-7 shrink-0 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0 sm:grid"><span>#</span><span>Artist</span><span>Title</span><span>Album</span><span class="text-right">Time</span></div>
+				<div class="hidden h-7 shrink-0 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b border-surface0 bg-mantle px-2 font-mono text-[9px] uppercase tracking-wider text-overlay0 sm:grid"><span>#</span><span>Album</span><span>Title</span><span>Artist</span><span class="text-right">Time</span></div>
 
 				<div class="min-h-0 flex-1">
 					{#key trackViewRevision}
-					<VList data={filteredTracks} getKey={(track) => track.id} itemSize={ROW_HEIGHT} bufferSize={ROW_HEIGHT * 10} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
-						{#snippet children(track, index)}
-							<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
-								<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="size-2.5 animate-spin rounded-full border border-overlay0 border-t-mauve"></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || index + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
-								<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.artist}</div>
-								<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredTrackIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
-								<div class="hidden min-w-0 truncate pr-2 text-subtext0 sm:block">{track.album}</div>
-								<div class="text-right font-mono text-[10px] text-overlay0">{formatTime(track.duration_seconds)}</div>
-							</div>
+					<VList data={trackListItems} getKey={(item) => item.key} itemSize={ROW_HEIGHT} bufferSize={ROW_HEIGHT * 10} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
+						{#snippet children(item)}
+							{#if item.kind === 'album'}
+								<button onclick={() => playTrack(item.tracks[0], item.tracks)} class="flex h-9 w-full items-center gap-2 border-y border-surface1 bg-mantle px-2 text-left transition hover:bg-surface0" aria-label={`Play album ${item.title}`}>
+									<Cover {client} id={item.coverArtId} title={item.title} rootMargin="0px" class="size-7 shrink-0 rounded-sm" />
+									<p class="min-w-0 flex-1 truncate text-[11px]"><span class="font-semibold text-mauve">{item.title}</span><span class="ml-2 text-[10px] text-overlay1">{item.artist}</span></p>
+									<span class="shrink-0 font-mono text-[10px] text-overlay0">{formatTime(item.durationSeconds)}</span>
+								</button>
+							{:else}
+								{@const track = item.track}
+								<div role="row" tabindex="0" aria-selected={selectedTrackId === track.id} onclick={() => (selectedTrackId = track.id)} ondblclick={() => playFromTrackList(track, filteredTracks)} onkeydown={(event) => { if (event.key === 'Enter') playFromTrackList(track, filteredTracks); else if (event.key === ' ') { event.preventDefault(); selectedTrackId = track.id; } }} class="group grid grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b border-surface0/35 px-2 text-[11px] transition outline-none focus:ring-1 focus:ring-inset focus:ring-mauve sm:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] {currentTrack?.id === track.id ? 'bg-mauve/15' : selectedTrackId === track.id ? 'bg-surface0' : 'hover:bg-surface0/60'}" style={`height:${ROW_HEIGHT}px`}>
+									<button onclick={(event) => { event.stopPropagation(); playFromTrackList(track, filteredTracks); }} class="grid size-6 place-items-center font-mono text-[10px] text-overlay0 hover:text-mauve" aria-label={`Play ${track.title}`}>{#if currentTrack?.id === track.id && audioLoading}<span class="h-1 w-4 overflow-hidden bg-surface1"><span class="block h-full bg-mauve transition-[width] duration-150" style={`width:${audioDownloadProgress * 100}%`}></span></span>{:else if currentTrack?.id === track.id && playing}<Icon name="pause" size={11}/>{:else}<span class="group-hover:hidden">{track.track_number || item.trackIndex + 1}</span><span class="hidden group-hover:block"><Icon name="play" size={10}/></span>{/if}</button>
+									<div class="hidden min-w-0 truncate pr-2 text-mauve sm:block">{track.album}</div>
+									<div class="flex min-w-0 items-center gap-2 pr-2"><span class="truncate text-teal">{track.title}</span><button onclick={(event) => toggleStar(track, event)} class="ml-auto hidden shrink-0 text-overlay0 group-hover:block hover:text-pink {starredTrackIds.has(track.id) ? '!block text-pink' : ''}" aria-label="Toggle favorite"><Icon name="heart" size={11}/></button><span class="truncate text-[9px] text-overlay0 sm:hidden"> · {track.artist}</span></div>
+									<div class="hidden min-w-0 truncate pr-2 text-subtext0 sm:block">{track.artist}</div>
+									<div class="text-right font-mono text-[10px] text-overlay0">{formatTime(track.duration_seconds)}</div>
+								</div>
+							{/if}
 						{/snippet}
 					</VList>
 					{/key}
@@ -830,7 +924,7 @@
 		<footer class="relative border-t border-surface1 bg-crust">
 			<input type="range" min="0" max={duration || currentTrack?.duration_seconds || 0} value={currentTime} oninput={seek} class="absolute inset-x-0 top-0 h-1 w-full cursor-pointer accent-mauve" aria-label="Playback position"/>
 			<div class="grid h-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 px-3 pt-1 sm:px-5">
-				<div class="flex items-center gap-1 text-overlay1"><button onclick={() => (shuffle = !shuffle)} class="hidden size-8 place-items-center hover:text-text sm:grid {shuffle ? 'text-teal' : ''}" title="Shuffle"><Icon name="shuffle" size={14}/></button><button onclick={() => skip(-1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="previous" size={16}/></button><button onclick={togglePlayback} disabled={!currentTrack || audioLoading} class="grid size-10 place-items-center bg-text text-crust hover:bg-mauve disabled:opacity-30">{#if audioLoading}<span class="size-3 animate-spin rounded-full border-2 border-crust/30 border-t-crust"></span>{:else if playing}<Icon name="pause" size={15}/>{:else}<Icon name="play" size={15}/>{/if}</button><button onclick={() => skip(1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="next" size={16}/></button><button onclick={() => (repeat = !repeat)} class="hidden size-8 place-items-center hover:text-text sm:grid {repeat ? 'text-teal' : ''}" title="Repeat"><Icon name="repeat" size={14}/></button></div>
+				<div class="flex items-center gap-1 text-overlay1"><button onclick={() => (shuffle = !shuffle)} class="hidden size-8 place-items-center hover:text-text sm:grid {shuffle ? 'text-teal' : ''}" title="Shuffle"><Icon name="shuffle" size={14}/></button><button onclick={() => skip(-1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="previous" size={16}/></button><button onclick={togglePlayback} disabled={!currentTrack || audioLoading} aria-label={audioLoading ? `Downloading ${Math.round(audioDownloadProgress * 100)}%` : playing ? 'Pause' : 'Play'} class="relative grid size-10 overflow-hidden bg-text text-crust hover:bg-mauve disabled:opacity-70">{#if currentTrack && audioDownloadProgress < 1}<span class="absolute inset-y-0 left-0 bg-mauve transition-[width] duration-150" style={`width:${audioDownloadProgress * 100}%`} aria-hidden="true"></span>{/if}<span class="relative z-10 grid size-full place-items-center">{#if audioLoading}<span class="font-mono text-[9px] font-bold">{Math.round(audioDownloadProgress * 100)}%</span>{:else if playing}<Icon name="pause" size={18}/>{:else}<Icon name="play" size={18}/>{/if}</span></button><button onclick={() => skip(1)} disabled={!currentTrack} class="grid size-8 place-items-center hover:text-text disabled:opacity-25"><Icon name="next" size={16}/></button><button onclick={() => (repeat = !repeat)} class="hidden size-8 place-items-center hover:text-text sm:grid {repeat ? 'text-teal' : ''}" title="Repeat"><Icon name="repeat" size={14}/></button></div>
 
 				<div class="flex min-w-0 items-center gap-3">{#if currentTrack}<Cover {client} id={currentTrack.cover_art_id} title={currentTrack.album} class="size-10 shrink-0 sm:size-12" />{/if}<div class="min-w-0"><p class="truncate text-xs font-semibold">{currentTrack?.title || 'Nothing playing'}</p><p class="mt-1 truncate text-[10px] text-overlay1">{#if playerError}<span class="text-red">{playerError}</span>{:else if currentTrack}{currentTrack.artist} · {currentTrack.album}{:else}{summary.track_count} tracks · {summary.album_count} albums{/if}</p></div></div>
 
@@ -851,7 +945,7 @@
 							<div><label for="settings-endpoint" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Server endpoint ID</label><input id="settings-endpoint" bind:value={settingsEndpoint} spellcheck="false" autocomplete="off" placeholder="Leave empty to use ticket" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/></div>
 							<div><div class="mb-2 flex items-center justify-between"><label for="settings-relay-0" class="font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Relay URLs</label><button type="button" onclick={() => addRelay(true)} class="font-mono text-[10px] text-mauve hover:text-pink">+ ADD RELAY</button></div><div class="space-y-2">{#each settingsRelays as relayUrl, index}<div class="relative"><input id={`settings-relay-${index}`} bind:value={settingsRelays[index]} spellcheck="false" autocomplete="url" placeholder="https://relay.example" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-10 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/>{#if settingsRelays.length > 1}<button type="button" onclick={() => removeRelay(index, true)} class="absolute inset-y-0 right-2 grid w-7 place-items-center text-overlay0 hover:text-red" aria-label={`Remove relay ${index + 1}`}><Icon name="close" size={12}/></button>{/if}</div>{/each}</div></div>
 							<div><label for="settings-secret" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Client secret</label><div class="relative"><input id="settings-secret" bind:value={settingsSecret} type={settingsShowSecret ? 'text' : 'password'} spellcheck="false" autocomplete="new-password" class="h-11 w-full border border-surface1 bg-mantle px-3 pr-14 font-mono text-xs outline-none focus:border-mauve"/><button type="button" onclick={() => (settingsShowSecret = !settingsShowSecret)} class="absolute inset-y-0 right-3 font-mono text-[10px] text-overlay1 hover:text-mauve">{settingsShowSecret ? 'HIDE' : 'SHOW'}</button></div></div>
-							<div><label for="settings-loved-key" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Loved collection key</label><input id="settings-loved-key" bind:value={settingsLovedKey} spellcheck="false" autocomplete="off" placeholder="Default: this client identity" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/><p class="mt-1.5 text-[10px] leading-4 text-overlay0">Leave empty for a private collection tied to the Client Endpoint ID. Use the same custom key on multiple clients to share one collection.</p></div>
+							<div><label for="settings-starred-key" class="mb-2 block font-mono text-[10px] uppercase tracking-[.14em] text-subtext0">Starred collection key</label><input id="settings-starred-key" bind:value={settingsStarredKey} spellcheck="false" autocomplete="off" placeholder="Default: this client identity" class="h-11 w-full border border-surface1 bg-mantle px-3 font-mono text-xs outline-none placeholder:text-overlay0 focus:border-mauve"/><p class="mt-1.5 text-[10px] leading-4 text-overlay0">Leave empty for a private collection tied to the Client Endpoint ID. Use the same custom key on multiple clients to share one collection.</p></div>
 							<div class="border border-surface0 bg-mantle p-3"><p class="font-mono text-[9px] uppercase tracking-[.14em] text-overlay0">Current client endpoint ID</p><code class="mt-2 block break-all text-[11px] leading-5 text-subtext0">{client.endpointId}</code></div><p class="text-[11px] leading-5 text-overlay1">Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
 						</div>
 						<div class="flex shrink-0 justify-end gap-2 border-t border-surface0 bg-mantle px-5 py-3"><button type="button" onclick={() => (settingsOpen = false)} class="border border-surface1 px-4 py-2 font-mono text-[10px] text-subtext0 hover:bg-surface0">CANCEL</button><button type="submit" disabled={!(settingsEndpoint.trim() ? cleanRelays(settingsRelays).length : settingsTicket.trim()) || connecting} class="bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust hover:bg-pink disabled:opacity-40">SAVE & RECONNECT</button></div>

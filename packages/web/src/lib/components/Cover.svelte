@@ -1,6 +1,6 @@
 <script>
 	// @ts-nocheck
-	let { client, id = null, title = '', class: className = '' } = $props();
+	let { client, id = null, title = '', class: className = '', rootMargin = '240px' } = $props();
 	let element = $state();
 	let visible = $state(false);
 	let imageFailed = $state(false);
@@ -18,7 +18,7 @@
 				visible = true;
 				observer.disconnect();
 			}
-		}, { rootMargin: '240px' });
+		}, { rootMargin });
 		observer.observe(element);
 		return () => observer.disconnect();
 	});
