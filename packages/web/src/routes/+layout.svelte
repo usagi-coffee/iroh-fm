@@ -23,9 +23,7 @@
 		{/snippet}
 
 		{#snippet failed()}
-			<div class="grid h-dvh place-items-center bg-base p-6 text-text">
-				<div class="max-w-sm border border-red/40 bg-mantle p-5 text-center"><p class="text-sm font-semibold text-red">Offline support could not start</p><p class="mt-2 text-xs leading-5 text-overlay1">Reload the page to retry service-worker registration.</p><button onclick={() => location.reload()} class="mt-4 bg-mauve px-4 py-2 font-mono text-[10px] font-bold text-crust">RELOAD</button></div>
-			</div>
+			{@render children()}
 		{/snippet}
 	</svelte:boundary>
 </div>

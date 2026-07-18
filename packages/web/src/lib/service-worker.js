@@ -16,23 +16,15 @@ export function attach() {
 		if (!('serviceWorker' in navigator)) return;
 
 		ensure_service_worker().catch((error) => console.error('[sw] registration failed', error));
-
-		const reload = () => {
-			if (document.startViewTransition) {
-				document.startViewTransition(() => location.reload());
-			} else {
-				location.reload();
-			}
-		};
-
-		navigator.serviceWorker.addEventListener('controllerchange', reload);
-		return () => navigator.serviceWorker.removeEventListener('controllerchange', reload);
 	};
 }
 
 export async function ensure_service_worker() {
 	if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-	startupPromise ??= startServiceWorker();
+	startupPromise ??= startServiceWorker().catch((error) => {
+		startupPromise = undefined;
+		throw error;
+	});
 	return startupPromise;
 }
 

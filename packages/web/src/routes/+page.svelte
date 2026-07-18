@@ -8,6 +8,8 @@
 	import Icon from '$lib/components/Icon.svelte';
 
 	const ROW_HEIGHT = 30;
+	const TRACK_LIST_BUFFER = ROW_HEIGHT * 60;
+	const TRACK_COVER_MARGIN = '1400px';
 	const ALBUM_MIN_WIDTH = 125;
 	const ALBUM_GAP = 12;
 	const DEMO_TRACKS = [
@@ -770,9 +772,9 @@
 
 	function trackSort(left, right) {
 		return left.album.localeCompare(right.album, undefined, { numeric: true })
-			|| left.artist.localeCompare(right.artist, undefined, { numeric: true })
 			|| (left.disc_number || 0) - (right.disc_number || 0)
 			|| (left.track_number || 0) - (right.track_number || 0)
+			|| left.artist.localeCompare(right.artist, undefined, { numeric: true })
 			|| left.title.localeCompare(right.title, undefined, { numeric: true });
 	}
 
@@ -878,11 +880,11 @@
 
 				<div class="min-h-0 flex-1">
 					{#key trackViewRevision}
-					<VList data={trackListItems} getKey={(item) => item.key} itemSize={ROW_HEIGHT} bufferSize={ROW_HEIGHT * 10} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
+					<VList data={trackListItems} getKey={(item) => item.key} itemSize={ROW_HEIGHT} bufferSize={TRACK_LIST_BUFFER} bind:this={trackList} style="height: 100%; overscroll-behavior: contain;">
 						{#snippet children(item)}
 							{#if item.kind === 'album'}
 								<button onclick={() => playTrack(item.tracks[0], item.tracks)} class="flex h-9 w-full items-center gap-2 border-y border-surface1 bg-mantle px-2 text-left transition hover:bg-surface0" aria-label={`Play album ${item.title}`}>
-									<Cover {client} id={item.coverArtId} title={item.title} rootMargin="0px" class="size-7 shrink-0 rounded-sm" />
+									<Cover {client} id={item.coverArtId} title={item.title} rootMargin={TRACK_COVER_MARGIN} class="size-7 shrink-0 rounded-sm" />
 									<p class="min-w-0 flex-1 truncate text-[11px]"><span class="font-semibold text-mauve">{item.title}</span><span class="ml-2 text-[10px] text-overlay1">{item.artist}</span></p>
 									<span class="shrink-0 font-mono text-[10px] text-overlay0">{formatTime(item.durationSeconds)}</span>
 								</button>

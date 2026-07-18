@@ -7,6 +7,16 @@
 	let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
 	let coverPromise = $derived(visible && client && id ? client.coverUrl(id) : null);
 
+	function findScrollRoot(node) {
+		let parent = node.parentElement;
+		while (parent) {
+			const style = getComputedStyle(parent);
+			if (/auto|scroll|overlay/.test(style.overflowY)) return parent;
+			parent = parent.parentElement;
+		}
+		return null;
+	}
+
 	$effect(() => {
 		if (!element) return;
 		if (!('IntersectionObserver' in window)) {
@@ -18,7 +28,7 @@
 				visible = true;
 				observer.disconnect();
 			}
-		}, { rootMargin });
+		}, { root: findScrollRoot(element), rootMargin });
 		observer.observe(element);
 		return () => observer.disconnect();
 	});
