@@ -28,9 +28,7 @@
   let updateBannerDismissed = $state(false);
   let connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
   let onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
-  const sw = ensure_service_worker().catch((error) =>
-    console.warn("[sw] offline support is unavailable", error),
-  );
+  const sw = ensure_service_worker();
   const wasm = sw.then(() => ClientCore.prepare());
   const cache = wasm.then(() => ClientCore.prepareCaches());
   const identity = cache.then(() => App.prepareIdentity());

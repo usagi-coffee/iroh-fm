@@ -171,11 +171,25 @@ export async function forceServiceWorkerUpdate() {
 
 export async function ensure_service_worker() {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-  startupPromise ??= startServiceWorker().catch((error) => {
+  startupPromise ??= withTimeout(
+    startServiceWorker(),
+    START_TIMEOUT_MS,
+    `Service worker startup timed out after ${START_TIMEOUT_MS / 1_000} seconds`,
+  ).catch((error) => {
     startupPromise = undefined;
     throw error;
   });
   return startupPromise;
+}
+
+/** @template T @param {Promise<T>} promise @param {number} timeoutMs @param {string} message */
+function withTimeout(promise, timeoutMs, message) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timeout;
+  const expired = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timeout));
 }
 
 async function startServiceWorker() {
