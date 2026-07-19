@@ -109,16 +109,18 @@ function requireActiveWorker(registration) {
   );
 }
 
-export function ensure_service_worker() {
-  if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
-    return Promise.resolve(undefined);
-  }
+function getRegistration() {
   registrationPromise ??= register().catch((error) => {
     registrationPromise = undefined;
     throw error;
   });
-  if (!dev) startUpdateMonitor();
   return registrationPromise;
+}
+
+export async function ensure_service_worker() {
+  if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  if (!dev) startUpdateMonitor();
+  await getRegistration();
 }
 
 export function attach() {
@@ -150,9 +152,8 @@ function startUpdateMonitor() {
 }
 
 async function checkForUpdate() {
-  const registration = await ensure_service_worker();
-  if (!registration || registration.waiting || registration.installing || !registration.active)
-    return;
+  const registration = await getRegistration();
+  if (registration.waiting || registration.installing || !registration.active) return;
 
   try {
     await registration.update();
@@ -271,8 +272,8 @@ export function subscribeToServiceWorkerStatus(listener) {
 
 export async function activateServiceWorkerUpdate() {
   if (dev) return;
-  const registration = await ensure_service_worker();
-  const worker = registration?.waiting ?? waitingWorker;
+  const registration = await getRegistration();
+  const worker = registration.waiting ?? waitingWorker;
   if (!worker) {
     if (reloadRequired) location.reload();
     return;
@@ -290,11 +291,7 @@ export async function forceServiceWorkerUpdate() {
     return;
   }
 
-  const registration = await ensure_service_worker();
-  if (!registration) {
-    location.reload();
-    return;
-  }
+  const registration = await getRegistration();
   if (registration.waiting) {
     waitingWorker = registration.waiting;
     await activateServiceWorkerUpdate();
