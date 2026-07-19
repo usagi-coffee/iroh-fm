@@ -45,6 +45,17 @@
     return () => window.removeEventListener("resize", update);
   }
 
+  /** @param {HTMLInputElement} input */
+  function focusRequestedFilter(input) {
+    if (!App.library.trackFilterFocusPending) return;
+    const frame = requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      App.library.trackFilterFocusPending = false;
+    });
+    return () => cancelAnimationFrame(frame);
+  }
+
   /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {MouseEvent} [event] */
   function openTrackActions(track, event) {
     event?.preventDefault();
@@ -149,6 +160,7 @@
   <div class="border-surface0 bg-mantle flex h-10 shrink-0 items-center gap-3 border-b px-3">
     <SearchIcon class="text-sm" />
     <input
+      {@attach focusRequestedFilter}
       value={query}
       oninput={(event) => onquery(event.currentTarget.value)}
       placeholder="Filter artist, title, album…"

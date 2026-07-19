@@ -72,6 +72,8 @@ export class Library {
     this.tracks.filter((track) => this.allStarredTrackIds.has(track.id)),
   );
   offlineOnly = $state(false);
+  trackFilterQuery = $state("");
+  trackFilterFocusPending = $state(false);
   /** @type {string | null} */
   selectedTrackId = $state(null);
   /** @type {string | null} */
@@ -180,6 +182,13 @@ export class Library {
   /** @param {Track} track */
   async focusTrack(track) {
     this.requestTrackFocus(track);
+    await goto(resolve("/tracks"));
+  }
+
+  /** @param {string} character */
+  async focusTrackFilter(character) {
+    this.trackFilterQuery += character;
+    this.trackFilterFocusPending = true;
     await goto(resolve("/tracks"));
   }
 

@@ -50,6 +50,48 @@
       if (!ready) updateBannerDismissed = false;
     });
   }
+
+  /** @param {EventTarget | null} target */
+  function isEditableTarget(target) {
+    return (
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox']",
+        ),
+      )
+    );
+  }
+
+  function globalKeybinds() {
+    /** @param {KeyboardEvent} event */
+    const keydown = (event) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        isEditableTarget(event.target)
+      )
+        return;
+
+      if (event.code === "Space" || event.key === " " || event.key === "Spacebar") {
+        if (!event.repeat && App.player.currentTrack) {
+          event.preventDefault();
+          void App.player.toggle();
+        }
+        return;
+      }
+
+      if (event.key.length === 1 && App.connection.client) {
+        event.preventDefault();
+        void App.library.focusTrackFilter(event.key);
+      }
+    };
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
+  }
 </script>
 
 <svelte:head>
@@ -61,6 +103,7 @@
   id="content"
   {@attach serviceworker()}
   {@attach watchUpdates}
+  {@attach globalKeybinds}
   {@attach App.connection.attachHashChanges}
 >
   {#snippet errorToast()}
