@@ -3,7 +3,7 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { filterTracks, friendlyError } from "../utils.js";
+import { cacheTrackSearchMetadata, filterTracks, friendlyError } from "../utils.js";
 import { Track } from "./Track.svelte.js";
 
 export class Library {
@@ -68,9 +68,9 @@ export class Library {
     return selected;
   });
   /** @type {Track[]} */
-  starredTracks = $derived.by(() =>
-    this.tracks.filter((track) => this.allStarredTrackIds.has(track.id)),
-  );
+  starredTracks = $state.raw([]);
+  /** @type {import('../types').TrackListItem[]} */
+  starredTrackListItems = $state.raw([]);
   offlineOnly = $state(false);
   trackFilterQuery = $state("");
   trackFilterFocusPending = $state(false);
@@ -128,11 +128,21 @@ export class Library {
   /** @param {Track[]} filtered */
   getTrackListItems(filtered) {
     if (filtered === this.tracks) return this.trackListItems;
+    if (filtered === this.starredTracks) return this.starredTrackListItems;
     return this.createTrackListItems(filtered);
   }
 
-  /** @param {Track[]} filtered */
-  createTrackListItems(filtered) {
+  cacheStarredRouteData() {
+    this.starredTracks = this.tracks.filter((track) => this.allStarredTrackIds.has(track.id));
+    this.starredTrackListItems = this.createTrackListItems(this.starredTracks, false);
+  }
+
+  cacheSearchData() {
+    cacheTrackSearchMetadata(this.tracks);
+  }
+
+  /** @param {Track[]} filtered @param {boolean} [offlineOnly] */
+  createTrackListItems(filtered, offlineOnly = this.offlineOnly) {
     /** @type {import('../types').TrackListItem[]} */
     const items = [];
     let previousAlbumKey;
@@ -141,7 +151,7 @@ export class Library {
       const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
       if (albumKey !== previousAlbumKey) {
         const albumTracks = (this.tracksByAlbum.get(albumKey) ?? [track]).filter(
-          (item) => !this.offlineOnly || item.cached,
+          (item) => !offlineOnly || item.cached,
         );
         items.push({
           kind: "album",
@@ -150,7 +160,7 @@ export class Library {
           artist: album?.album_artist ?? album?.artist ?? track.album_artist ?? track.artist,
           coverArtId: album?.cover_art_id ?? track.cover_art_id,
           durationSeconds:
-            (!this.offlineOnly ? album?.duration_seconds : null) ??
+            (!offlineOnly ? album?.duration_seconds : null) ??
             albumTracks.reduce((total, item) => total + (item.duration_seconds ?? 0), 0),
           tracks: albumTracks,
           album,
@@ -241,6 +251,7 @@ export class Library {
       this.starred.tracks = starred
         ? [track, ...this.starred.tracks.filter((item) => item.id !== track.id)]
         : this.starred.tracks.filter((item) => item.id !== track.id);
+      this.cacheStarredRouteData();
     } catch (error) {
       if (this.app.connection.client === client)
         this.app.connection.error = friendlyError(error, "Could not update the starred track.");
@@ -359,6 +370,7 @@ export class Library {
       this.starred.albums = starred
         ? [album, ...this.starred.albums.filter((item) => item.id !== album.id)]
         : this.starred.albums.filter((item) => item.id !== album.id);
+      this.cacheStarredRouteData();
     } catch (error) {
       if (this.app.connection.client === client)
         this.app.connection.error = friendlyError(error, "Could not update the starred album.");
