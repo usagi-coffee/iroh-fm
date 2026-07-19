@@ -14,6 +14,8 @@ Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and s
 
 **The website is fully static.** It is only HTML, CSS, JavaScript, and WebAssembly hosted on GitHub Pages. There is no application backend, no SSR, and no server-side code behind the website. The browser connects directly to the `iroh-fm` server running on your or your friend's device.
 
+![iroh.fm web player with the track list and album browser](extra/web.png)
+
 ## Why “unstoppable”?
 
 - **Run it on your own bare metal:** keep the server and music library on hardware you control at home.
