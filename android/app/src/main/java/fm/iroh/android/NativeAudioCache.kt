@@ -80,9 +80,11 @@ object NativeAudioCache {
 
     fun cachedTrackIds(remoteId: String): Set<String> {
         val prefix = "$CACHE_KEY_PREFIX$remoteId:"
-        return offlineCache.keys
-            .asSequence()
-            .filter { it.startsWith(prefix) && isComplete(offlineCache, it) }
+        return sequenceOf(offlineCache, rollingCache)
+            .flatMap { cache ->
+                cache.keys.asSequence()
+                    .filter { it.startsWith(prefix) && isComplete(cache, it) }
+            }
             .map { it.removePrefix(prefix) }
             .toSet()
     }

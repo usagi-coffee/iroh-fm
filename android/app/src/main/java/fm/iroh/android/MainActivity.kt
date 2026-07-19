@@ -338,7 +338,7 @@ class MainActivity : ComponentActivity() {
         val player = controller ?: error("native player is starting")
         val selectedTrackId = payload.getString("trackId")
         if (NativeCore.offlineOnly) {
-            check(NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, selectedTrackId)) {
+            check(NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, selectedTrackId)) {
                 "track is not available in the Android offline cache"
             }
         }
@@ -372,7 +372,7 @@ class MainActivity : ComponentActivity() {
             }
             .filter {
                 !NativeCore.offlineOnly ||
-                    NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, it.mediaId)
+                    NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, it.mediaId)
             }
         val selected = items.indexOfFirst { it.mediaId == selectedTrackId }.coerceAtLeast(0)
         player.setMediaItems(items, selected, 0)
@@ -389,7 +389,7 @@ class MainActivity : ComponentActivity() {
         val retained = (0 until player.mediaItemCount)
             .map(player::getMediaItemAt)
             .filter {
-                NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, it.mediaId)
+                NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, it.mediaId)
             }
         val selected = retained.indexOfFirst { it.mediaId == currentTrackId }
         if (selected < 0) {
@@ -438,7 +438,11 @@ class MainActivity : ComponentActivity() {
                         JSONObject()
                             .put("received", it.receivedBytes)
                             .put("total", it.totalBytes)
-                            .put("active", it.active),
+                            .put("active", it.active)
+                            .put(
+                                "cached",
+                                NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, id),
+                            ),
                     )
                 }
             }

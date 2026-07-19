@@ -341,6 +341,10 @@ export class Player {
         const queuedTrack = this.app.library.tracksById.get(id);
         if (!queuedTrack || !transfer || typeof transfer !== "object") continue;
         if (queuedTrack.cached) continue;
+        if (transfer.cached) {
+          this.app.library.markCached(queuedTrack);
+          continue;
+        }
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);
