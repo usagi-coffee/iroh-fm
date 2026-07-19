@@ -22,6 +22,6 @@ protocol = { path = "../../../crates/protocol" }
 rodio = "0.22.2"
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2.11.3", features = [] }
+tauri = { version = "2.11.3", features = ["devtools"] }
 tauri-plugin-log = "2"
 tokio.workspace = true

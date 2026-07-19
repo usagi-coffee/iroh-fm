@@ -1,29 +1,32 @@
 name: Android
 
 on:
-  push:
-    branches: [master]
-    tags: ["v[1-9]*"]
+  workflow_run:
+    workflows: [Web]
+    types: [completed]
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('android-{0}', github.event.workflow_run.head_branch) || format('android-skip-{0}', github.run_id) }}
   cancel-in-progress: true
 
 env:
   NDK_VERSION: "28.2.13676358"
   EXPECTED_RELEASE_SHA256: "B4:39:05:72:C0:38:D1:68:0B:74:48:BC:F7:03:9B:07:00:D4:A8:8D:E2:B4:3C:17:8E:EC:50:02:33:D2:24:41"
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
   build:
-    if: github.ref_type == 'tag' || startsWith(github.event.head_commit.message, 'android:')
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -89,23 +92,11 @@ jobs:
 
       - name: Set release metadata
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            if [[ ! "$GITHUB_REF_NAME" =~ ^v[1-9][0-9]*$ ]]; then
-              echo "Android release tags must be numbered v1, v2, v3, ..." >&2
-              exit 1
-            fi
-            version_name="${GITHUB_REF_NAME#v}"
-            artifact_suffix="$GITHUB_REF_NAME"
-          else
-            version_name="ci-$GITHUB_RUN_NUMBER"
-            artifact_suffix="ci-$GITHUB_RUN_NUMBER"
-          fi
-
-          artifact_suffix="${artifact_suffix//[^a-zA-Z0-9._-]/-}"
+          short_sha="${RELEASE_SHA::7}"
           version_code="$(date -u +%s)"
-          echo "IROH_FM_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "IROH_FM_VERSION_NAME=$short_sha" >> "$GITHUB_ENV"
           echo "IROH_FM_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
-          echo "ANDROID_ARTIFACT_NAME=iroh-fm-android-$artifact_suffix" >> "$GITHUB_ENV"
+          echo "ANDROID_ARTIFACT_NAME=iroh-fm-android-$short_sha" >> "$GITHUB_ENV"
 
       - name: Build signed release APK
         env:
@@ -141,7 +132,6 @@ jobs:
           retention-days: 30
 
   release:
-    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -158,23 +148,24 @@ jobs:
 
       - name: Name release APK
         run: |
-          safe_tag="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/-}"
-          release_apk="release/iroh-fm-android-$safe_tag.apk"
+          short_sha="${RELEASE_SHA::7}"
+          release_apk="release/iroh-fm-android-$short_sha.apk"
           mv release/app-release.apk "$release_apk"
           echo "RELEASE_APK=$release_apk" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=android-$RELEASE_SHA" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Android ($short_sha)" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          release_title="Android $GITHUB_REF_NAME"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --title "$release_title"
-            gh release upload "$GITHUB_REF_NAME" "$RELEASE_APK" --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE"
+            gh release upload "$RELEASE_TAG" "$RELEASE_APK" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$RELEASE_APK" \
-              --verify-tag \
-              --generate-notes \
-              --title "$release_title"
+            gh release create "$RELEASE_TAG" "$RELEASE_APK" \
+              --target "$RELEASE_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes "Android build of $RELEASE_SHA."
           fi
