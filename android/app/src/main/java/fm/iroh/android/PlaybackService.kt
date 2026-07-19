@@ -173,8 +173,14 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
-        // Playback intentionally outlives the TWA task, like a conventional music player.
-        Log.d(TAG, "TWA task removed; playback service retained")
+        Log.d(TAG, "TWA task removed; stopping playback service")
+        session?.player?.run {
+            stop()
+            clearMediaItems()
+        }
+        cancelPrefetch()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
