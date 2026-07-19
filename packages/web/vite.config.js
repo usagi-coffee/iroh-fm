@@ -1,6 +1,7 @@
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
+import icons from "unplugin-icons/vite";
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +16,6 @@ export default defineConfig({
     __BUILD_VERSION__: JSON.stringify(buildVersion),
   },
   plugins: [
-    tailwindcss(),
     sveltekit({
       compilerOptions: {
         // Force runes mode for the project, except for libraries. Can be removed in svelte 6.
@@ -31,6 +31,8 @@ export default defineConfig({
         base,
       },
     }),
+    tailwindcss(),
+    icons({ compiler: "svelte" }),
   ],
   server: {
     fs: {

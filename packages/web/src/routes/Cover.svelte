@@ -1,12 +1,22 @@
 <script>
-	// @ts-nocheck
+	/**
+	 * @typedef {Object} Props
+	 * @property {import('@iroh-fm/client').MusicClient | null} client
+	 * @property {string | null} [id]
+	 * @property {string} [title]
+	 * @property {string} [class]
+	 * @property {string} [rootMargin]
+	 */
+	/** @typedef {{ client: import('@iroh-fm/client').MusicClient | null, id: string | null }} FailedRequest */
+	/** @type {Props} */
 	let { client, id = null, title = '', class: className = '', rootMargin = '240px' } = $props();
-	let element = $state();
 	let visible = $state(false);
-	let imageFailed = $state(false);
+	let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
+	let imageFailed = $derived(Boolean(failedRequest && failedRequest.client === client && failedRequest.id === id));
 	let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
 	let coverPromise = $derived(visible && client && id ? client.coverUrl(id) : null);
 
+	/** @param {HTMLElement} node */
 	function findScrollRoot(node) {
 		let parent = node.parentElement;
 		while (parent) {
@@ -17,26 +27,20 @@
 		return null;
 	}
 
-	$effect(() => {
-		if (!element) return;
+	/** @param {HTMLElement} node */
+	function observeVisibility(node) {
 		if (!('IntersectionObserver' in window)) {
 			visible = true;
 			return;
 		}
 		const observer = new IntersectionObserver((entries) => {
-			if (entries.some((entry) => entry.isIntersecting)) {
-				visible = true;
-				observer.disconnect();
-			}
-		}, { root: findScrollRoot(element), rootMargin });
-		observer.observe(element);
+			if (!entries.some((entry) => entry.isIntersecting)) return;
+			visible = true;
+			observer.disconnect();
+		}, { root: findScrollRoot(node), rootMargin });
+		observer.observe(node);
 		return () => observer.disconnect();
-	});
-
-	$effect(() => {
-		id;
-		imageFailed = false;
-	});
+	}
 
 </script>
 
@@ -47,10 +51,10 @@
 	</div>
 {/snippet}
 
-<div bind:this={element} class={`cover ${className}`} style={`--cover-hue: ${hue}`}>
+<div {@attach observeVisibility} class={`cover ${className}`} style={`--cover-hue: ${hue}`}>
 	<svelte:boundary>
 		{#if coverPromise && !imageFailed}
-			<img src={await coverPromise} alt={`${title} cover`} onerror={() => (imageFailed = true)} />
+			<img src={await coverPromise} alt={`${title} cover`} onerror={() => (failedRequest = { client, id })} />
 		{:else}
 			{@render fallback()}
 		{/if}
@@ -72,5 +76,6 @@
 	.cover-fallback::after { content: ''; position: absolute; width: 62%; height: 62%; border-radius: 50%; border: 1px solid rgb(255 255 255 / .32); box-shadow: 0 0 0 12px rgb(0 0 0 / .08), 0 0 0 24px rgb(255 255 255 / .06); }
 	.cover-fallback span { position: relative; z-index: 2; font-family: var(--font-display); font-size: clamp(2rem, 5vw, 4.5rem); font-style: italic; text-shadow: 0 2px 20px rgb(0 0 0 / .25); }
 	.groove { position: absolute; border: 1px solid rgb(255 255 255 / .18); border-radius: 50%; }
-	.groove.one { width: 82%; height: 82%; } .groove.two { width: 43%; height: 43%; }
+	.groove.one { width: 82%; height: 82%; }
+	.groove.two { width: 43%; height: 43%; }
 </style>

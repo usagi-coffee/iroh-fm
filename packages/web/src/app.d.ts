@@ -8,7 +8,9 @@ declare global {
     // interface Error {}
     // interface Locals {}
     // interface PageData {}
-    // interface PageState {}
+    interface PageState {
+      focusTrackId?: string;
+    }
     // interface Platform {}
   }
 }

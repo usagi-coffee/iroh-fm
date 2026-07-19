@@ -1,7 +1,7 @@
 import { dev } from '$app/environment';
-import { base } from '$app/paths';
+import { asset } from '$app/paths';
 
-const workerUrl = `${base}/service-worker.js`;
+const workerUrl = asset('/service-worker.js');
 const START_TIMEOUT_MS = 30_000;
 let startupPromise;
 /** @type {ServiceWorker | undefined} */

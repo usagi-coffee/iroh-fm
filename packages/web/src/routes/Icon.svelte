@@ -1,19 +1,16 @@
 <script>
+	/**
+	 * @typedef {Object} Props
+	 * @property {string} name
+	 * @property {number} [size]
+	 * @property {number} [stroke]
+	 * @property {string} [label]
+	 */
+	/** @type {Props} */
 	let { name, size = 20, stroke = 1.8, label = '' } = $props();
 </script>
 
-<svg
-	width={size}
-	height={size}
-	viewBox="0 0 24 24"
-	fill="none"
-	stroke="currentColor"
-	stroke-width={stroke}
-	stroke-linecap="round"
-	stroke-linejoin="round"
-	aria-hidden={label ? undefined : 'true'}
-	aria-label={label || undefined}
->
+<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width={stroke} stroke-linecap="round" stroke-linejoin="round" aria-hidden={label ? undefined : 'true'} aria-label={label || undefined}>
 	{#if name === 'home'}
 		<path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 21v-8h6v8"/>
 	{:else if name === 'library'}

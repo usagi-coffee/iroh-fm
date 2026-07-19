@@ -6,6 +6,9 @@ const TRACK_CACHE_ORIGIN = "https://track-cache.iroh-fm.invalid";
 const MAX_CONCURRENT_COVER_FETCHES = 8;
 const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
+const MAX_MEDIA_BUFFER_AHEAD_SECONDS = 90;
+const RETAIN_MEDIA_BUFFER_BEHIND_SECONDS = 15;
+const MEDIA_BUFFER_RETRY_MS = 250;
 
 /** @param {string} remoteId @param {string} coverId */
 function coverCacheRequest(remoteId, coverId) {
@@ -302,11 +305,14 @@ export class MusicClient {
   async trackSource(id, onProgress = () => {}) {
     const active = this.activeTrackRequests.get(id);
     const unsubscribe = active ? this.subscribeTrackProgress(id, onProgress) : () => {};
-    const cached = await this.cachedTrackBlob(id);
+    const cached = await this.cachedTrack(id);
     if (cached) {
       unsubscribe();
-      onProgress(cached.size, cached.size);
-      return new BlobTrackSource(cached, () => {});
+      onProgress(cached.blob.size, cached.blob.size);
+      const cacheReady = cached.persistent
+        ? Promise.resolve(true)
+        : this.rememberTrackBlob(id, cached.blob);
+      return new BlobTrackSource(cached.blob, () => {}, cacheReady);
     }
     unsubscribe();
     if (this.offlineOnly) throw new Error("track is not available offline");
@@ -357,8 +363,11 @@ export class MusicClient {
         const blob = await new Response(trackDownload(stream, fileSize, reportProgress), {
           headers: { "content-type": contentType },
         }).blob();
-        this.rememberTrackBlob(id, blob);
-        return new BlobTrackSource(blob, releaseAudioPriority);
+        return new BlobTrackSource(
+          blob,
+          releaseAudioPriority,
+          this.rememberTrackBlob(id, blob),
+        );
       } catch (error) {
         releaseAudioPriority();
         throw error;
@@ -376,7 +385,11 @@ export class MusicClient {
   prefetchTrack(id, onProgress = () => {}) {
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
-    if (existing) return existing.finally(unsubscribe).then(() => undefined);
+    if (existing) {
+      return existing
+        .finally(unsubscribe)
+        .then(() => this.isTrackCached(id));
+    }
 
     const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
       if (cached) {
@@ -392,7 +405,9 @@ export class MusicClient {
     pending.finally(() => {
       if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
     }).catch(() => {});
-    return pending.finally(unsubscribe).then(() => undefined);
+    return pending
+      .finally(unsubscribe)
+      .then(() => this.isTrackCached(id));
   }
 
   /** @param {string} id @param {(received: number, total: number) => void} listener */
@@ -420,17 +435,34 @@ export class MusicClient {
   }
 
   /** @param {string} id */
-  async cachedTrackBlob(id) {
+  async cachedTrack(id) {
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
       try {
-        return await existing;
+        const blob = await existing;
+        return { blob, persistent: await this.isTrackCached(id) };
       } catch {
         if (this.activeTrackRequests.get(id) === existing) this.activeTrackRequests.delete(id);
       }
     }
 
-    return this.readPersistentTrackBlob(id);
+    const blob = await this.readPersistentTrackBlob(id);
+    return blob ? { blob, persistent: true } : null;
+  }
+
+  /** @param {string} id */
+  async isTrackCached(id) {
+    if (!("caches" in globalThis)) return false;
+    try {
+      const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
+      const response = await cache.match(trackCacheRequest(this.remoteId, id));
+      if (!response) return false;
+      const declaredLength = response.headers.get("content-length");
+      if (declaredLength !== null) return Number(declaredLength) > 0;
+      return (await response.blob()).size > 0;
+    } catch {
+      return false;
+    }
   }
 
   /** @param {string} id */
@@ -452,16 +484,18 @@ export class MusicClient {
 
   /** @param {string} id @param {Blob} blob */
   rememberTrackBlob(id, blob) {
-    const pending = this.persistTrackBlob(id, blob).then(() => blob);
+    const stored = this.persistTrackBlob(id, blob);
+    const pending = stored.then(() => blob);
     this.activeTrackRequests.set(id, pending);
     pending.finally(() => {
       if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
     }).catch(() => {});
+    return stored;
   }
 
   /** @param {string} id @param {Blob} blob */
   async persistTrackBlob(id, blob) {
-    if (!("caches" in globalThis) || blob.size === 0) return;
+    if (!("caches" in globalThis) || blob.size === 0) return false;
     try {
       const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
       await cache.put(
@@ -474,8 +508,10 @@ export class MusicClient {
           },
         }),
       );
+      return true;
     } catch {
       // Storage quotas and private browsing can reject persistent writes.
+      return false;
     }
   }
 
@@ -532,15 +568,16 @@ export class MusicClient {
 }
 
 class BlobTrackSource {
-  /** @param {Blob} blob @param {() => void} releaseAudioPriority */
-  constructor(blob, releaseAudioPriority) {
+  /** @param {Blob} blob @param {() => void} releaseAudioPriority @param {Promise<boolean>} cacheReady */
+  constructor(blob, releaseAudioPriority, cacheReady) {
     this.url = URL.createObjectURL(blob);
-    this.done = Promise.resolve();
+    this.done = cacheReady;
     this.disposed = false;
     this.releaseAudioPriority = releaseAudioPriority;
   }
 
-  async start() {}
+  /** @param {HTMLMediaElement} _mediaElement */
+  async start(_mediaElement) {}
 
   dispose() {
     if (this.disposed) return;
@@ -551,7 +588,7 @@ class BlobTrackSource {
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => void} onComplete */
+  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => Promise<boolean>} onComplete */
   constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority, onComplete) {
     this.stream = stream;
     this.contentType = contentType;
@@ -564,14 +601,15 @@ class ProgressiveTrackSource {
     this.onComplete = onComplete;
     /** @type {Uint8Array[]} */
     this.chunks = [];
-    this.done = Promise.resolve();
+    this.done = Promise.resolve(false);
     this.disposed = false;
     this.releaseAudioPriority = releaseAudioPriority;
     /** @type {null | (() => void)} */
     this.cancelOpen = null;
   }
 
-  async start() {
+  /** @param {HTMLMediaElement} mediaElement */
+  async start(mediaElement) {
     if (this.disposed) throw new DOMException("Track was cancelled", "AbortError");
     await this.waitUntilOpen();
     if (this.disposed) throw new DOMException("Track was cancelled", "AbortError");
@@ -580,31 +618,36 @@ class ProgressiveTrackSource {
     const first = await this.reader.read();
     if (first.done) {
       this.onProgress(this.fileSize, this.fileSize);
-      this.completeCache();
+      this.done = this.completeCache();
       this.finishMediaSource();
       return;
     }
     this.reportChunk(first.value);
-    await appendBuffer(sourceBuffer, first.value);
-    this.done = this.pump(sourceBuffer);
+    await appendMediaBuffer(sourceBuffer, first.value, mediaElement, () => this.disposed);
+    this.done = this.pump(sourceBuffer, mediaElement);
   }
 
-  /** @param {SourceBuffer} sourceBuffer */
-  async pump(sourceBuffer) {
+  /** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+  async pump(sourceBuffer, mediaElement) {
     try {
       while (!this.disposed) {
+        await waitForMediaBufferRoom(sourceBuffer, mediaElement, () => this.disposed);
+        if (this.disposed) return false;
         const chunk = await this.reader.read();
         if (chunk.done) break;
         this.reportChunk(chunk.value);
-        await appendBuffer(sourceBuffer, chunk.value);
+        await appendMediaBuffer(sourceBuffer, chunk.value, mediaElement, () => this.disposed);
       }
       if (!this.disposed) {
         this.onProgress(this.fileSize, this.fileSize);
-        this.completeCache();
+        const cacheReady = this.completeCache();
         this.finishMediaSource();
+        return await cacheReady;
       }
+      return false;
     } catch (error) {
       if (!this.disposed) throw error;
+      return false;
     }
   }
 
@@ -618,7 +661,7 @@ class ProgressiveTrackSource {
   completeCache() {
     const chunks = this.chunks;
     this.chunks = [];
-    this.onComplete(new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer), { type: this.contentType }));
+    return this.onComplete(new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer), { type: this.contentType }));
   }
 
   /** @returns {Promise<void>} */
@@ -696,8 +739,85 @@ function canUseMediaSource(contentType) {
   );
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {Uint8Array} chunk @returns {Promise<void>} */
-function appendBuffer(sourceBuffer, chunk) {
+/** @param {SourceBuffer} sourceBuffer @param {Uint8Array} chunk @param {HTMLMediaElement} mediaElement @param {() => boolean} disposed */
+async function appendMediaBuffer(sourceBuffer, chunk, mediaElement, disposed) {
+  while (!disposed()) {
+    await waitForMediaBufferRoom(sourceBuffer, mediaElement, disposed);
+    if (disposed()) break;
+    try {
+      await updateSourceBuffer(sourceBuffer, () => {
+        sourceBuffer.appendBuffer(/** @type {BufferSource} */ (chunk));
+      });
+      return;
+    } catch (error) {
+      if (!isSourceBufferQuotaError(error)) throw error;
+      if (!(await evictPlayedMediaBuffer(sourceBuffer, mediaElement))) {
+        await waitForMediaProgress(mediaElement);
+      }
+    }
+  }
+  throw new DOMException("Track was cancelled", "AbortError");
+}
+
+/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement @param {() => boolean} disposed */
+async function waitForMediaBufferRoom(sourceBuffer, mediaElement, disposed) {
+  while (
+    !disposed() &&
+    mediaBufferAhead(sourceBuffer, mediaElement) > MAX_MEDIA_BUFFER_AHEAD_SECONDS
+  ) {
+    await waitForMediaProgress(mediaElement);
+  }
+}
+
+/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+function mediaBufferAhead(sourceBuffer, mediaElement) {
+  try {
+    const ranges = sourceBuffer.buffered;
+    if (!ranges.length) return 0;
+    return Math.max(0, ranges.end(ranges.length - 1) - mediaElement.currentTime);
+  } catch {
+    return 0;
+  }
+}
+
+/** @param {HTMLMediaElement} mediaElement */
+function waitForMediaProgress(mediaElement) {
+  return new Promise((resolve) => {
+    const complete = () => {
+      clearTimeout(timeout);
+      mediaElement.removeEventListener("timeupdate", complete);
+      mediaElement.removeEventListener("seeking", complete);
+      resolve(undefined);
+    };
+    const timeout = setTimeout(complete, MEDIA_BUFFER_RETRY_MS);
+    mediaElement.addEventListener("timeupdate", complete, { once: true });
+    mediaElement.addEventListener("seeking", complete, { once: true });
+  });
+}
+
+/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+async function evictPlayedMediaBuffer(sourceBuffer, mediaElement) {
+  const cutoff = mediaElement.currentTime - RETAIN_MEDIA_BUFFER_BEHIND_SECONDS;
+  if (!Number.isFinite(cutoff) || cutoff <= 0) return false;
+  try {
+    const ranges = sourceBuffer.buffered;
+    if (!ranges.length || ranges.start(0) >= cutoff) return false;
+    await updateSourceBuffer(sourceBuffer, () => sourceBuffer.remove(0, cutoff));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {unknown} error */
+function isSourceBufferQuotaError(error) {
+  return (
+    error instanceof DOMException && error.name === "QuotaExceededError"
+  ) || /sourcebuffer is full|quota/i.test(String(error));
+}
+
+/** @param {SourceBuffer} sourceBuffer @param {() => void} update @returns {Promise<void>} */
+function updateSourceBuffer(sourceBuffer, update) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       sourceBuffer.removeEventListener("updateend", updated);
@@ -714,7 +834,7 @@ function appendBuffer(sourceBuffer, chunk) {
     sourceBuffer.addEventListener("updateend", updated, { once: true });
     sourceBuffer.addEventListener("error", failed, { once: true });
     try {
-      sourceBuffer.appendBuffer(/** @type {BufferSource} */ (chunk));
+      update();
     } catch (error) {
       cleanup();
       reject(error);
