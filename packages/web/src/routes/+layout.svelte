@@ -98,6 +98,9 @@
             style={`width:${(step / 6) * 100}%`}
           ></div>
         </div>
+        <p class="text-4xs text-overlay0 font-mono tracking-[.08em]">
+          BUILD {__BUILD_COMMIT__}
+        </p>
       </div>
     </div>
   {/snippet}
