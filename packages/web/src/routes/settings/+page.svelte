@@ -414,38 +414,39 @@
       </section>
       <div class="text-2xs text-overlay1 flex items-start justify-between gap-4 leading-5">
         <p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
-        <div class="text-4xs text-overlay0 flex shrink-0 items-center gap-2 font-mono">
-          <span title="Remote web build commit">WEB {__BUILD_COMMIT__}</span>
-          {#if nativeBuildInfo}
+        <div class="text-4xs text-overlay0 flex shrink-0 flex-col items-end gap-0.5 font-mono">
+          <div class="flex items-center gap-2">
+            <span title="Remote web build commit">WEB {__BUILD_COMMIT__}</span>
             <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
+            <span
+              title={serviceWorkerStatus.detail}
+              class:text-green={serviceWorkerStatus.kind === "active"}
+              class:text-yellow={serviceWorkerStatus.kind === "installing" ||
+                serviceWorkerStatus.kind === "update-ready"}
+              class:text-red={serviceWorkerStatus.kind === "error"}
+              class="inline-flex items-center gap-1"
+            >
+              <span
+                aria-hidden="true"
+                class:bg-green={serviceWorkerStatus.kind === "active"}
+                class:bg-yellow={serviceWorkerStatus.kind === "installing" ||
+                  serviceWorkerStatus.kind === "update-ready"}
+                class:bg-red={serviceWorkerStatus.kind === "error"}
+                class:bg-overlay0={serviceWorkerStatus.kind !== "active" &&
+                  serviceWorkerStatus.kind !== "installing" &&
+                  serviceWorkerStatus.kind !== "update-ready" &&
+                  serviceWorkerStatus.kind !== "error"}
+                class="size-1.5 rounded-full"
+              ></span>
+              {serviceWorkerStatus.label}
+            </span>
+          </div>
+          {#if nativeBuildInfo}
             <span title={`${nativeBuildInfo.platform} application build commit`}>
               {nativeBuildInfo.platform.toUpperCase()}
               {nativeBuildInfo.commit.slice(0, 12)}
             </span>
           {/if}
-          <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
-          <span
-            title={serviceWorkerStatus.detail}
-            class:text-green={serviceWorkerStatus.kind === "active"}
-            class:text-yellow={serviceWorkerStatus.kind === "installing" ||
-              serviceWorkerStatus.kind === "update-ready"}
-            class:text-red={serviceWorkerStatus.kind === "error"}
-            class="inline-flex items-center gap-1"
-          >
-            <span
-              aria-hidden="true"
-              class:bg-green={serviceWorkerStatus.kind === "active"}
-              class:bg-yellow={serviceWorkerStatus.kind === "installing" ||
-                serviceWorkerStatus.kind === "update-ready"}
-              class:bg-red={serviceWorkerStatus.kind === "error"}
-              class:bg-overlay0={serviceWorkerStatus.kind !== "active" &&
-                serviceWorkerStatus.kind !== "installing" &&
-                serviceWorkerStatus.kind !== "update-ready" &&
-                serviceWorkerStatus.kind !== "error"}
-              class="size-1.5 rounded-full"
-            ></span>
-            {serviceWorkerStatus.label}
-          </span>
         </div>
       </div>
     </div>
