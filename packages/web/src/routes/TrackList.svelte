@@ -252,6 +252,7 @@
       oninput={(event) => onquery(event.currentTarget.value)}
       onkeydown={(event) => {
         if (event.key === "Escape") {
+          onquery("");
           event.currentTarget.blur();
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
