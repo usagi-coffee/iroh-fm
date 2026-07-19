@@ -3,6 +3,7 @@
   import { resolve } from "$app/paths";
 
   import { App } from "$lib/runes/App.svelte.js";
+  import { forceServiceWorkerUpdate } from "$lib/service-worker.js";
   import { cleanRelays, formatBytes, friendlyError } from "$lib/utils.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
@@ -32,6 +33,7 @@
   });
   let ticketParseGeneration = 0;
   let endpointCopied = $state(false);
+  let forcingUpdate = $state(false);
   let draftEndpointId = $derived(
     settings.secret.trim()
       ? ClientCore.endpointIdForSecret(settings.secret.trim())
@@ -109,6 +111,16 @@
     } finally {
       settings.storage.requesting = false;
       await refreshStorageInfo();
+    }
+  }
+
+  async function forceUpdate() {
+    forcingUpdate = true;
+    try {
+      await forceServiceWorkerUpdate();
+    } catch (error) {
+      forcingUpdate = false;
+      App.connection.error = friendlyError(error, "Could not reset the application update cache.");
     }
   }
 
@@ -364,6 +376,27 @@
               >{settings.storage.requesting ? "REQUESTING…" : "KEEP OFFLINE"}</button
             >{/if}
         </div>
+      </section>
+      <section
+        aria-labelledby="update-title"
+        class="border-surface0 flex items-center justify-between gap-4 border-t pt-4"
+      >
+        <div class="min-w-0">
+          <p id="update-title" class="text-4xs text-overlay0 font-mono tracking-[.14em] uppercase">
+            Application update
+          </p>
+          <p class="text-3xs text-overlay1 mt-1 leading-4">
+            Reset the application shell and service worker if this client is stuck on an older
+            build. Downloaded tracks, covers, and connection settings are preserved.
+          </p>
+        </div>
+        <button
+          type="button"
+          onclick={forceUpdate}
+          disabled={forcingUpdate}
+          class="border-mauve text-4xs text-mauve hover:bg-mauve hover:text-crust shrink-0 border px-3 py-2 font-mono disabled:opacity-40"
+          >{forcingUpdate ? "RESETTING…" : "FORCE UPDATE"}</button
+        >
       </section>
       <div class="text-2xs text-overlay1 flex items-start justify-between gap-4 leading-5">
         <p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>

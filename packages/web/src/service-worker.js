@@ -27,33 +27,22 @@ const APP_SHELL =
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
+      const cache = await caches.open(CACHE_NAME);
       try {
-        const cache = await caches.open(CACHE_NAME);
-        // Cache navigation HTML independently. One bad optional route must not
-        // roll back the main document and every hashed application asset.
-        const failed = [];
-        await Promise.all(
-          APP_SHELL.map(async (path) => {
-            try {
-              await cache.add(path);
-            } catch {
-              failed.push(path);
-            }
-          }),
-        );
+        // A worker is installable only when its complete, matching application
+        // shell is available offline. The previous worker remains active if
+        // any asset from this deployment cannot be cached.
+        await cache.addAll(APP_SHELL);
         const navigationCached = await Promise.all(
           NAVIGATION_FALLBACKS.map((path) => safeCacheMatch(cache, path)),
         );
         if (!navigationCached.some(Boolean)) {
           throw new Error("the main application document could not be cached");
         }
-        if (failed.length) {
-          console.warn("[sw] some optional app-shell entries could not be cached", failed);
-        }
       } catch (error) {
-        // Offline support is optional. A quota or transient Cache API failure
-        // must never prevent a newer network-safe worker from activating.
-        console.warn("[sw] app shell could not be cached", error);
+        await caches.delete(CACHE_NAME).catch(() => {});
+        console.error("[sw] application update was not cached completely", error);
+        throw error;
       }
     })(),
   );
@@ -116,15 +105,25 @@ self.addEventListener("fetch", (event) => {
       }
 
       if (event.request.mode === "navigate") {
+        const cached =
+          (cache && (await safeCacheMatch(cache, event.request))) ||
+          (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[0]))) ||
+          (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[1])));
+        if (cached) return cached;
+
+        // This is only needed for the first uncontrolled load or if Cache
+        // Storage was cleared. Controlled navigations never mix HTML from a
+        // newer deployment into the active worker's versioned cache.
         try {
           const response = await fetch(event.request, { cache: "no-store" });
-          if (response.ok) {
-            if (cache) await cache.put(event.request, response.clone()).catch(() => {});
-            return response;
-          }
+          if (response.ok) return response;
         } catch {
-          // Fall through to the cached application shell while offline.
+          // The response below explains why a complete offline shell is absent.
         }
+        return new Response("The offline application shell is unavailable.", {
+          status: 503,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
       }
 
       if (cache && APP_SHELL.includes(url.pathname)) {

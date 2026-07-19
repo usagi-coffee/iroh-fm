@@ -3,11 +3,12 @@ import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
 const START_TIMEOUT_MS = 30_000;
+const APP_CACHE_PREFIX = "iroh-fm-";
+const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 let startupPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
 let reloadRequired = false;
-let matchingWorkerActivationPending = false;
 /** @type {Set<(ready: boolean) => void>} */
 const updateListeners = new Set();
 /** @type {WeakSet<ServiceWorkerRegistration>} */
@@ -52,6 +53,26 @@ export function activateServiceWorkerUpdate() {
     once: true,
   });
   waitingWorker.postMessage({ type: "skip-waiting" });
+  setTimeout(() => location.reload(), 2_000);
+}
+
+export async function forceServiceWorkerUpdate() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) await registration.unregister();
+    }
+    if ("caches" in globalThis) {
+      const keys = await globalThis.caches.keys();
+      await Promise.allSettled(
+        keys
+          .filter((key) => key.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(key))
+          .map((key) => globalThis.caches.delete(key)),
+      );
+    }
+  } finally {
+    location.reload();
+  }
 }
 
 export async function ensure_service_worker() {
@@ -82,11 +103,7 @@ async function startServiceWorker() {
     return {};
   });
   if (dev) return;
-  if (
-    workerInfo.buildVersion &&
-    workerInfo.buildVersion !== __BUILD_VERSION__ &&
-    !matchingWorkerActivationPending
-  ) {
+  if (workerInfo.buildVersion && workerInfo.buildVersion !== __BUILD_VERSION__) {
     reloadRequired = true;
     notifyUpdateListeners();
   }
@@ -104,38 +121,19 @@ function watchRegistration(registration) {
   watchedRegistrations.add(registration);
 
   /** @param {ServiceWorker | null | undefined} worker */
-  const announceWaitingWorker = async (worker) => {
-    if (!worker || !navigator.serviceWorker.controller) return;
-    const workerInfo = await pingWorker(worker).catch(() => ({}));
-    if (workerInfo.buildVersion === __BUILD_VERSION__) {
-      matchingWorkerActivationPending = true;
-      waitingWorker = undefined;
-      reloadRequired = false;
-      notifyUpdateListeners();
-      navigator.serviceWorker.addEventListener(
-        "controllerchange",
-        () => {
-          matchingWorkerActivationPending = false;
-          waitingWorker = undefined;
-          reloadRequired = false;
-          notifyUpdateListeners();
-        },
-        { once: true },
-      );
-      worker.postMessage({ type: "skip-waiting" });
-      return;
-    }
+  const announceWaitingWorker = (worker) => {
+    if (!worker || (!navigator.serviceWorker.controller && !registration.active)) return;
     waitingWorker = worker;
     notifyUpdateListeners();
   };
 
-  void announceWaitingWorker(registration.waiting);
+  announceWaitingWorker(registration.waiting);
   registration.addEventListener("updatefound", () => {
     const installing = registration.installing;
     if (!installing) return;
     installing.addEventListener("statechange", () => {
       if (installing.state === "installed")
-        void announceWaitingWorker(registration.waiting ?? installing);
+        announceWaitingWorker(registration.waiting ?? installing);
     });
   });
 }
