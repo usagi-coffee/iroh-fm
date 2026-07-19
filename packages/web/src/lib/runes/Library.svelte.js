@@ -74,6 +74,8 @@ export class Library {
   offlineOnly = $state(false);
   /** @type {string | null} */
   selectedTrackId = $state(null);
+  /** @type {string | null} */
+  pendingTrackFocusId = $state(null);
 
   /** @param {import('./App.svelte.js').Application} app */
   constructor(app) {
@@ -174,7 +176,8 @@ export class Library {
     );
     if (!first) return null;
     this.selectedTrackId = first.id;
-    await goto(resolve("/tracks"), { state: { focusTrackId: first.id } });
+    this.pendingTrackFocusId = first.id;
+    await goto(resolve("/tracks"));
     return first;
   }
 

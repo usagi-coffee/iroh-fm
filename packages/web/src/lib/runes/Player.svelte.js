@@ -41,10 +41,17 @@ export class Player {
 
   /** @param {import('../types').AlbumData} album */
   async playAlbum(album) {
-    const tracks = this.app.library
-      .tracksForAlbum(album)
-      .filter((track) => !this.app.library.offlineOnly || track.cached);
-    if (tracks[0]) await this.play(tracks[0], tracks);
+    await this.playAlbumTracks(
+      this.app.library.tracksForAlbum(album),
+      this.app.library.getFilteredTracks(),
+    );
+  }
+
+  /** @param {import('./Track.svelte.js').Track[]} albumTracks @param {import('./Track.svelte.js').Track[]} sourceQueue */
+  async playAlbumTracks(albumTracks, sourceQueue) {
+    const albumTrackIds = new Set(albumTracks.map((track) => track.id));
+    const first = sourceQueue.find((track) => albumTrackIds.has(track.id));
+    if (first) await this.play(first, sourceQueue);
   }
 
   /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} queue @param {number} generation */

@@ -17,6 +17,12 @@ export default defineConfig({
   },
   plugins: [
     sveltekit({
+      vitePlugin: {
+        inspector: {
+          toggleKeyCombo: "control-shift",
+          holdMode: true,
+        },
+      },
       compilerOptions: {
         // Force runes mode for the project, except for libraries. Can be removed in svelte 6.
         runes: ({ filename }) =>
@@ -29,7 +35,7 @@ export default defineConfig({
       adapter: adapter({ fallback: "index.html" }),
       paths: {
         base,
-      }
+      },
     }),
     tailwindcss(),
     icons({ compiler: "svelte" }),

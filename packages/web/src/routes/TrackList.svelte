@@ -69,25 +69,72 @@
 
   /** @param {HTMLElement} host */
   function focusRequestedTrack(host) {
-    const trackId = page.state.focusTrackId;
+    const trackId = App.library.pendingTrackFocusId ?? page.state.focusTrackId;
     if (!trackId) return;
     const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
-    let attempts = 3;
+    let attempts = 120;
+    let cancelled = false;
+    let centeredFrames = 0;
     /** @type {number | undefined} */
     let frame;
+    const retry = () => {
+      if (!cancelled && attempts-- > 0) frame = requestAnimationFrame(scroll);
+    };
     const scroll = () => {
       const viewport = host.firstElementChild;
       if (!(viewport instanceof HTMLElement)) {
-        if (attempts-- > 0) frame = requestAnimationFrame(scroll);
+        retry();
         return;
       }
-      const top = index * rowHeight - (viewport.clientHeight - rowHeight) / 2;
-      viewport.scrollTo({ top: Math.max(0, top), behavior: "auto" });
-      replaceState(page.url, {});
+      const target = [...host.querySelectorAll("[data-track-id]")].find(
+        (element) => element instanceof HTMLElement && element.dataset.trackId === trackId,
+      );
+      if (target instanceof HTMLElement) {
+        const viewportRect = viewport.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const offset =
+          targetRect.top + targetRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
+        if (Math.abs(offset) > 1) {
+          centeredFrames = 0;
+          viewport.scrollBy({ top: offset, behavior: "auto" });
+          retry();
+          return;
+        }
+        if (++centeredFrames < 2) {
+          retry();
+          return;
+        }
+        App.library.pendingTrackFocusId = null;
+        if (page.state.focusTrackId) replaceState(page.url, {});
+        return;
+      }
+      centeredFrames = 0;
+      const measuredRoot = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const measuredRow = Number.isFinite(measuredRoot) ? measuredRoot * ROW_HEIGHT_REM : rowHeight;
+      const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      if (maxTop === 0 && items.length > 1) {
+        retry();
+        return;
+      }
+      const rendered = host.querySelector("[data-list-index]");
+      const renderedIndex =
+        rendered instanceof HTMLElement ? Number(rendered.dataset.listIndex) : Number.NaN;
+      const requested = Number.isFinite(renderedIndex)
+        ? viewport.scrollTop +
+          (rendered instanceof HTMLElement
+            ? rendered.getBoundingClientRect().top - viewport.getBoundingClientRect().top
+            : 0) +
+          (index - renderedIndex) * measuredRow -
+          (viewport.clientHeight - measuredRow) / 2
+        : (index / Math.max(1, items.length - 1)) * maxTop;
+      const top = Math.min(maxTop, Math.max(0, requested));
+      viewport.scrollTo({ top, behavior: "auto" });
+      retry();
     };
     frame = requestAnimationFrame(scroll);
     return () => {
+      cancelled = true;
       if (frame) cancelAnimationFrame(frame);
     };
   }
@@ -123,14 +170,15 @@
       {bufferSize}
       style="height: 100%; overscroll-behavior: contain;"
     >
-      {#snippet children(item)}
+      {#snippet children(item, itemIndex)}
         {#if item.kind === "album"}
           <button
+            data-list-index={itemIndex}
             {@attach longPress(() =>
               openAlbumActions(item.album, item.tracks, item.title, item.album?.id ?? item.key),
             )}
             type="button"
-            onclick={() => App.player.play(item.tracks[0], item.tracks)}
+            onclick={() => App.player.playAlbumTracks(item.tracks, tracks)}
             oncontextmenu={(event) =>
               openAlbumActions(
                 item.album,
@@ -147,7 +195,7 @@
               id={item.coverArtId}
               title={item.title}
               rootMargin={COVER_MARGIN}
-              class="size-7 shrink-0 rounded-sm"
+              class="size-5 shrink-0 rounded-sm"
             />
             <p class="text-track min-w-0 flex-1 truncate">
               <span class="text-mauve font-semibold">{item.title}</span><span
@@ -160,6 +208,8 @@
           </button>
         {:else}
           <div
+            data-list-index={itemIndex}
+            data-track-id={item.track.id}
             {@attach longPress(() => openTrackActions(item.track))}
             role="row"
             tabindex="0"
