@@ -48,7 +48,7 @@ Current seek behavior reopens a stream and consumes bytes up to Media3's request
 
 ## GitHub Actions and release signing
 
-The Android workflow builds only signed release APKs. It builds for every pushed tag and for pushes to `master` whose commit subject starts exactly with `android:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
+The Android workflow builds only signed release APKs. It builds for numbered Android tags (`v1`, `v2`, `v3`, ...) and for pushes to `master` whose commit subject starts exactly with `android:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
 
 Create the long-lived release keystore locally. Do not create it in GitHub Actions and do not commit it:
 
@@ -87,15 +87,21 @@ git commit -m "android: describe the Android change"
 git push
 ```
 
-Create a GitHub release with the signed APK attached by pushing any tag,
-conventionally a version tag:
+Create a GitHub release with the signed APK attached by pushing the next numbered
+Android release tag:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1
+git push origin v1
 ```
 
-A tag becomes the APK `versionName` without one leading `v`. An `android:` branch build uses `0.1.0-ci.<run-number>` as its `versionName`. The workflow run number supplies the monotonically increasing `versionCode` for both paths.
+Android releases use sequential tags (`v1`, `v2`, `v3`, ...), with the leading
+`v` removed for the APK `versionName`; GitHub names the corresponding release
+`Android v1`, `Android v2`, and so on. An `android:` branch build uses
+`ci-<run-number>` and an unconfigured local build uses `local`; neither shares the
+Rust and web SemVer. Both CI and local release builds use the Unix build timestamp
+as a monotonically increasing `versionCode`, so either source can update an APK
+produced by the other.
 
 Tag builds are also retained as workflow artifacts. If a tag workflow is rerun,
 the existing release is kept and its APK asset is replaced with the newly built,

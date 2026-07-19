@@ -3,7 +3,7 @@ name: Android
 on:
   push:
     branches: [master]
-    tags: ["**"]
+    tags: ["v[1-9]*"]
 
 permissions:
   contents: read
@@ -90,15 +90,21 @@ jobs:
       - name: Set release metadata
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[1-9][0-9]*$ ]]; then
+              echo "Android release tags must be numbered v1, v2, v3, ..." >&2
+              exit 1
+            fi
             version_name="${GITHUB_REF_NAME#v}"
             artifact_suffix="$GITHUB_REF_NAME"
           else
-            version_name="0.1.0-ci.$GITHUB_RUN_NUMBER"
+            version_name="ci-$GITHUB_RUN_NUMBER"
             artifact_suffix="ci-$GITHUB_RUN_NUMBER"
           fi
 
           artifact_suffix="${artifact_suffix//[^a-zA-Z0-9._-]/-}"
+          version_code="$(date -u +%s)"
           echo "IROH_FM_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "IROH_FM_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
           echo "ANDROID_ARTIFACT_NAME=iroh-fm-android-$artifact_suffix" >> "$GITHUB_ENV"
 
       - name: Build signed release APK
@@ -108,7 +114,7 @@ jobs:
         run: |
           gradle -p android --no-daemon \
             -PirohFmVersionName="$IROH_FM_VERSION_NAME" \
-            -PirohFmVersionCode="$GITHUB_RUN_NUMBER" \
+            -PirohFmVersionCode="$IROH_FM_VERSION_CODE" \
             :app:assembleRelease
 
       - name: Verify release signature
@@ -162,11 +168,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          release_title="Android $GITHUB_REF_NAME"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "$release_title"
             gh release upload "$GITHUB_REF_NAME" "$RELEASE_APK" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "$RELEASE_APK" \
               --verify-tag \
               --generate-notes \
-              --title "$GITHUB_REF_NAME"
+              --title "$release_title"
           fi
