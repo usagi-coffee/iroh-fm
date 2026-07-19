@@ -233,29 +233,24 @@
     >
       <div class="border-surface0 bg-mantle border-b px-5 pt-5">
         <div class="mb-5 flex items-start gap-3">
-          <img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-9 rounded-lg" />
+          <img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-12 rounded-xl" />
           <div class="min-w-0 flex-1">
             <div class="flex min-w-0 items-center">
               <h1 class="text-text text-base font-semibold">iroh.fm</h1>
-              <div
-                class="text-4xs text-overlay0 ml-auto flex h-7 shrink-0 items-center gap-1 font-mono leading-none"
+              <a
+                href={commitUrl}
+                target="_blank"
+                rel="noreferrer"
+                class="text-4xs text-overlay0 hover:text-mauve ml-auto shrink-0 font-mono leading-none transition"
+                title={`View commit ${__BUILD_COMMIT__} on GitHub`}>{__BUILD_COMMIT__}</a
+              ><a
+                href={repositoryUrl}
+                target="_blank"
+                rel="noreferrer"
+                class="text-overlay0 hover:text-mauve ml-2 grid size-5 shrink-0 place-items-center transition"
+                title="Open the iroh-fm repository on GitHub"
+                aria-label="Open the iroh-fm repository on GitHub"><GithubIcon class="text-sm" /></a
               >
-                <a
-                  href={commitUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="hover:bg-surface0 hover:text-mauve flex h-7 items-center px-1.5 transition"
-                  title={`View commit ${__BUILD_COMMIT__} on GitHub`}>{__BUILD_COMMIT__}</a
-                ><a
-                  href={repositoryUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="hover:bg-surface0 hover:text-mauve grid size-7 place-items-center transition"
-                  title="Open the iroh-fm repository on GitHub"
-                  aria-label="Open the iroh-fm repository on GitHub"
-                  ><GithubIcon class="text-sm" /></a
-                >
-              </div>
             </div>
             <p class="text-2xs text-overlay1 mt-0.5 leading-5">Your music, anywhere with iroh.</p>
           </div>
@@ -277,7 +272,7 @@
         </div>
       </div>
 
-      <div class="space-y-4 p-5">
+      <div class="flex flex-col gap-3 p-5">
         <div>
           <div class="mb-2 flex items-center justify-between gap-3">
             <label for="ticket" class="text-3xs text-subtext0 font-mono tracking-[.14em] uppercase"
@@ -313,11 +308,6 @@
         </div>
 
         {#if loginTab === "advanced"}
-          <div class="text-4xs text-overlay0 flex items-center gap-3 tracking-wider uppercase">
-            <span class="bg-surface0 h-px flex-1"></span>or manual address<span
-              class="bg-surface0 h-px flex-1"
-            ></span>
-          </div>
           <div>
             <label
               for="endpoint"
@@ -361,9 +351,6 @@
                     >{/if}
                 </div>{/each}
             </div>
-            <p class="text-3xs text-overlay0 mt-1.5">
-              Valid tickets fill this address automatically. You can still edit it manually.
-            </p>
           </div>
           <div>
             <label
@@ -426,18 +413,20 @@
             <strong>Connection failed.</strong>
             {App.connection.error}
           </div>{/if}
-        <button
-          type="submit"
-          disabled={!App.connection.canConnect(loginTab === "ticket") ||
-            App.connection.connecting ||
-            App.connection.identityLoading}
-          class="bg-mauve text-crust hover:bg-pink flex h-11 w-full items-center justify-center gap-3 font-mono text-xs font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
-          >{#if App.connection.connecting}<span
-              class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
-            ></span>{App.connection.connectionStep}{:else}CONNECT <ArrowIcon
-              class="text-sm"
-            />{/if}</button
-        >
+        <div>
+          <button
+            type="submit"
+            disabled={!App.connection.canConnect(loginTab === "ticket") ||
+              App.connection.connecting ||
+              App.connection.identityLoading}
+            class="bg-mauve text-crust hover:bg-pink flex h-11 w-full items-center justify-center gap-3 font-mono text-xs font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
+            >{#if App.connection.connecting}<span
+                class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
+              ></span>{App.connection.connectionStep}{:else}CONNECT <ArrowIcon
+                class="text-sm"
+              />{/if}</button
+          >
+        </div>
       </div>
     </form>
   </section>
