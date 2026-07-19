@@ -25,8 +25,21 @@ jobs:
         id: wasm-tools-cache
         uses: actions/cache@v4
         with:
-          path: .ci-tools/bin
-          key: web-wasm-tools-v1-${{ runner.os }}-${{ runner.arch }}-bindgen-0.2.125
+          path: .ci-tools
+          key: web-wasm-tools-v2-${{ runner.os }}-${{ runner.arch }}-bindgen-0.2.125
+
+      - name: Validate cached WASM build tools
+        id: wasm-tools
+        run: |
+          if [ -x .ci-tools/bin/wasm-bindgen ] && \
+            [ -x .ci-tools/bin/wasm-opt ] && \
+            .ci-tools/bin/wasm-bindgen --version | grep --fixed-strings --line-regexp 'wasm-bindgen 0.2.125' >/dev/null && \
+            LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.ci-tools/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+              .ci-tools/bin/wasm-opt --version >/dev/null; then
+            echo "cache-valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cache-valid=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Pages
         id: pages
@@ -48,17 +61,25 @@ jobs:
           shared-key: web
 
       - name: Install WASM build tools
-        if: steps.wasm-tools-cache.outputs.cache-hit != 'true'
+        if: steps.wasm-tools.outputs.cache-valid != 'true'
         run: |
-          mkdir -p .ci-tools/bin
+          mkdir -p .ci-tools/bin .ci-tools/lib
           cargo install wasm-bindgen-cli --version 0.2.125 --locked
           sudo apt-get update
           sudo apt-get install --yes binaryen
           cp "$(command -v wasm-bindgen)" .ci-tools/bin/wasm-bindgen
           cp "$(command -v wasm-opt)" .ci-tools/bin/wasm-opt
+          binaryen_library="$(ldd "$(command -v wasm-opt)" | awk '$1 == "libbinaryen.so" { print $3 }')"
+          if [ -z "$binaryen_library" ] || [ ! -f "$binaryen_library" ]; then
+            echo "Could not locate libbinaryen.so required by wasm-opt." >&2
+            exit 1
+          fi
+          cp "$binaryen_library" .ci-tools/lib/libbinaryen.so
 
       - name: Add WASM build tools to PATH
-        run: echo "$GITHUB_WORKSPACE/.ci-tools/bin" >> "$GITHUB_PATH"
+        run: |
+          echo "$GITHUB_WORKSPACE/.ci-tools/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci-tools/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Set Pages base path
         run: |
