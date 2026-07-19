@@ -27,6 +27,10 @@ const APP_SHELL =
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
+      // SvelteKit does not provide an application-shell manifest to its
+      // development worker. Production builds always have one.
+      if (APP_SHELL.length === 0) return;
+
       const cache = await caches.open(CACHE_NAME);
       try {
         // A worker is installable only when its complete, matching application
