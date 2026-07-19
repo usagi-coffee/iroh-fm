@@ -1,3 +1,25 @@
+import { toHiragana, toKatakana } from "wanakana";
+
+/** @type {WeakMap<object, { source: string, variants: string[] }>} */
+const trackSearchMetadata = new WeakMap();
+
+/** @param {import('./types').TrackData} track */
+function trackMetadataVariants(track) {
+  const source = `${track.artist}\n${track.title}\n${track.album}`;
+  const cached = trackSearchMetadata.get(track);
+  if (cached?.source === source) return cached.variants;
+  const metadata = source.toLocaleLowerCase();
+  const variants = [
+    ...new Set([
+      metadata,
+      toHiragana(metadata).toLocaleLowerCase(),
+      toKatakana(metadata).toLocaleLowerCase(),
+    ]),
+  ];
+  trackSearchMetadata.set(track, { source, variants });
+  return variants;
+}
+
 /** @template T @param {Record<string, unknown> | null | undefined} response @param {string} key @param {T} fallback @returns {T} */
 export function variant(response, key, fallback) {
   return response && key in response ? /** @type {T} */ (response[key]) : fallback;
@@ -11,9 +33,18 @@ export function cleanRelays(values) {
 /** @template {import('./types').TrackData} T @param {T[]} list @param {string} term @returns {T[]} */
 export function filterTracks(list, term) {
   const needle = term.trim().toLocaleLowerCase();
+  const needles = [
+    ...new Set([
+      needle,
+      toHiragana(needle).toLocaleLowerCase(),
+      toKatakana(needle).toLocaleLowerCase(),
+    ]),
+  ];
   return list.filter((track) => {
     if (!needle) return true;
-    return `${track.artist}\n${track.title}\n${track.album}`.toLocaleLowerCase().includes(needle);
+    return trackMetadataVariants(track).some((metadata) =>
+      needles.some((candidate) => metadata.includes(candidate)),
+    );
   });
 }
 

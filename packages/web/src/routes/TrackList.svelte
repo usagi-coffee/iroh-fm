@@ -163,6 +163,9 @@
       {@attach focusRequestedFilter}
       value={query}
       oninput={(event) => onquery(event.currentTarget.value)}
+      onkeydown={(event) => {
+        if (event.key === "Escape") event.currentTarget.blur();
+      }}
       placeholder="Filter artist, title, album…"
       class="text-text placeholder:text-overlay0 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none"
     />

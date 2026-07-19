@@ -20,7 +20,8 @@
     "@iroh-fm/client": "workspace:*",
     "@tauri-apps/api": "^2.11.0",
     "oxfmt": "^0.59.0",
-    "virtua": "^0.49.3"
+    "virtua": "^0.49.3",
+    "wanakana": "^5.3.1"
   },
   "devDependencies": {
     "@iconify-json/ri": "^1.2.10",
