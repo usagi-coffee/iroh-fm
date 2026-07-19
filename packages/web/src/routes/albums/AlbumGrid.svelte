@@ -26,6 +26,7 @@
   const ALBUM_HORIZONTAL_PADDING_REM = 1.5;
   const MAX_COLUMNS = 16;
   const COLUMN_ADJUSTMENT_KEY = "iroh-fm-album-column-adjustment";
+  const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   let gridWidth = $state(0);
   let rootFontSize = $state(16);
   let columnAdjustment = $state(0);
@@ -70,6 +71,26 @@
     const observer = new ResizeObserver((entries) => update(entries[0]?.contentRect.width ?? 0));
     observer.observe(node);
     return () => observer.disconnect();
+  }
+
+  /** @param {HTMLElement} node */
+  function immediateDesktopWheelScroll(node) {
+    if (!desktop) return;
+    /** @param {WheelEvent} event */
+    const scroll = (event) => {
+      const viewport = node.firstElementChild;
+      if (!(viewport instanceof HTMLElement) || event.deltaY === 0) return;
+      event.preventDefault();
+      const delta =
+        event.deltaMode === 1
+          ? event.deltaY * rootFontSize * 3
+          : event.deltaMode === 2
+            ? event.deltaY * viewport.clientHeight
+            : event.deltaY;
+      viewport.scrollTop += delta;
+    };
+    node.addEventListener("wheel", scroll, { passive: false, capture: true });
+    return () => node.removeEventListener("wheel", scroll, true);
   }
 
   /** @param {-1 | 1} direction */
@@ -137,7 +158,11 @@
       >
     </div>
   </div>
-  <div {@attach measureColumns} class="min-h-0 flex-1">
+  <div
+    {@attach measureColumns}
+    {@attach immediateDesktopWheelScroll}
+    class="min-h-0 flex-1"
+  >
     <VList
       data={rows}
       getKey={(row) => `${columns}:${row.map((album) => album.id).join("|")}`}

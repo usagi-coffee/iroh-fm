@@ -56,6 +56,43 @@
     return () => cancelAnimationFrame(frame);
   }
 
+  function selectFirstSearchResult() {
+    if (!query.trim()) return;
+    const first = tracks[0];
+    if (first) App.library.requestTrackFocus(first);
+    else {
+      App.library.selectedTrackId = null;
+      App.library.pendingTrackFocusId = null;
+    }
+  }
+
+  /** @param {-1 | 1} direction */
+  function moveSearchSelection(direction) {
+    if (!tracks.length) return;
+    const selectedIndex = tracks.findIndex(
+      (track) => track.id === App.library.selectedTrackId,
+    );
+    const start = selectedIndex < 0 ? (direction > 0 ? -1 : tracks.length) : selectedIndex;
+    const nextIndex = Math.max(0, Math.min(tracks.length - 1, start + direction));
+    App.library.requestTrackFocus(tracks[nextIndex]);
+  }
+
+  function playSearchSelection() {
+    const selected = tracks.find((track) => track.id === App.library.selectedTrackId) ?? tracks[0];
+    if (selected) playTrackFromList(selected);
+  }
+
+  /** @param {import('$lib/runes/Track.svelte.js').Track} track */
+  function playTrackFromList(track) {
+    let queue = tracks;
+    if (query.trim()) {
+      queue = App.library.getFilteredTracks();
+      onquery("");
+      void App.library.focusTrack(track);
+    }
+    void App.player.playFromTrackList(track, queue);
+  }
+
   /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {MouseEvent} [event] */
   function openTrackActions(track, event) {
     event?.preventDefault();
@@ -161,10 +198,19 @@
     <SearchIcon class="text-sm" />
     <input
       {@attach focusRequestedFilter}
+      {@attach selectFirstSearchResult}
       value={query}
       oninput={(event) => onquery(event.currentTarget.value)}
       onkeydown={(event) => {
-        if (event.key === "Escape") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          event.currentTarget.blur();
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          moveSearchSelection(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          playSearchSelection();
+        }
       }}
       placeholder="Filter artist, title, album…"
       class="text-text placeholder:text-overlay0 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none"
@@ -236,10 +282,10 @@
             tabindex="0"
             aria-selected={App.library.selectedTrackId === item.track.id}
             onclick={() => (App.library.selectedTrackId = item.track.id)}
-            ondblclick={() => App.player.playFromTrackList(item.track, tracks)}
+            ondblclick={() => playTrackFromList(item.track)}
             oncontextmenu={(event) => openTrackActions(item.track, event)}
             onkeydown={(event) => {
-              if (event.key === "Enter") App.player.playFromTrackList(item.track, tracks);
+              if (event.key === "Enter") playTrackFromList(item.track);
               else if (event.key === " ") {
                 event.preventDefault();
                 App.library.selectedTrackId = item.track.id;
@@ -256,7 +302,7 @@
               type="button"
               onclick={(event) => {
                 event.stopPropagation();
-                App.player.playFromTrackList(item.track, tracks);
+                playTrackFromList(item.track);
               }}
               class="text-3xs text-overlay0 hover:text-mauve grid size-6 place-items-center font-mono"
               aria-label={`Play ${item.track.title}`}
