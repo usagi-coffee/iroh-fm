@@ -34,6 +34,7 @@
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   let bufferSize = $derived(rowHeight * 60);
+  let focusPlayingTrackOnMount = true;
   const COVER_MARGIN = "400%";
 
   function measureRowHeight() {
@@ -44,6 +45,47 @@
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
+  }
+
+  /** @param {EventTarget | null} target */
+  function isEditableTarget(target) {
+    return (
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox']",
+        ),
+      )
+    );
+  }
+
+  function globalTrackKeybinds() {
+    /** @param {KeyboardEvent} event */
+    const keydown = (event) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        isEditableTarget(event.target)
+      )
+        return;
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (!tracks.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveSearchSelection(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter") {
+        if (!tracks.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) playSearchSelection();
+      }
+    };
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
   }
 
   /** @param {HTMLInputElement} input */
@@ -120,10 +162,12 @@
 
   /** @param {HTMLElement} host */
   function focusRequestedTrack(host) {
+    const playingTrackId = focusPlayingTrackOnMount
+      ? untrack(() => App.player.currentTrack?.id)
+      : null;
+    focusPlayingTrackOnMount = false;
     const trackId =
-      App.library.pendingTrackFocusId ??
-      page.state.focusTrackId ??
-      untrack(() => App.player.currentTrack?.id);
+      App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? playingTrackId;
     if (!trackId) return;
     const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
@@ -194,7 +238,11 @@
   }
 </script>
 
-<section {@attach measureRowHeight} class="bg-base flex h-full min-h-0 w-full flex-col">
+<section
+  {@attach measureRowHeight}
+  {@attach globalTrackKeybinds}
+  class="bg-base flex h-full min-h-0 w-full flex-col"
+>
   <div class="border-surface0 bg-mantle flex h-10 shrink-0 items-center gap-3 border-b px-3">
     <SearchIcon class="text-sm" />
     <input
