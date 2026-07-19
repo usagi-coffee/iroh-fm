@@ -8,6 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+base64 = "0.22"
 client = { path = "../client" }
 iroh.workspace = true
 iroh-dns = "1.0.0"

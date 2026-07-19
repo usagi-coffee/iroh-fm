@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use client::{Client, IrohConfig};
 use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey};
 use iroh_tickets::endpoint::EndpointTicket;
@@ -12,7 +13,7 @@ use jni::{
     objects::{JByteArray, JClass, JObject, JString},
     sys::{jbyteArray, jint, jlong, jstring},
 };
-use protocol::{BackendRequest, TrackId};
+use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
@@ -184,6 +185,30 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_request(
             .block_on(client_for(handle)?.request(request))
             .map_err(|error| error.to_string())?;
         serde_json::to_string(&response).map_err(|error| error.to_string())
+    })();
+    java_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_fm_iroh_android_NativeCore_coverArt(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    cover_art_id: JString,
+) -> jstring {
+    let result = (|| {
+        let cover_art_id = CoverArtId(to_rust_string(&mut env, cover_art_id)?);
+        let response = RUNTIME
+            .block_on(client_for(handle)?.request(BackendRequest::GetCoverArt { cover_art_id }))
+            .map_err(|error| error.to_string())?;
+        let BackendResponse::CoverArt(cover) = response else {
+            return Err("backend returned an unexpected cover response".to_string());
+        };
+        serde_json::to_string(&serde_json::json!({
+            "contentType": cover.content_type,
+            "bytesBase64": BASE64.encode(cover.bytes),
+        }))
+        .map_err(|error| error.to_string())
     })();
     java_string(&mut env, result)
 }

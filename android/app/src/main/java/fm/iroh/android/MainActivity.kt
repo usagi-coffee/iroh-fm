@@ -170,7 +170,7 @@ class MainActivity : ComponentActivity() {
         val action = message.optString("action")
         Log.d(TAG, "Native request received: action=$action id=$id")
         val payload = message.optJSONObject("payload") ?: JSONObject()
-        val background = action in setOf("connect", "request", "connectionInfo", "identity", "endpointId", "parseTicket", "close")
+        val background = action in setOf("connect", "request", "coverArt", "connectionInfo", "identity", "endpointId", "parseTicket", "close")
         val task = Runnable {
             val startedAt = SystemClock.elapsedRealtime()
             runCatching { execute(action, payload) }
@@ -201,6 +201,11 @@ class MainActivity : ComponentActivity() {
             NativeCore.activeClientHandle = it.getLong("handle")
         }
         "request" -> JSONTokener(NativeCore.unwrap(NativeCore.request(payload.getLong("handle"), encodeJson(payload.get("request"))))).nextValue()
+        "coverArt" -> JSONObject(
+            NativeCore.unwrap(
+                NativeCore.coverArt(payload.getLong("handle"), payload.getString("coverArtId")),
+            ),
+        )
         "connectionInfo" -> JSONObject(NativeCore.unwrap(NativeCore.connectionInfo(payload.getLong("handle"))))
         "identity" -> JSONObject(NativeCore.unwrap(NativeCore.generateIdentity()))
         "endpointId" -> NativeCore.unwrap(NativeCore.endpointIdForSecret(payload.getString("secret")))
@@ -301,6 +306,6 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "iroh.fm"
         private const val POST_MESSAGE_ATTEMPTS = 5
         private const val POST_MESSAGE_RETRY_DELAY_MS = 1_000L
-        private const val POST_MESSAGE_CHUNK_CHARS = 32 * 1024
+        private const val POST_MESSAGE_CHUNK_CHARS = 64 * 1024
     }
 }

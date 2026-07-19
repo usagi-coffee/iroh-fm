@@ -1,4 +1,5 @@
 const NATIVE_TIMEOUT_MS = 30_000;
+const NATIVE_COVER_CONCURRENCY = 3;
 /** @type {MessagePort | undefined} */
 let port;
 let nativeExpected = false;
@@ -155,6 +156,9 @@ export class NativeMusicClient {
     this.info = { path_type: "unknown", address: "", received_bytes: 0 };
     this.infoPending = false;
     this.coverUrls = new Map();
+    this.coverRequests = new Map();
+    this.coverActive = 0;
+    this.coverQueue = /** @type {Array<() => void>} */ ([]);
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -206,14 +210,32 @@ export class NativeMusicClient {
   async coverUrl(id) {
     if (!id) return "";
     if (this.coverUrls.has(id)) return this.coverUrls.get(id);
-    const response = await this.request({ GetCoverArt: { cover_art_id: id } });
-    const cover = response.CoverArt;
-    if (!cover) throw new Error("backend returned an unexpected cover response");
-    const url = URL.createObjectURL(
-      new Blob([new Uint8Array(cover.bytes)], { type: cover.content_type }),
-    );
-    this.coverUrls.set(id, url);
-    return url;
+    if (this.coverRequests.has(id)) return this.coverRequests.get(id);
+    const request = this.withCoverSlot(async () => {
+      const cover = await nativeRequest("coverArt", { handle: this.handle, coverArtId: id });
+      const binary = atob(cover.bytesBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1)
+        bytes[index] = binary.charCodeAt(index);
+      const url = URL.createObjectURL(new Blob([bytes], { type: cover.contentType }));
+      this.coverUrls.set(id, url);
+      return url;
+    }).finally(() => this.coverRequests.delete(id));
+    this.coverRequests.set(id, request);
+    return request;
+  }
+
+  /** @template T @param {() => Promise<T>} task @returns {Promise<T>} */
+  async withCoverSlot(task) {
+    if (this.coverActive >= NATIVE_COVER_CONCURRENCY)
+      await new Promise((resolve) => this.coverQueue.push(() => resolve(undefined)));
+    this.coverActive += 1;
+    try {
+      return await task();
+    } finally {
+      this.coverActive -= 1;
+      this.coverQueue.shift()?.();
+    }
   }
 
   /** @param {{id: string}} track @param {Array<{id: string, title: string, artist: string, album: string}>} queue */

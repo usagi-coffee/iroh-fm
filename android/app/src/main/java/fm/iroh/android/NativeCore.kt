@@ -8,6 +8,7 @@ object NativeCore {
     @JvmStatic external fun initialize(applicationContext: Any): String
     @JvmStatic external fun connect(options: String): String
     @JvmStatic external fun request(handle: Long, request: String): String
+    @JvmStatic external fun coverArt(handle: Long, coverArtId: String): String
     @JvmStatic external fun connectionInfo(handle: Long): String
     @JvmStatic external fun openStream(clientHandle: Long, trackId: String): String
     @JvmStatic external fun readStream(streamHandle: Long, destination: ByteArray, offset: Int, length: Int): Int

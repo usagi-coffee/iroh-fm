@@ -1737,6 +1737,7 @@ dependencies = [
 name = "iroh-fm-android-native"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "client",
  "iroh",
  "iroh-dns",
