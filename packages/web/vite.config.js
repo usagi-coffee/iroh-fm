@@ -29,10 +29,7 @@ export default defineConfig({
       adapter: adapter({ fallback: "index.html" }),
       paths: {
         base,
-      },
-      experimental: {
-        forkPreloads: true,
-      },
+      }
     }),
     tailwindcss(),
     icons({ compiler: "svelte" }),

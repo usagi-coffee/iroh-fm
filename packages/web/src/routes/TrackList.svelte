@@ -149,7 +149,7 @@
               rootMargin={COVER_MARGIN}
               class="size-7 shrink-0 rounded-sm"
             />
-            <p class="text-2xs min-w-0 flex-1 truncate">
+            <p class="text-track min-w-0 flex-1 truncate">
               <span class="text-mauve font-semibold">{item.title}</span><span
                 class="text-3xs text-overlay1 ml-2">{item.artist}</span
               >
@@ -174,7 +174,7 @@
                 App.library.selectedTrackId = item.track.id;
               }
             }}
-            class="group border-surface0/35 text-2xs focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
+            class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
               .player.currentTrack?.id === item.track.id
               ? 'bg-mauve/15'
               : App.library.selectedTrackId === item.track.id
