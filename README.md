@@ -165,9 +165,9 @@ frontend reloads.
 
 Prebuilt installers are available from [Desktop releases](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-).
 
-## Subsonic backend
+### Subsonic adapter
 
-The first-party iroh web client is the main way to use `iroh-fm`. Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
+Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
 
 Install and run the adapter:
 
