@@ -8,7 +8,7 @@
   import CloseIcon from "virtual:icons/ri/close-line";
   import CopyIcon from "virtual:icons/ri/file-copy-line";
 
-  import { MusicClient } from "@iroh-fm/client";
+  import { ClientCore } from "@iroh-fm/client/core";
 
   let settings = $state({
     ticket: App.connection.ticket,
@@ -34,7 +34,7 @@
   let endpointCopied = $state(false);
   let draftEndpointId = $derived(
     settings.secret.trim()
-      ? MusicClient.endpointIdForSecret(settings.secret.trim())
+      ? ClientCore.endpointIdForSecret(settings.secret.trim())
       : Promise.resolve(""),
   );
 
@@ -56,7 +56,7 @@
     const generation = ++ticketParseGeneration;
     if (!value.trim()) return;
     try {
-      const address = await MusicClient.parseTicket(value.trim());
+      const address = await ClientCore.parseTicket(value.trim());
       if (generation !== ticketParseGeneration) return;
       settings.endpoint = address.endpointId;
       settings.relays = address.relays.length ? address.relays : [""];
@@ -81,7 +81,7 @@
     storage.supported = Boolean(navigator.storage);
     try {
       const [cacheStats, estimate, persisted] = await Promise.all([
-        App.connection.client?.cacheStats() ?? MusicClient.cacheStats(),
+        App.connection.client?.cacheStats() ?? ClientCore.cacheStats(),
         navigator.storage?.estimate?.() ?? Promise.resolve({}),
         navigator.storage?.persisted?.() ?? Promise.resolve(false),
       ]);
@@ -122,7 +122,7 @@
     try {
       if (secret) App.connection.clientEndpointId = await draftEndpointId;
       else {
-        const identity = await MusicClient.generateIdentity();
+        const identity = await ClientCore.generateIdentity();
         secret = identity.secret;
         App.connection.clientEndpointId = identity.endpointId;
       }

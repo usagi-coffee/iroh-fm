@@ -1,0 +1,1 @@
+-keep class fm.iroh.android.NativeCore { *; }

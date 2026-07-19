@@ -2,6 +2,8 @@ import { tick } from "svelte";
 
 import { friendlyError } from "../utils.js";
 
+import { subscribeNativePlayerState } from "@iroh-fm/client/core";
+
 export class Player {
   /** @type {HTMLAudioElement | null} */
   audio = null;
@@ -24,10 +26,12 @@ export class Player {
   generation = 0;
   /** @type {number | null} */
   audioDownloadGeneration = null;
+  nativeStatePending = false;
 
   /** @param {import('./App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
+    subscribeNativePlayerState((/** @type {any} */ state) => this.applyNativeState(state));
   }
 
   /** @param {HTMLAudioElement} element */
@@ -64,15 +68,15 @@ export class Player {
     if (!next || next.id === track.id || next.cached || next.downloading) return;
     const downloadGeneration = next.startDownload();
     client
-      .prefetchTrack(next.id, (received, total) =>
+      .prefetchTrack(next.id, (/** @type {number} */ received, /** @type {number} */ total) =>
         next.updateProgress(received, total, downloadGeneration),
       )
-      .then((cached) => {
+      .then((/** @type {boolean} */ cached) => {
         if (this.app.connection.client === client && cached) this.app.library.markCached(next);
         else if (this.app.connection.client === client) next.setCached(false);
         else next.stopDownload(downloadGeneration);
       })
-      .catch((error) => {
+      .catch((/** @type {unknown} */ error) => {
         next.stopDownload(downloadGeneration);
         console.warn("[player] next-track prefetch failed", error);
       });
@@ -100,12 +104,27 @@ export class Player {
     this.duration = track.duration_seconds || 0;
     this.audioLoading = true;
     this.playing = false;
+    if (client.native) {
+      try {
+        this.applyNativeState(await client.playNative(track, sourceQueue));
+      } catch (error) {
+        if (generation === this.generation)
+          this.error = friendlyError(error, "This track could not be played.");
+      } finally {
+        if (generation === this.generation) this.audioLoading = false;
+      }
+      return;
+    }
     const downloadGeneration = track.cached ? null : track.startDownload();
     this.audioDownloadGeneration = downloadGeneration;
     try {
-      const source = await client.trackSource(track.id, (received, total) => {
-        if (downloadGeneration !== null) track.updateProgress(received, total, downloadGeneration);
-      });
+      const source = await client.trackSource(
+        track.id,
+        (/** @type {number} */ received, /** @type {number} */ total) => {
+          if (downloadGeneration !== null)
+            track.updateProgress(received, total, downloadGeneration);
+        },
+      );
       if (generation !== this.generation) return source.dispose();
       this.audioSource = source;
       this.audioSrc = source.url;
@@ -116,7 +135,7 @@ export class Player {
       await source.start(audio);
       if (generation !== this.generation) return;
       void source.done.then(
-        (cached) => {
+        (/** @type {boolean} */ cached) => {
           if (this.app.connection.client !== client) return;
           if (cached && this.app.library.tracksById.get(track.id) === track)
             this.app.library.markCached(track);
@@ -125,7 +144,7 @@ export class Player {
           else track.setCached(false);
           this.audioDownloadGeneration = null;
         },
-        (error) => {
+        (/** @type {unknown} */ error) => {
           if (generation === this.generation && this.audioSource === source && !source.disposed) {
             if (downloadGeneration !== null) track.stopDownload(downloadGeneration);
             this.audioDownloadGeneration = null;
@@ -151,7 +170,12 @@ export class Player {
   /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} queue */
   async playFromTrackList(track, queue) {
     this.app.library.selectedTrackId = track.id;
-    if (this.currentTrack?.id === track.id && this.audioSource && !this.error) await this.toggle();
+    if (
+      this.currentTrack?.id === track.id &&
+      (this.app.connection.client?.native || this.audioSource) &&
+      !this.error
+    )
+      await this.toggle();
     else await this.play(track, queue);
   }
 
@@ -159,6 +183,8 @@ export class Player {
     this.generation += 1;
     const track = this.currentTrack;
     const downloadGeneration = this.audioDownloadGeneration;
+    if (this.app.connection.client?.native)
+      void this.app.connection.client.playerCommand("stop").catch(() => {});
     this.audio?.pause();
     this.audioSource?.dispose();
     if (track && !track.cached && downloadGeneration !== null)
@@ -176,6 +202,11 @@ export class Player {
   }
 
   async toggle() {
+    if (this.app.connection.client?.native) {
+      if (!this.currentTrack) return;
+      this.applyNativeState(await this.app.connection.client.playerCommand("toggle"));
+      return;
+    }
     if (!this.audio || this.audioLoading || !this.currentTrack) return;
     if (this.audio.paused)
       await this.audio
@@ -198,6 +229,12 @@ export class Player {
 
   /** @param {number} direction */
   async skip(direction) {
+    if (this.app.connection.client?.native) {
+      this.applyNativeState(
+        await this.app.connection.client.playerCommand(direction < 0 ? "previous" : "next"),
+      );
+      return;
+    }
     const next = this.adjacent(direction);
     if (next) await this.play(next, this.queue);
   }
@@ -213,6 +250,12 @@ export class Player {
 
   /** @param {string | number} value */
   seek(value) {
+    if (this.app.connection.client?.native) {
+      void this.app.connection.client
+        .playerCommand("seek", { seconds: Number(value) })
+        .then((/** @type {any} */ state) => this.applyNativeState(state));
+      return;
+    }
     const audio = this.audio;
     const duration = Number.isFinite(audio?.duration)
       ? audio?.duration
@@ -224,6 +267,55 @@ export class Player {
   changeVolume(value) {
     this.volume = Math.min(1, Math.max(0, Number(value)));
     localStorage.setItem("iroh-fm-volume", String(this.volume));
+    if (this.app.connection.client?.native) {
+      void this.app.connection.client.playerCommand("volume", { value: this.volume });
+      return;
+    }
     if (this.audio) this.audio.volume = this.volume;
+  }
+
+  toggleRepeat() {
+    this.repeat = !this.repeat;
+    if (this.app.connection.client?.native)
+      void this.app.connection.client.playerCommand("repeat", { enabled: this.repeat });
+  }
+
+  toggleShuffle() {
+    this.shuffle = !this.shuffle;
+    if (this.app.connection.client?.native)
+      void this.app.connection.client.playerCommand("shuffle", { enabled: this.shuffle });
+  }
+
+  async refreshNativeState(client = this.app.connection.client) {
+    if (!client?.native || this.nativeStatePending) return;
+    this.nativeStatePending = true;
+    try {
+      this.applyNativeState(await client.playerState());
+    } catch {
+      // The activity or message channel can be transitioning while the TWA wakes.
+    } finally {
+      this.nativeStatePending = false;
+    }
+  }
+
+  /** @param {any} state */
+  applyNativeState(state) {
+    if (!state || !this.app.connection.client?.native) return;
+    const track = state.trackId ? this.app.library.tracksById.get(state.trackId) : null;
+    if (track) {
+      this.currentTrack = track;
+      this.app.library.selectedTrackId = track.id;
+      if (!this.queue.length) this.queue = [...this.app.library.tracks];
+    } else if (!state.trackId) {
+      this.currentTrack = null;
+      this.queue = [];
+    }
+    this.playing = Boolean(state.playing);
+    this.audioLoading = Boolean(state.loading);
+    this.currentTime = Number(state.position) || 0;
+    this.duration = Number(state.duration) || track?.duration_seconds || 0;
+    this.repeat = Boolean(state.repeat);
+    this.shuffle = Boolean(state.shuffle);
+    if (Number.isFinite(Number(state.volume))) this.volume = Number(state.volume);
   }
 }

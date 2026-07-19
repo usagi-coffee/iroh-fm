@@ -242,8 +242,10 @@ export class Library {
     this.cachingTrackIds.add(track.id);
     const downloadGeneration = track.startDownload();
     try {
-      const cached = await client.prefetchTrack(track.id, (received, total) =>
-        track.updateProgress(received, total, downloadGeneration),
+      const cached = await client.prefetchTrack(
+        track.id,
+        (/** @type {number} */ received, /** @type {number} */ total) =>
+          track.updateProgress(received, total, downloadGeneration),
       );
       if (!cached) throw new Error("The browser could not store this track for offline playback.");
       if (this.app.connection.client === client) this.markCached(track);
@@ -277,8 +279,10 @@ export class Library {
         this.cachingTrackIds.add(track.id);
         const downloadGeneration = track.startDownload();
         downloads.set(track, downloadGeneration);
-        const cached = await client.prefetchTrack(track.id, (received, total) =>
-          track.updateProgress(received, total, downloadGeneration),
+        const cached = await client.prefetchTrack(
+          track.id,
+          (/** @type {number} */ received, /** @type {number} */ total) =>
+            track.updateProgress(received, total, downloadGeneration),
         );
         if (!cached)
           throw new Error("The browser could not store this track for offline playback.");

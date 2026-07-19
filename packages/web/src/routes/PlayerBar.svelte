@@ -32,7 +32,7 @@
     <div class="text-overlay1 flex items-center gap-1">
       <button
         type="button"
-        onclick={() => (App.player.shuffle = !App.player.shuffle)}
+        onclick={() => App.player.toggleShuffle()}
         class="hover:text-text tablet-xl:grid hidden size-8 place-items-center {App.player.shuffle
           ? 'text-teal'
           : ''}"
@@ -78,7 +78,7 @@
       >
       <button
         type="button"
-        onclick={() => (App.player.repeat = !App.player.repeat)}
+        onclick={() => App.player.toggleRepeat()}
         class="hover:text-text tablet-xl:grid hidden size-8 place-items-center {App.player.repeat
           ? 'text-teal'
           : ''}"

@@ -139,9 +139,16 @@ crates/
 packages/
   client/       reusable JavaScript/WASM browser client
   web/          fully static Svelte/Tailwind player
+android/        TWA shell and Media3 foreground playback service
 ```
 
 The architecture deliberately keeps the music library and iroh operations protocol-agnostic. Subsonic and any future compatibility service remain sibling adapters rather than becoming the source of truth.
+
+## Android TWA
+
+The optional Android client keeps the Svelte interface but replaces browser-only iroh and audio playback with a native Rust/Media3 core. It can negotiate direct iroh paths, keeps playback in a foreground media session while the TWA sleeps, and synchronizes the current native player state back into the web runes when the UI resumes.
+
+See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
 
 ## Credits
 

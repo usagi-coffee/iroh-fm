@@ -1,6 +1,6 @@
 import { albumSort, cleanRelays, friendlyError, trackSort, variant } from "../utils.js";
 
-import { MusicClient } from "@iroh-fm/client";
+import { ClientCore } from "@iroh-fm/client/core";
 
 export class Connection {
   ticket = $state("");
@@ -13,7 +13,7 @@ export class Connection {
   connecting = $state(false);
   connectionStep = $state("Connecting to the iroh server…");
   error = $state("");
-  /** @type {MusicClient | null} */
+  /** @type {any} */
   client = $state(null);
   /** @type {import('../types').ConnectionInfo} */
   info = $state({ path_type: "unknown", address: "", received_bytes: 0 });
@@ -44,7 +44,7 @@ export class Connection {
     return () => window.removeEventListener("hashchange", importConnection);
   };
 
-  /** @param {MusicClient | null} client */
+  /** @param {any} client */
   monitor(client) {
     return () => {
       if (!client) {
@@ -54,6 +54,7 @@ export class Connection {
       const update = () => {
         try {
           this.info = client.connectionInfo();
+          void this.app.player.refreshNativeState(client);
         } catch {
           // The connection may be closing while settings are applied.
         }
@@ -161,7 +162,7 @@ export class Connection {
     const generation = ++this.ticketParseGeneration;
     if (!value.trim()) return;
     try {
-      const address = await MusicClient.parseTicket(value.trim());
+      const address = await ClientCore.parseTicket(value.trim());
       if (generation !== this.ticketParseGeneration) return;
       this.endpoint = address.endpointId;
       this.relays = address.relays.length ? address.relays : [""];
@@ -185,10 +186,10 @@ export class Connection {
     this.identityLoading = true;
     try {
       if (this.secret.trim()) {
-        const endpointId = await MusicClient.endpointIdForSecret(this.secret);
+        const endpointId = await ClientCore.endpointIdForSecret(this.secret);
         if (generation === this.identityGeneration) this.clientEndpointId = endpointId;
       } else {
-        const identity = await MusicClient.generateIdentity();
+        const identity = await ClientCore.generateIdentity();
         if (generation !== this.identityGeneration) return;
         this.secret = identity.secret;
         this.clientEndpointId = identity.endpointId;
@@ -210,7 +211,7 @@ export class Connection {
     this.identityLoading = Boolean(secret.trim());
     if (!secret.trim()) return;
     try {
-      const endpointId = await MusicClient.endpointIdForSecret(secret);
+      const endpointId = await ClientCore.endpointIdForSecret(secret);
       if (generation === this.identityGeneration) this.clientEndpointId = endpointId;
     } catch {
       // Validation is reported when connecting.
@@ -225,7 +226,7 @@ export class Connection {
     this.identityLoading = true;
     this.error = "";
     try {
-      const identity = await MusicClient.generateIdentity();
+      const identity = await ClientCore.generateIdentity();
       if (generation !== this.identityGeneration) return;
       this.secret = identity.secret;
       this.clientEndpointId = identity.endpointId;
@@ -276,18 +277,18 @@ export class Connection {
     this.error = "";
     this.connectionStep = "Connecting to the iroh server…";
     const previousClient = this.client;
-    /** @type {MusicClient | undefined} */
+    /** @type {any} */
     let nextClient;
     try {
       if (!this.secret.trim()) {
-        const identity = await MusicClient.generateIdentity();
+        const identity = await ClientCore.generateIdentity();
         if (operation !== this.operationGeneration) return false;
         this.identityGeneration += 1;
         this.secret = identity.secret;
         this.clientEndpointId = identity.endpointId;
       }
       this.persist();
-      nextClient = await MusicClient.connect({
+      nextClient = await ClientCore.connect({
         ticket: this.ticket.trim(),
         endpoint: forceTicket ? "" : this.endpoint.trim(),
         relays: cleanRelays(this.relays),

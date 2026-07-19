@@ -1,0 +1,71 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+def releaseKeystorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyAlias = System.getenv('ANDROID_KEY_ALIAS')
+def hasReleaseSigning = [
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+].every { value -> value != null && !value.isBlank() }
+
+android {
+    namespace 'fm.iroh.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'fm.iroh.android'
+        minSdk 26
+        targetSdk 35
+        versionCode (project.findProperty('irohFmVersionCode') ?: '1').toInteger()
+        versionName project.findProperty('irohFmVersionName') ?: '0.1.0'
+
+        def webOrigin = project.findProperty('irohFmOrigin') ?: 'https://usagi-coffee.github.io'
+        def launchUrl = project.findProperty('irohFmLaunchUrl') ?: "${webOrigin}/iroh-fm/"
+        buildConfigField 'String', 'LAUNCH_URL', "\"${launchUrl}\""
+        buildConfigField 'String', 'WEB_ORIGIN', "\"${webOrigin}\""
+        resValue 'string', 'app_name', 'iroh.fm'
+        resValue 'string', 'launch_url', launchUrl
+        resValue 'string', 'web_origin', webOrigin
+        resValue 'string', 'asset_statements', "[{\\\"relation\\\":[\\\"delegate_permission/common.handle_all_urls\\\"],\\\"target\\\":{\\\"namespace\\\":\\\"web\\\",\\\"site\\\":\\\"${webOrigin}\\\"}}]"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseKeystorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeystorePassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildFeatures { buildConfig true }
+}
+
+dependencies {
+    implementation 'androidx.activity:activity-ktx:1.10.1'
+    implementation 'androidx.browser:browser:1.8.0'
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.media3:media3-exoplayer:1.6.1'
+    implementation 'androidx.media3:media3-session:1.6.1'
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+}

@@ -18,7 +18,7 @@
   import PlayerBar from "./PlayerBar.svelte";
   import TopBar from "./TopBar.svelte";
 
-  import { MusicClient } from "@iroh-fm/client";
+  import { ClientCore } from "@iroh-fm/client/core";
   import "../app.css";
 
   /** @typedef {import('./$types').LayoutProps} Props */
@@ -31,8 +31,8 @@
   const sw = ensure_service_worker().catch((error) =>
     console.warn("[sw] offline support is unavailable", error),
   );
-  const wasm = sw.then(() => MusicClient.prepare());
-  const cache = wasm.then(() => MusicClient.prepareCaches());
+  const wasm = sw.then(() => ClientCore.prepare());
+  const cache = wasm.then(() => ClientCore.prepareCaches());
   const identity = cache.then(() => App.prepareIdentity());
   const connected = Promise.withResolvers();
   const ready = identity.then(() => App.initialize(() => connected.resolve(undefined)));

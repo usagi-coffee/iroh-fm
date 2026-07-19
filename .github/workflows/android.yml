@@ -1,0 +1,186 @@
+name: Android
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/android.yml"
+      - "android/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/android-native/**"
+      - "crates/client/**"
+      - "crates/protocol/**"
+  pull_request:
+    paths:
+      - ".github/workflows/android.yml"
+      - "android/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/android-native/**"
+      - "crates/client/**"
+      - "crates/protocol/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build-debug: ${{ steps.classify.outputs.build-debug }}
+      build-release: ${{ steps.classify.outputs.build-release }}
+    steps:
+      - name: Checkout commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Classify build
+        id: classify
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "build-debug=false" >> "$GITHUB_OUTPUT"
+            echo "build-release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          commit="${PR_HEAD_SHA:-$GITHUB_SHA}"
+          subject="$(git log -1 --format=%s "$commit")"
+          if [[ "$subject" == android:* ]]; then
+            echo "build-debug=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build-debug=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping Android debug build: commit subject does not start with 'android:'"
+          fi
+          echo "build-release=false" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.build-debug == 'true' || needs.gate.outputs.build-release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+
+      - name: Export Android NDK path
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_NDK_HOME=$sdk_root/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Build Rust JNI libraries
+        run: |
+          ./android/build-rust.sh
+          test -f android/app/src/main/jniLibs/arm64-v8a/libiroh_fm_android_native.so
+          test -f android/app/src/main/jniLibs/armeabi-v7a/libiroh_fm_android_native.so
+          test -f android/app/src/main/jniLibs/x86_64/libiroh_fm_android_native.so
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build debug APK
+        if: needs.gate.outputs.build-debug == 'true'
+        run: gradle -p android --no-daemon :app:assembleDebug
+
+      - name: Upload debug APK
+        if: needs.gate.outputs.build-debug == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iroh-fm-android-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require release signing secrets
+        if: needs.gate.outputs.build-release == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "A v* tag requires all three Android signing secrets." >&2
+            exit 1
+          fi
+
+      - name: Decode release keystore
+        if: needs.gate.outputs.build-release == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          keystore_path="$RUNNER_TEMP/iroh-fm-release.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          chmod 600 "$keystore_path"
+          echo "ANDROID_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        if: needs.gate.outputs.build-release == 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          version_name="${GITHUB_REF_NAME#v}"
+          gradle -p android --no-daemon \
+            -PirohFmVersionName="$version_name" \
+            -PirohFmVersionCode="$GITHUB_RUN_NUMBER" \
+            :app:assembleRelease
+
+      - name: Verify release signature
+        if: needs.gate.outputs.build-release == 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$apksigner_path" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk
+          fingerprint="$(keytool -list -v -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p')"
+          echo "### Android release certificate" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed release APK
+        if: needs.gate.outputs.build-release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iroh-fm-android-${{ github.ref_name }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

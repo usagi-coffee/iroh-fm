@@ -1734,6 +1734,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "iroh-fm-android-native"
+version = "0.1.0"
+dependencies = [
+ "client",
+ "iroh",
+ "iroh-tickets",
+ "jni 0.21.1",
+ "protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "iroh-fm-web-wasm"
 version = "0.1.0"
 dependencies = [

@@ -40,6 +40,34 @@ pub struct Client {
 }
 
 impl Client {
+    pub fn endpoint_id(&self) -> EndpointId {
+        self.endpoint.id()
+    }
+
+    pub fn remote_id(&self) -> EndpointId {
+        self.addr.id
+    }
+
+    pub async fn connection_info(&self) -> Result<ConnectionInfo> {
+        let connection = self.connection().await?;
+        let paths = connection.paths();
+        let selected = paths.iter().find(|path| path.is_selected());
+        let (path_type, address) = match selected {
+            Some(path) => match path.remote_addr() {
+                TransportAddr::Relay(relay) => ("relay", relay.to_string()),
+                TransportAddr::Ip(address) => ("direct", address.to_string()),
+                TransportAddr::Custom(address) => ("custom", format!("{address:?}")),
+                other => ("unknown", format!("{other:?}")),
+            },
+            None => ("unknown", String::new()),
+        };
+        Ok(ConnectionInfo {
+            path_type: path_type.to_string(),
+            address,
+            received_bytes: connection.stats().udp_rx.bytes,
+        })
+    }
+
     pub async fn connect(endpoint_id: EndpointId, relay: Option<RelayUrl>) -> Result<Self> {
         eprintln!(
             "[client-rpc] local endpoint startup remote_endpoint={} relay={}",
@@ -223,6 +251,13 @@ impl Client {
             *guard = Some(label);
         }
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConnectionInfo {
+    pub path_type: String,
+    pub address: String,
+    pub received_bytes: u64,
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
