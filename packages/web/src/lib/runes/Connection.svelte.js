@@ -346,6 +346,13 @@ export class Connection {
     this.app.player.stop();
     const previous = this.client;
     this.client = null;
+    this.ticket = "";
+    this.endpoint = "";
+    this.relays = [""];
+    localStorage.removeItem("iroh-fm-ticket");
+    localStorage.removeItem("iroh-fm-endpoint");
+    localStorage.removeItem("iroh-fm-relays");
+    localStorage.removeItem("iroh-fm-relay");
     if (previous) await previous.close().catch(() => {});
   }
 

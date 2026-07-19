@@ -10,6 +10,7 @@
   import ArrowIcon from "virtual:icons/ri/arrow-right-line";
   import CloseIcon from "virtual:icons/ri/close-line";
   import CopyIcon from "virtual:icons/ri/file-copy-line";
+  import GithubIcon from "virtual:icons/ri/github-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import QrIcon from "virtual:icons/ri/qr-scan-2-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
@@ -39,6 +40,11 @@
     ["Soft Focus", "Quiet Form", "from-green/60 to-teal/20"],
     ["Signals", "Paloma Wire", "from-red/60 to-yellow/20"],
   ];
+  const repositoryUrl = "https://github.com/usagi-coffee/iroh-fm";
+  const commitUrl =
+    __BUILD_COMMIT__ === "development"
+      ? repositoryUrl
+      : `${repositoryUrl}/commit/${__BUILD_COMMIT__}`;
   let loginTab = $state("ticket");
   let showSecret = $state(false);
   let ticketLinkCopied = $state(false);
@@ -226,12 +232,21 @@
       class="border-surface1 bg-base shadow-float my-auto w-[calc(100vw-2rem)] max-w-[29rem] border"
     >
       <div class="border-surface0 bg-mantle border-b px-5 pt-5">
-        <div class="mb-5 flex items-center gap-3">
-          <img src={asset("/pwa-icon-192.png")} alt="" class="size-9 rounded-lg" />
-          <div>
-            <h1 class="text-text text-base font-semibold">Enter your library</h1>
-            <p class="text-2xs text-overlay1 mt-0.5">Connect privately with iroh</p>
+        <div class="mb-5 flex items-start gap-3">
+          <img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-9 rounded-lg" />
+          <div class="min-w-0 flex-1">
+            <h1 class="text-text text-base font-semibold">iroh.fm</h1>
+            <p class="text-2xs text-overlay1 mt-0.5 leading-5">Your music, anywhere with iroh.</p>
           </div>
+          <a
+            href={commitUrl}
+            target="_blank"
+            rel="noreferrer"
+            class="text-4xs text-overlay0 hover:text-mauve flex shrink-0 items-center gap-1.5 pt-1 font-mono transition"
+            title={`View build ${__BUILD_COMMIT__} on GitHub`}
+            aria-label={`View build ${__BUILD_COMMIT__} on GitHub`}
+            ><GithubIcon class="text-sm" /><span>{__BUILD_COMMIT__}</span></a
+          >
         </div>
         <div class="text-3xs flex gap-5 font-mono font-bold tracking-wider uppercase">
           <button
