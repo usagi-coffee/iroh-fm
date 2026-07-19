@@ -43,6 +43,7 @@ class IrohDataSource : BaseDataSource(true) {
             totalBytes = fileSize,
             reset = dataSpec.position == 0L,
         )
+        NativeTransferProgress.begin(trackId!!)
         remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else fileSize - skipped
         transferStarted(dataSpec)
         return remaining
@@ -66,12 +67,14 @@ class IrohDataSource : BaseDataSource(true) {
     override fun getUri(): Uri? = uri
 
     override fun close() {
+        val closingTrackId = trackId
         if (streamHandle != 0L) {
             Log.d(TAG, "Native iroh stream closed: uri=$uri")
             NativeCore.closeStream(streamHandle)
             streamHandle = 0
             transferEnded()
         }
+        if (closingTrackId != null) NativeTransferProgress.end(closingTrackId)
         uri = null
         trackId = null
         absolutePosition = 0L

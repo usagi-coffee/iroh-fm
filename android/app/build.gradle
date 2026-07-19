@@ -64,6 +64,7 @@ dependencies {
     implementation 'androidx.activity:activity-ktx:1.10.1'
     implementation 'androidx.browser:browser:1.8.0'
     implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.media3:media3-datasource:1.6.1'
     implementation 'androidx.media3:media3-exoplayer:1.6.1'
     implementation 'androidx.media3:media3-session:1.6.1'
     implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'

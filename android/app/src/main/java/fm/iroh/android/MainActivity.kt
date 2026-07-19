@@ -18,6 +18,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONObject
+import org.json.JSONArray
 import org.json.JSONTokener
 import java.util.concurrent.Executors
 
@@ -247,7 +248,8 @@ class MainActivity : ComponentActivity() {
             "previous" -> player.seekToPreviousMediaItem()
             "seek" -> player.seekTo((payload.getDouble("seconds") * 1000).toLong())
             "volume" -> player.volume = payload.getDouble("value").toFloat()
-            "repeat" -> player.repeatMode = if (payload.getBoolean("enabled")) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            "repeat" -> player.repeatMode =
+                if (payload.getBoolean("enabled")) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_ALL
             "shuffle" -> player.shuffleModeEnabled = payload.getBoolean("enabled")
             "stop" -> { player.stop(); player.clearMediaItems() }
         }
@@ -258,11 +260,31 @@ class MainActivity : ComponentActivity() {
         val player = controller
         val trackId = player?.currentMediaItem?.mediaId
         val transfer = NativeTransferProgress.snapshot(trackId)
+        val queue = JSONArray()
+        val transfers = JSONObject()
+        if (player != null) {
+            for (index in 0 until player.mediaItemCount) {
+                val id = player.getMediaItemAt(index).mediaId
+                queue.put(id)
+                NativeTransferProgress.snapshot(id)?.let {
+                    transfers.put(
+                        id,
+                        JSONObject()
+                            .put("received", it.receivedBytes)
+                            .put("total", it.totalBytes)
+                            .put("active", it.active),
+                    )
+                }
+            }
+        }
         return JSONObject()
             .put("trackId", trackId ?: JSONObject.NULL)
+            .put("queue", queue)
+            .put("currentIndex", player?.currentMediaItemIndex ?: 0)
+            .put("transfers", transfers)
             .put("playing", player?.isPlaying == true)
             .put("loading", player?.playbackState == Player.STATE_BUFFERING)
-            .put("transferring", player?.isLoading == true)
+            .put("transferring", transfer?.active == true)
             .put("position", (player?.currentPosition ?: 0L) / 1000.0)
             .put("bufferedPosition", (player?.bufferedPosition ?: 0L) / 1000.0)
             .put("duration", (player?.duration ?: 0L).coerceAtLeast(0L) / 1000.0)
