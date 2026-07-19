@@ -5,24 +5,17 @@ import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
-import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
-import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
-    private lateinit var audioCache: SimpleCache
-    private lateinit var cacheDataSource: CacheDataSource.Factory
     private val prefetchExecutor = Executors.newSingleThreadExecutor()
     private val prefetchLock = Any()
     private var prefetchWriter: CacheWriter? = null
@@ -32,17 +25,9 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         Log.d(TAG, "Playback service created")
         NativeCore.unwrap(NativeCore.initialize(applicationContext))
-        audioCache = SimpleCache(
-            File(cacheDir, "iroh-audio"),
-            LeastRecentlyUsedCacheEvictor(AUDIO_CACHE_BYTES),
-            StandaloneDatabaseProvider(this),
-        )
-        cacheDataSource = CacheDataSource.Factory()
-            .setCache(audioCache)
-            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        NativeAudioCache.initialize(this)
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSource))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(NativeAudioCache.playbackDataSourceFactory()))
             .build()
         player.setAudioAttributes(
             AudioAttributes.Builder()
@@ -90,7 +75,13 @@ class PlaybackService : MediaSessionService() {
         val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
         val nextTrackId = nextItem?.mediaId
         val nextUri = nextItem?.localConfiguration?.uri
-        if (nextTrackId == null || nextTrackId == player.currentMediaItem?.mediaId || nextUri == null) {
+        if (
+            NativeCore.offlineOnly ||
+            nextTrackId == null ||
+            nextTrackId == player.currentMediaItem?.mediaId ||
+            nextUri == null ||
+            NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, nextTrackId)
+        ) {
             cancelPrefetch()
             return
         }
@@ -106,8 +97,11 @@ class PlaybackService : MediaSessionService() {
 
     private fun prefetch(trackId: String, uri: Uri) {
         val writer = CacheWriter(
-            cacheDataSource.createDataSourceForDownloading(),
-            DataSpec.Builder().setUri(uri).build(),
+            NativeAudioCache.rollingDataSource(),
+            DataSpec.Builder()
+                .setUri(uri)
+                .setKey(NativeAudioCache.cacheKey(NativeCore.activeRemoteId, trackId))
+                .build(),
             ByteArray(PREFETCH_BUFFER_BYTES),
             CacheWriter.ProgressListener { requestLength, bytesCached, _ ->
                 NativeTransferProgress.update(trackId, bytesCached, requestLength)
@@ -157,13 +151,11 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         session = null
-        if (::audioCache.isInitialized) audioCache.release()
         super.onDestroy()
     }
 
     companion object {
         private const val TAG = "iroh.fm.playback"
-        private const val AUDIO_CACHE_BYTES = 1024L * 1024L * 1024L
         private const val PREFETCH_BUFFER_BYTES = 128 * 1024
     }
 }

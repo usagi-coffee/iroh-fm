@@ -95,6 +95,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NativeCore.unwrap(NativeCore.initialize(applicationContext))
+        NativeAudioCache.initialize(applicationContext)
         Log.d(TAG, "Native Android context initialized")
         launchUri = Uri.parse(BuildConfig.LAUNCH_URL)
             .buildUpon()
@@ -169,19 +170,34 @@ class MainActivity : ComponentActivity() {
         if (message.optString("module") != "native") return
         val id = message.optString("id")
         val action = message.optString("action")
-        Log.d(TAG, "Native request received: action=$action id=$id")
+        val logRequest = action != "cacheProgress"
+        if (logRequest) Log.d(TAG, "Native request received: action=$action id=$id")
         val payload = message.optJSONObject("payload") ?: JSONObject()
-        val background = action in setOf("connect", "request", "coverArt", "connectionInfo", "identity", "endpointId", "parseTicket", "close")
+        val background = action in setOf(
+            "connect",
+            "request",
+            "coverArt",
+            "connectionInfo",
+            "identity",
+            "endpointId",
+            "parseTicket",
+            "close",
+            "cacheTrack",
+            "cachedTrackIds",
+            "cacheStats",
+        )
         val task = Runnable {
             val startedAt = SystemClock.elapsedRealtime()
             runCatching { execute(action, payload) }
                 .onSuccess {
                     val replyResult = reply(id, it)
-                    Log.d(
-                        TAG,
-                        "Native request completed: action=$action id=$id " +
-                            "durationMs=${SystemClock.elapsedRealtime() - startedAt} replyResult=$replyResult",
-                    )
+                    if (logRequest) {
+                        Log.d(
+                            TAG,
+                            "Native request completed: action=$action id=$id " +
+                                "durationMs=${SystemClock.elapsedRealtime() - startedAt} replyResult=$replyResult",
+                        )
+                    }
                 }
                 .onFailure {
                     val error = it.message ?: "native operation failed"
@@ -200,6 +216,8 @@ class MainActivity : ComponentActivity() {
     private fun execute(action: String, payload: JSONObject): Any = when (action) {
         "connect" -> JSONObject(NativeCore.unwrap(NativeCore.connect(payload.toString()))).also {
             NativeCore.activeClientHandle = it.getLong("handle")
+            NativeCore.activeRemoteId = it.getString("remoteId")
+            NativeCore.offlineOnly = false
         }
         "request" -> JSONTokener(NativeCore.unwrap(NativeCore.request(payload.getLong("handle"), encodeJson(payload.get("request"))))).nextValue()
         "coverArt" -> JSONObject(
@@ -211,7 +229,48 @@ class MainActivity : ComponentActivity() {
         "identity" -> JSONObject(NativeCore.unwrap(NativeCore.generateIdentity()))
         "endpointId" -> NativeCore.unwrap(NativeCore.endpointIdForSecret(payload.getString("secret")))
         "parseTicket" -> JSONObject(NativeCore.unwrap(NativeCore.parseTicket(payload.getString("ticket"))))
-        "close" -> { NativeCore.closeClient(payload.getLong("handle")); JSONObject() }
+        "close" -> {
+            val handle = payload.getLong("handle")
+            NativeCore.closeClient(handle)
+            if (NativeCore.activeClientHandle == handle) {
+                NativeCore.activeClientHandle = 0
+                NativeCore.activeRemoteId = ""
+                NativeCore.offlineOnly = false
+            }
+            JSONObject()
+        }
+        "cachedTrackIds" -> JSONArray(
+            NativeAudioCache.cachedTrackIds(payload.getString("remoteId")).toList(),
+        )
+        "cacheTrack" -> {
+            check(payload.getLong("handle") == NativeCore.activeClientHandle) {
+                "native client is no longer active"
+            }
+            check(payload.getString("remoteId") == NativeCore.activeRemoteId) {
+                "native server changed while caching track"
+            }
+            JSONObject().put(
+                "cached",
+                NativeAudioCache.cacheTrack(
+                    payload.getString("remoteId"),
+                    payload.getString("trackId"),
+                ),
+            )
+        }
+        "cacheProgress" -> NativeTransferProgress.snapshot(payload.getString("trackId"))?.let {
+            JSONObject()
+                .put("received", it.receivedBytes)
+                .put("total", it.totalBytes)
+                .put("active", it.active)
+        } ?: JSONObject().put("received", 0).put("total", 0).put("active", false)
+        "cacheStats" -> NativeAudioCache.offlineStats().let {
+            JSONObject()
+                .put("tracks", JSONObject().put("count", it.count).put("size", it.size))
+                .put("covers", JSONObject().put("count", 0).put("size", 0))
+        }
+        "setOfflineOnly" -> JSONObject().also {
+            NativeCore.offlineOnly = payload.getBoolean("enabled")
+        }
         "play" -> play(payload)
         "playerCommand" -> playerCommand(payload)
         "playerState" -> playerState()
@@ -220,12 +279,21 @@ class MainActivity : ComponentActivity() {
 
     private fun play(payload: JSONObject): JSONObject {
         val player = controller ?: error("native player is starting")
+        val selectedTrackId = payload.getString("trackId")
+        if (NativeCore.offlineOnly) {
+            check(NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, selectedTrackId)) {
+                "track is not available in the Android offline cache"
+            }
+        }
         val queue = payload.getJSONArray("queue")
         val items = (0 until queue.length()).map { index ->
             val track = queue.getJSONObject(index)
             MediaItem.Builder()
                 .setMediaId(track.getString("id"))
                 .setUri("iroh-fm://track/${Uri.encode(track.getString("id"))}")
+                .setCustomCacheKey(
+                    NativeAudioCache.cacheKey(NativeCore.activeRemoteId, track.getString("id")),
+                )
                 .setMediaMetadata(MediaMetadata.Builder()
                     .setTitle(track.optString("title"))
                     .setArtist(track.optString("artist"))
@@ -233,7 +301,7 @@ class MainActivity : ComponentActivity() {
                     .build())
                 .build()
         }
-        val selected = items.indexOfFirst { it.mediaId == payload.getString("trackId") }.coerceAtLeast(0)
+        val selected = items.indexOfFirst { it.mediaId == selectedTrackId }.coerceAtLeast(0)
         player.setMediaItems(items, selected, 0)
         player.prepare()
         player.play()

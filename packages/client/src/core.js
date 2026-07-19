@@ -33,7 +33,7 @@ export class ClientCore {
 
   static cacheStats() {
     return isNative()
-      ? Promise.resolve({ tracks: { count: 0, size: 0 }, covers: { count: 0, size: 0 } })
+      ? nativeRequest("cacheStats")
       : MusicClient.cacheStats();
   }
 }

@@ -19,6 +19,8 @@ object NativeCore {
     @JvmStatic external fun parseTicket(ticket: String): String
 
     @Volatile var activeClientHandle: Long = 0
+    @Volatile var activeRemoteId: String = ""
+    @Volatile var offlineOnly: Boolean = false
 
     fun unwrap(raw: String): String {
         val envelope = JSONObject(raw)

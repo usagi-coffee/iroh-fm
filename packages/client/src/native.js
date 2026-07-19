@@ -1,4 +1,6 @@
 const NATIVE_TIMEOUT_MS = 30_000;
+const NATIVE_CACHE_TIMEOUT_MS = 60 * 60 * 1_000;
+const NATIVE_CACHE_PROGRESS_MS = 250;
 const NATIVE_COVER_CONCURRENCY = 3;
 /** @type {MessagePort | undefined} */
 let port;
@@ -159,6 +161,7 @@ export class NativeMusicClient {
     this.coverRequests = new Map();
     this.coverActive = 0;
     this.coverQueue = /** @type {Array<() => void>} */ ([]);
+    this.offlineOnly = false;
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -195,15 +198,50 @@ export class NativeMusicClient {
     return this.info;
   }
 
-  setOfflineOnly() {}
+  /** @param {boolean} offlineOnly */
+  setOfflineOnly(offlineOnly) {
+    this.offlineOnly = Boolean(offlineOnly);
+    void nativeRequest("setOfflineOnly", { enabled: this.offlineOnly }).catch(() => {});
+  }
+
   async cachedTrackIds() {
-    return new Set();
+    const ids = await nativeRequest("cachedTrackIds", { remoteId: this.remoteId });
+    return new Set(Array.isArray(ids) ? ids.map(String) : []);
   }
+
   async cacheStats() {
-    return { tracks: { count: 0, size: 0 }, covers: { count: 0, size: 0 } };
+    return nativeRequest("cacheStats");
   }
-  async prefetchTrack() {
-    return false;
+
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async prefetchTrack(id, onProgress = () => {}) {
+    if (this.offlineOnly) throw new Error("track is not available offline");
+    let polling = false;
+    const reportProgress = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const progress = await nativeRequest("cacheProgress", { trackId: id }, 5_000);
+        onProgress(Number(progress.received) || 0, Number(progress.total) || 0);
+      } catch {
+        // The final cache request carries the authoritative success result.
+      } finally {
+        polling = false;
+      }
+    };
+    await reportProgress();
+    const timer = setInterval(reportProgress, NATIVE_CACHE_PROGRESS_MS);
+    try {
+      const result = await nativeRequest(
+        "cacheTrack",
+        { handle: this.handle, remoteId: this.remoteId, trackId: id },
+        NATIVE_CACHE_TIMEOUT_MS,
+      );
+      await reportProgress();
+      return Boolean(result.cached);
+    } finally {
+      clearInterval(timer);
+    }
   }
 
   /** @param {string} id */

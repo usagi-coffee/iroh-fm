@@ -19,6 +19,7 @@ class IrohDataSource : BaseDataSource(true) {
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
+        if (NativeCore.offlineOnly) throw IOException("track is not available in the Android offline cache")
         val client = NativeCore.activeClientHandle
         check(client != 0L) { "iroh client is not connected" }
         uri = dataSpec.uri
