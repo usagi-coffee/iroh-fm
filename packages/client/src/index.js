@@ -100,6 +100,22 @@ export class MusicClient {
     this.closed = false;
   }
 
+  static async prepare() {
+    await loadWasm();
+  }
+
+  static async prepareCaches() {
+    if (!("caches" in globalThis)) return;
+    try {
+      await Promise.all([
+        globalThis.caches.open(TRACK_CACHE_NAME),
+        globalThis.caches.open(COVER_CACHE_NAME),
+      ]);
+    } catch {
+      // Cache Storage can be unavailable in private browsing contexts.
+    }
+  }
+
   /**
    * @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} connection
    */
@@ -275,9 +291,8 @@ export class MusicClient {
   }
 
   drainCoverFetchQueue() {
-    const concurrency = this.activeAudioSources > 0
-      ? MAX_COVER_FETCHES_DURING_AUDIO
-      : MAX_CONCURRENT_COVER_FETCHES;
+    const concurrency =
+      this.activeAudioSources > 0 ? MAX_COVER_FETCHES_DURING_AUDIO : MAX_CONCURRENT_COVER_FETCHES;
     while (
       !this.closed &&
       !this.offlineOnly &&
@@ -363,11 +378,7 @@ export class MusicClient {
         const blob = await new Response(trackDownload(stream, fileSize, reportProgress), {
           headers: { "content-type": contentType },
         }).blob();
-        return new BlobTrackSource(
-          blob,
-          releaseAudioPriority,
-          this.rememberTrackBlob(id, blob),
-        );
+        return new BlobTrackSource(blob, releaseAudioPriority, this.rememberTrackBlob(id, blob));
       } catch (error) {
         releaseAudioPriority();
         throw error;
@@ -386,9 +397,7 @@ export class MusicClient {
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
-      return existing
-        .finally(unsubscribe)
-        .then(() => this.isTrackCached(id));
+      return existing.finally(unsubscribe).then(() => this.isTrackCached(id));
     }
 
     const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
@@ -397,17 +406,19 @@ export class MusicClient {
         return cached;
       }
       if (this.offlineOnly) throw new Error("track is not available offline");
-      const blob = await this.downloadTrackBlob(id, (received, total) => this.notifyTrackProgress(id, received, total));
+      const blob = await this.downloadTrackBlob(id, (received, total) =>
+        this.notifyTrackProgress(id, received, total),
+      );
       await this.persistTrackBlob(id, blob);
       return blob;
     });
     this.activeTrackRequests.set(id, pending);
-    pending.finally(() => {
-      if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
-    }).catch(() => {});
-    return pending
-      .finally(unsubscribe)
-      .then(() => this.isTrackCached(id));
+    pending
+      .finally(() => {
+        if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+      })
+      .catch(() => {});
+    return pending.finally(unsubscribe).then(() => this.isTrackCached(id));
   }
 
   /** @param {string} id @param {(received: number, total: number) => void} listener */
@@ -487,9 +498,11 @@ export class MusicClient {
     const stored = this.persistTrackBlob(id, blob);
     const pending = stored.then(() => blob);
     this.activeTrackRequests.set(id, pending);
-    pending.finally(() => {
-      if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
-    }).catch(() => {});
+    pending
+      .finally(() => {
+        if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+      })
+      .catch(() => {});
     return stored;
   }
 
@@ -661,7 +674,12 @@ class ProgressiveTrackSource {
   completeCache() {
     const chunks = this.chunks;
     this.chunks = [];
-    return this.onComplete(new Blob(chunks.map((chunk) => Uint8Array.from(chunk).buffer), { type: this.contentType }));
+    return this.onComplete(
+      new Blob(
+        chunks.map((chunk) => Uint8Array.from(chunk).buffer),
+        { type: this.contentType },
+      ),
+    );
   }
 
   /** @returns {Promise<void>} */
@@ -812,8 +830,9 @@ async function evictPlayedMediaBuffer(sourceBuffer, mediaElement) {
 /** @param {unknown} error */
 function isSourceBufferQuotaError(error) {
   return (
-    error instanceof DOMException && error.name === "QuotaExceededError"
-  ) || /sourcebuffer is full|quota/i.test(String(error));
+    (error instanceof DOMException && error.name === "QuotaExceededError") ||
+    /sourcebuffer is full|quota/i.test(String(error))
+  );
 }
 
 /** @param {SourceBuffer} sourceBuffer @param {() => void} update @returns {Promise<void>} */

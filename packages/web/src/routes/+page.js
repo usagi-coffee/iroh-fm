@@ -1,6 +1,7 @@
-import { resolve } from '$app/paths';
-import { redirect } from '@sveltejs/kit';
+import { resolve } from "$app/paths";
+
+import { redirect } from "@sveltejs/kit";
 
 export function load() {
-	redirect(307, resolve('/tracks'));
+  redirect(307, resolve("/tracks"));
 }

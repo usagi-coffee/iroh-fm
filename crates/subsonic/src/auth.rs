@@ -51,7 +51,7 @@ fn matches_password(provided: &str, expected: &str) -> bool {
 }
 
 fn decode_hex_utf8(hex: &str) -> Result<String, ()> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(());
     }
 

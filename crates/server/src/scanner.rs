@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -134,18 +134,18 @@ fn collect_library_files(root: &Path) -> Result<LibraryFiles> {
         audio_files: Vec::new(),
         image_files_by_dir: BTreeMap::new(),
     };
-    visit_dir(root, root, &mut files)?;
+    visit_dir(root, &mut files)?;
     files.audio_files.sort();
     Ok(files)
 }
 
-fn visit_dir(root: &Path, dir: &Path, files: &mut LibraryFiles) -> Result<()> {
+fn visit_dir(dir: &Path, files: &mut LibraryFiles) -> Result<()> {
     let mut image_files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            visit_dir(root, &path, files)?;
+            visit_dir(&path, files)?;
             continue;
         }
 
@@ -393,10 +393,10 @@ impl LibraryBuilder {
         dirs.sort();
         dirs.dedup();
 
-        if let Some(common_parent) = common_parent_dir(&dirs) {
-            if !dirs.contains(&common_parent) {
-                dirs.push(common_parent);
-            }
+        if let Some(common_parent) = common_parent_dir(&dirs)
+            && !dirs.contains(&common_parent)
+        {
+            dirs.push(common_parent);
         }
 
         dirs
@@ -532,19 +532,21 @@ impl LibraryBuilder {
         }
 
         for (album_id, album) in other.albums {
-            if !self.albums.contains_key(&album_id) {
-                self.albums.insert(album_id, album);
-                continue;
-            }
-
-            let target = self.albums.get_mut(&album_id).expect("album exists");
-            for track_id in album.track_ids {
-                let Some(track) = other.tracks.get(&track_id) else {
-                    continue;
-                };
-                if !target.track_ids.contains(&track_id) {
-                    target.track_ids.push(track_id.clone());
-                    merge_album_track_metadata(target, track, track.file_size);
+            match self.albums.entry(album_id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(album);
+                }
+                Entry::Occupied(mut entry) => {
+                    let target = entry.get_mut();
+                    for track_id in album.track_ids {
+                        let Some(track) = other.tracks.get(&track_id) else {
+                            continue;
+                        };
+                        if !target.track_ids.contains(&track_id) {
+                            target.track_ids.push(track_id.clone());
+                            merge_album_track_metadata(target, track, track.file_size);
+                        }
+                    }
                 }
             }
         }
@@ -729,7 +731,7 @@ fn fill_missing_tags_parallel(scanned_tracks: &mut [ScannedTrack], cache_misses:
             track.tags = Some(tags);
 
             let parsed = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if parsed % SCAN_PROGRESS_BATCH_SIZE == 0 || parsed == cache_misses {
+            if parsed.is_multiple_of(SCAN_PROGRESS_BATCH_SIZE) || parsed == cache_misses {
                 eprintln!(
                     "[scanner] tag extraction progress parsed={}/{}",
                     parsed, cache_misses

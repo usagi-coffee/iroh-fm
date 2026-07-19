@@ -9,17 +9,20 @@ const scoped = (path) => {
   if (path === "/") return `${SCOPE_PATH}/`;
   return `${SCOPE_PATH}${path}`;
 };
-const APP_SHELL = build.length === 0 ? [] : [
-  ...new Set(
-    [
-      ...build,
-      ...files.filter((path) => !path.endsWith("/.nojekyll")),
-      ...prerendered,
-      "/",
-      "/index.html",
-    ].map(scoped),
-  ),
-];
+const APP_SHELL =
+  build.length === 0
+    ? []
+    : [
+        ...new Set(
+          [
+            ...build,
+            ...files.filter((path) => !path.endsWith("/.nojekyll")),
+            ...prerendered,
+            "/",
+            "/index.html",
+          ].map(scoped),
+        ),
+      ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -44,9 +47,7 @@ self.addEventListener("activate", (event) => {
         const previous = keys
           .filter(
             (key) =>
-              key !== CACHE_NAME &&
-              key.startsWith(APP_CACHE_PREFIX) &&
-              !DATA_CACHE_NAMES.has(key),
+              key !== CACHE_NAME && key.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(key),
           )
           .at(-1);
         await Promise.all(
@@ -74,7 +75,8 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (event.data?.type !== "version" && event.data?.type !== "user") return;
-  event.ports[0]?.postMessage({ type: "version", version, buildVersion: __BUILD_VERSION__ });
+  const buildVersion = typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__;
+  event.ports[0]?.postMessage({ type: "version", version, buildVersion });
 });
 
 self.addEventListener("fetch", (event) => {
@@ -122,7 +124,7 @@ self.addEventListener("fetch", (event) => {
         // one prior app cache so its hashed modules still resolve safely.
         const previous = await safeGlobalMatch(event.request);
         return previous ?? response;
-      } catch (error) {
+      } catch {
         const cached = await safeGlobalMatch(event.request);
         if (cached) return cached;
 

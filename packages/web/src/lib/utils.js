@@ -1,67 +1,74 @@
 /** @template T @param {Record<string, unknown> | null | undefined} response @param {string} key @param {T} fallback @returns {T} */
 export function variant(response, key, fallback) {
-	return response && key in response ? /** @type {T} */ (response[key]) : fallback;
+  return response && key in response ? /** @type {T} */ (response[key]) : fallback;
 }
 
 /** @param {string[]} values */
 export function cleanRelays(values) {
-	return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 /** @template {import('./types').TrackData} T @param {T[]} list @param {string} term @returns {T[]} */
 export function filterTracks(list, term) {
-	const needle = term.trim().toLocaleLowerCase();
-	return list.filter((track) => {
-		if (!needle) return true;
-		return `${track.artist}\n${track.title}\n${track.album}`.toLocaleLowerCase().includes(needle);
-	});
+  const needle = term.trim().toLocaleLowerCase();
+  return list.filter((track) => {
+    if (!needle) return true;
+    return `${track.artist}\n${track.title}\n${track.album}`.toLocaleLowerCase().includes(needle);
+  });
 }
 
 /** @param {import('./types').TrackData} left @param {import('./types').TrackData} right */
 export function trackSort(left, right) {
-	return left.album.localeCompare(right.album, undefined, { numeric: true })
-		|| (left.disc_number || 0) - (right.disc_number || 0)
-		|| (left.track_number || 0) - (right.track_number || 0)
-		|| left.artist.localeCompare(right.artist, undefined, { numeric: true })
-		|| left.title.localeCompare(right.title, undefined, { numeric: true });
+  return (
+    left.album.localeCompare(right.album, undefined, { numeric: true }) ||
+    (left.disc_number || 0) - (right.disc_number || 0) ||
+    (left.track_number || 0) - (right.track_number || 0) ||
+    left.artist.localeCompare(right.artist, undefined, { numeric: true }) ||
+    left.title.localeCompare(right.title, undefined, { numeric: true })
+  );
 }
 
 /** @param {import('./types').AlbumData} left @param {import('./types').AlbumData} right */
 export function albumSort(left, right) {
-	return (left.album_artist || left.artist).localeCompare(right.album_artist || right.artist, undefined, { numeric: true })
-		|| left.title.localeCompare(right.title, undefined, { numeric: true });
+  return (
+    (left.album_artist || left.artist).localeCompare(
+      right.album_artist || right.artist,
+      undefined,
+      { numeric: true },
+    ) || left.title.localeCompare(right.title, undefined, { numeric: true })
+  );
 }
 
 /** @param {number | null | undefined} seconds */
 export function formatTime(seconds) {
-	const value = Number(seconds);
-	if (!Number.isFinite(value) || value < 0) return '0:00';
-	return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "0:00";
+  return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
 }
 
 /** @param {number | null | undefined} bytes */
 export function formatBytes(bytes) {
-	const count = Number(bytes);
-	if (!Number.isFinite(count) || count <= 0) return '0 B';
-	const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-	const unit = Math.min(units.length - 1, Math.floor(Math.log(count) / Math.log(1024)));
-	const value = count / 1024 ** unit;
-	return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+  const count = Number(bytes);
+  if (!Number.isFinite(count) || count <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const unit = Math.min(units.length - 1, Math.floor(Math.log(count) / Math.log(1024)));
+  const value = count / 1024 ** unit;
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
 /** @param {unknown} error @param {string} fallback */
 export function friendlyError(error, fallback) {
-	const message = error instanceof Error ? error.message : String(error ?? '');
-	return message.replace(/^Error:\s*/i, '') || fallback;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.replace(/^Error:\s*/i, "") || fallback;
 }
 
 /** @param {import('./types').ConnectionInfo} info */
 export function connectionAddressLabel(info) {
-	if (!info.address) return 'CONNECTING';
-	if (info.path_type !== 'relay') return info.path_type.toUpperCase();
-	try {
-		return new URL(info.address).host;
-	} catch {
-		return info.address;
-	}
+  if (!info.address) return "CONNECTING";
+  if (info.path_type !== "relay") return info.path_type.toUpperCase();
+  try {
+    return new URL(info.address).host;
+  } catch {
+    return info.address;
+  }
 }

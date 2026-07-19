@@ -1,9 +1,9 @@
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
 import icons from "unplugin-icons/vite";
 import { defineConfig } from "vite";
-import { fileURLToPath } from "node:url";
 
 const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -29,6 +29,9 @@ export default defineConfig({
       adapter: adapter({ fallback: "index.html" }),
       paths: {
         base,
+      },
+      experimental: {
+        forkPreloads: true,
       },
     }),
     tailwindcss(),

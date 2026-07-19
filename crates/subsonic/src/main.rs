@@ -298,12 +298,12 @@ fn into_http_response(response: SubsonicResponse) -> Response {
                 HeaderValue::from_str(&content_type)
                     .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
             );
-            if let Some(content_length) = content_length {
-                if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
-                    response
-                        .headers_mut()
-                        .insert(axum::http::header::CONTENT_LENGTH, value);
-                }
+            if let Some(content_length) = content_length
+                && let Ok(value) = HeaderValue::from_str(&content_length.to_string())
+            {
+                response
+                    .headers_mut()
+                    .insert(axum::http::header::CONTENT_LENGTH, value);
             }
             response
         }

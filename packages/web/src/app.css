@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
 @theme {
+  --breakpoint-mobile: 320px;
+  --breakpoint-tablet: 457px;
+  --breakpoint-tablet-xl: 600px;
+  --breakpoint-desktop: 1024px;
+  --breakpoint-desktop-xl: 1560px;
+
   --color-rosewater: #f5e0dc;
   --color-flamingo: #f2cdcd;
   --color-pink: #f5c2e7;
@@ -29,19 +35,43 @@
   --color-crust: #11111b;
   --font-sans: "Inter", "Noto Sans", "Segoe UI", sans-serif;
   --font-display: "Inter", "Noto Sans", "Segoe UI", sans-serif;
-  --shadow-float: 0 24px 70px rgb(0 0 0 / 0.45);
+  --text-2xs: 0.65rem;
+  --text-3xs: 0.6rem;
+  --text-4xs: 0.55rem;
+  --text-5xs: 0.5rem;
+  --shadow-float: 0 1.5rem 4.375rem rgb(0 0 0 / 0.45);
 }
 
 @layer base {
   :root {
+    --font-size: clamp(0.75rem, calc(0.62rem + 1.1vw), 1.375rem);
     color-scheme: dark;
     font-family: var(--font-sans);
+    font-size: var(--font-size);
     background: var(--color-crust);
     color: var(--color-text);
   }
 
+  @media (min-width: 28.5625rem) {
+    :root {
+      --font-size: clamp(0.8125rem, calc(0.9rem + 0.2vw), 1.375rem);
+    }
+  }
+
+  @media (min-width: 33.3125rem) {
+    :root {
+      --font-size: clamp(1rem, calc(1.05rem + 0.2vw), 1.375rem);
+    }
+  }
+
+  @media (min-width: 64rem) {
+    :root {
+      --font-size: clamp(1rem, calc(1rem + 0.2vw), 1.375rem);
+    }
+  }
+
   html {
-    min-width: 320px;
+    min-width: 20rem;
     background: var(--color-crust);
   }
 

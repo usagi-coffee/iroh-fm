@@ -44,4 +44,3 @@ Primary crates involved:
 
 - `subsonic`
 - `server` as the backend contract owner, or a later `protocol` crate if that contract needs isolation
-
