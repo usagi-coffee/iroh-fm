@@ -77,7 +77,7 @@ iroh-fm \
 | Desktop | [Download a Desktop release](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-) |
 | Android | [Download an Android release](https://github.com/usagi-coffee/iroh-fm/releases?q=android-) |
 
-### Web player
+## Web player
 
 The first-party player is a client-rendered Svelte SPA with no SSR and no HTTP application backend. It includes:
 
@@ -103,7 +103,7 @@ bun run dev
 
 See [`packages/web/README.md`](packages/web/README.md) for static builds and GitHub Pages deployment.
 
-### Android app (TWA)
+## Android app (TWA)
 
 The Android app keeps the same Svelte interface as the PWA, but its transport and
 player do not depend on JavaScript remaining alive. A native Rust iroh client can
@@ -126,7 +126,7 @@ Download the signed APK from [Android releases](https://github.com/usagi-coffee/
 
 See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
 
-### Desktop app
+## Desktop app
 
 The Tauri desktop app keeps the same Svelte library, queue, and controls as the
 web player while moving both networking and audio playback into Rust. The shared
@@ -165,7 +165,7 @@ frontend reloads.
 
 Prebuilt installers are available from [Desktop releases](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-).
 
-### Subsonic adapter
+## Subsonic adapter
 
 Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
 
