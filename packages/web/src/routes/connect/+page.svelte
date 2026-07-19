@@ -43,7 +43,7 @@
   const repositoryUrl = "https://github.com/usagi-coffee/iroh-fm";
   const commitUrl =
     __BUILD_COMMIT__ === "development"
-      ? repositoryUrl
+      ? `${repositoryUrl}/commits`
       : `${repositoryUrl}/commit/${__BUILD_COMMIT__}`;
   let loginTab = $state("ticket");
   let showSecret = $state(false);
@@ -235,18 +235,30 @@
         <div class="mb-5 flex items-start gap-3">
           <img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-9 rounded-lg" />
           <div class="min-w-0 flex-1">
-            <h1 class="text-text text-base font-semibold">iroh.fm</h1>
+            <div class="flex min-w-0 items-center">
+              <h1 class="text-text text-base font-semibold">iroh.fm</h1>
+              <div
+                class="text-4xs text-overlay0 ml-auto flex h-7 shrink-0 items-center gap-1 font-mono leading-none"
+              >
+                <a
+                  href={commitUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="hover:bg-surface0 hover:text-mauve flex h-7 items-center px-1.5 transition"
+                  title={`View commit ${__BUILD_COMMIT__} on GitHub`}>{__BUILD_COMMIT__}</a
+                ><a
+                  href={repositoryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="hover:bg-surface0 hover:text-mauve grid size-7 place-items-center transition"
+                  title="Open the iroh-fm repository on GitHub"
+                  aria-label="Open the iroh-fm repository on GitHub"
+                  ><GithubIcon class="text-sm" /></a
+                >
+              </div>
+            </div>
             <p class="text-2xs text-overlay1 mt-0.5 leading-5">Your music, anywhere with iroh.</p>
           </div>
-          <a
-            href={commitUrl}
-            target="_blank"
-            rel="noreferrer"
-            class="text-4xs text-overlay0 hover:text-mauve flex shrink-0 items-center gap-1.5 pt-1 font-mono transition"
-            title={`View build ${__BUILD_COMMIT__} on GitHub`}
-            aria-label={`View build ${__BUILD_COMMIT__} on GitHub`}
-            ><GithubIcon class="text-sm" /><span>{__BUILD_COMMIT__}</span></a
-          >
         </div>
         <div class="text-3xs flex gap-5 font-mono font-bold tracking-wider uppercase">
           <button

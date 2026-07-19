@@ -1,14 +1,27 @@
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import icons from "unplugin-icons/vite";
 import { defineConfig } from "vite";
 
 const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
-const commitHash = (process.env.GITHUB_SHA ?? "development").slice(0, 12);
+const commitHash = (process.env.GITHUB_SHA ?? localCommit()).slice(0, 12);
 const buildVersion = process.env.GITHUB_SHA ?? String(Date.now());
+
+function localCommit() {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "development";
+  }
+}
 
 export default defineConfig({
   define: {
