@@ -24,4 +24,5 @@ commands.allow = [
   "desktop_generate_identity",
   "desktop_endpoint_id_for_secret",
   "desktop_parse_ticket",
+  "desktop_build_info",
 ]

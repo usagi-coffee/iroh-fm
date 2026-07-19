@@ -147,6 +147,12 @@ struct ParsedTicket {
 }
 
 #[derive(Serialize)]
+struct NativeBuildInfo {
+    platform: &'static str,
+    commit: &'static str,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopPlayerState {
     track_id: Option<String>,
@@ -1092,6 +1098,16 @@ fn desktop_parse_ticket(ticket: String) -> Result<ParsedTicket, String> {
     })
 }
 
+#[tauri::command]
+fn desktop_build_info() -> NativeBuildInfo {
+    NativeBuildInfo {
+        platform: "Desktop",
+        commit: option_env!("RELEASE_SHA")
+            .or(option_env!("GITHUB_SHA"))
+            .unwrap_or("development"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default().manage(DesktopState::default());
@@ -1139,6 +1155,7 @@ pub fn run() {
             desktop_generate_identity,
             desktop_endpoint_id_for_secret,
             desktop_parse_ticket,
+            desktop_build_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building iroh-fm desktop")
