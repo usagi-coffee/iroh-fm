@@ -141,9 +141,10 @@ is opened again, the TWA bridge synchronizes the native queue, current track,
 playback position, download progress, and controls back into the Svelte UI.
 
 > [!WARNING]
-> The TWA works best with Chrome as the device's default browser. With Firefox,
-> it will fall back to a regular Custom Tab and the trusted native bridge may not
-> be available.
+> The Android app requires an installed Chromium-family Custom Tabs provider,
+> such as Chrome, Chromium, Vanadium, Bromite/Cromite, Brave, Edge, or Vivaldi.
+> It selects that provider directly instead of using Firefox even when Firefox is
+> the device's default browser.
 
 Download the signed APK from [GitHub Releases](https://github.com/usagi-coffee/iroh-fm/releases).
 See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.

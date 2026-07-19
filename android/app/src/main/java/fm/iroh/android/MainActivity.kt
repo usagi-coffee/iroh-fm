@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.browser.customtabs.*
 import androidx.browser.trusted.TrustedWebActivityIntentBuilder
@@ -125,7 +126,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindTwa() {
-        val browser = CustomTabsClient.getPackageName(this, null) ?: return
+        val browser = CustomTabsClient.getPackageName(
+            this,
+            CHROMIUM_CUSTOM_TABS_PACKAGES,
+            true,
+        )
+        if (browser == null) {
+            Log.e(TAG, "No supported Chromium Custom Tabs provider is installed")
+            Toast.makeText(
+                this,
+                "Install Chrome or another Chromium-based browser to run iroh.fm.",
+                Toast.LENGTH_LONG,
+            ).show()
+            finish()
+            return
+        }
         Log.d(TAG, "Binding Custom Tabs provider: $browser")
         CustomTabsClient.bindCustomTabsService(this, browser, object : CustomTabsServiceConnection() {
             override fun onCustomTabsServiceConnected(name: ComponentName, client: CustomTabsClient) {
@@ -502,6 +517,28 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "iroh.fm"
+        private val CHROMIUM_CUSTOM_TABS_PACKAGES = listOf(
+            "com.android.chrome",
+            "app.vanadium.browser",
+            "org.chromium.chrome",
+            "com.chrome.beta",
+            "com.chrome.dev",
+            "com.chrome.canary",
+            "org.bromite.bromite",
+            "org.cromite.cromite",
+            "com.brave.browser",
+            "com.brave.browser_beta",
+            "com.brave.browser_nightly",
+            "com.microsoft.emmx",
+            "com.microsoft.emmx.beta",
+            "com.microsoft.emmx.dev",
+            "com.microsoft.emmx.canary",
+            "com.vivaldi.browser",
+            "com.vivaldi.browser.snapshot",
+            "com.kiwibrowser.browser",
+            "com.sec.android.app.sbrowser",
+            "com.sec.android.app.sbrowser.beta",
+        )
         private const val POST_MESSAGE_ATTEMPTS = 5
         private const val POST_MESSAGE_RETRY_DELAY_MS = 1_000L
         private const val POST_MESSAGE_CHUNK_CHARS = 64 * 1024
