@@ -66,6 +66,11 @@ object NativeAudioCache {
     fun isOfflineCached(remoteId: String, trackId: String): Boolean =
         isComplete(offlineCache, cacheKey(remoteId, trackId))
 
+    fun isPlaybackCached(remoteId: String, trackId: String): Boolean {
+        val key = cacheKey(remoteId, trackId)
+        return isComplete(offlineCache, key) || isComplete(rollingCache, key)
+    }
+
     fun cachedTrackIds(remoteId: String): Set<String> {
         val prefix = "$CACHE_KEY_PREFIX$remoteId:"
         return offlineCache.keys

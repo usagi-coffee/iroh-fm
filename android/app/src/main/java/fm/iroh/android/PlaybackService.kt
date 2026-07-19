@@ -1,6 +1,8 @@
 package fm.iroh.android
 
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -17,9 +19,12 @@ import java.util.concurrent.TimeUnit
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private val prefetchExecutor = Executors.newSingleThreadExecutor()
+    private val prefetchHandler = Handler(Looper.getMainLooper())
     private val prefetchLock = Any()
     private var prefetchWriter: CacheWriter? = null
     private var prefetchTrackId: String? = null
+    private var prefetchScheduleGeneration = 0
+    private var waitingForTrackId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -59,6 +64,7 @@ class PlaybackService : MediaSessionService() {
                 if (
                     events.contains(Player.EVENT_TIMELINE_CHANGED) ||
                     events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                    events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
                     events.contains(Player.EVENT_REPEAT_MODE_CHANGED) ||
                     events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
                 ) {
@@ -71,17 +77,46 @@ class PlaybackService : MediaSessionService() {
 
     /** Keeps one complete queue item ahead of the player without relying on the TWA process. */
     private fun scheduleNextPrefetch(player: Player) {
+        val generation = ++prefetchScheduleGeneration
+        val currentTrackId = player.currentMediaItem?.mediaId
         val nextIndex = player.nextMediaItemIndex
         val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
         val nextTrackId = nextItem?.mediaId
         val nextUri = nextItem?.localConfiguration?.uri
         if (
             NativeCore.offlineOnly ||
+            currentTrackId == null ||
             nextTrackId == null ||
-            nextTrackId == player.currentMediaItem?.mediaId ||
-            nextUri == null ||
-            NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, nextTrackId)
+            nextTrackId == currentTrackId ||
+            nextUri == null
         ) {
+            waitingForTrackId = null
+            cancelPrefetch()
+            return
+        }
+
+        if (!NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, currentTrackId)) {
+            val activePrefetch = synchronized(prefetchLock) { prefetchTrackId }
+            if (activePrefetch != null && activePrefetch != currentTrackId) cancelPrefetch()
+            if (waitingForTrackId != currentTrackId) {
+                waitingForTrackId = currentTrackId
+                Log.d(TAG, "Waiting for current download before next-track prefetch: mediaId=$currentTrackId")
+            }
+            if (!player.playWhenReady) return
+            prefetchHandler.postDelayed(
+                {
+                    if (prefetchScheduleGeneration == generation) scheduleNextPrefetch(player)
+                },
+                PREFETCH_READINESS_POLL_MS,
+            )
+            return
+        }
+        if (waitingForTrackId == currentTrackId) {
+            Log.d(TAG, "Current download complete; next-track prefetch is eligible: mediaId=$currentTrackId")
+        }
+        waitingForTrackId = null
+
+        if (NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, nextTrackId)) {
             cancelPrefetch()
             return
         }
@@ -143,6 +178,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         Log.d(TAG, "Playback service destroyed")
+        prefetchScheduleGeneration += 1
+        prefetchHandler.removeCallbacksAndMessages(null)
         cancelPrefetch()
         prefetchExecutor.shutdownNow()
         runCatching { prefetchExecutor.awaitTermination(2, TimeUnit.SECONDS) }
@@ -157,5 +194,6 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val TAG = "iroh.fm.playback"
         private const val PREFETCH_BUFFER_BYTES = 128 * 1024
+        private const val PREFETCH_READINESS_POLL_MS = 500L
     }
 }
