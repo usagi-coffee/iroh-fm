@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "svelte": true,
+  "sortImports": {
+    "customGroups": [
+      {
+        "groupName": "svelte",
+        "elementNamePattern": ["svelte", "svelte/**"]
+      },
+      {
+        "groupName": "icons",
+        "elementNamePattern": ["virtual:icons/**"]
+      },
+      {
+        "groupName": "app",
+        "elementNamePattern": ["$app/**"]
+      },
+      {
+        "groupName": "lib",
+        "elementNamePattern": ["$lib/**"]
+      },
+      {
+        "groupName": "relative",
+        "elementNamePattern": ["./**", "../**"]
+      }
+    ],
+    "groups": [
+      "type-import",
+      "svelte",
+      "app",
+      "icons",
+      "lib",
+      "relative",
+      ["value-builtin", "value-external"],
+      "unknown"
+    ]
+  },
+  "sortTailwindcss": {
+    "preserveWhitespace": true,
+    "functions": ["clsx", "cn"]
+  }
+}

@@ -11,7 +11,10 @@
     "check": "bun run --cwd packages/web check"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxfmt": "latest",
+    "oxlint": "latest",
+    "prettier-plugin-svelte": "latest"
   },
   "peerDependencies": {
     "typescript": "^6"
