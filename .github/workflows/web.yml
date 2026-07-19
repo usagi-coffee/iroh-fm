@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Restore WASM build tools
         id: wasm-tools-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ci-tools
           key: web-wasm-tools-v2-${{ runner.os }}-${{ runner.arch }}-bindgen-0.2.125
@@ -43,7 +43,7 @@ jobs:
 
       - name: Setup Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload desktop web assets
         if: github.event_name == 'push' && (startsWith(github.event.head_commit.message, 'desktop:') || startsWith(github.event.head_commit.message, 'ci:'))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-web-${{ github.sha }}
           path: packages/web/build
@@ -117,7 +117,7 @@ jobs:
         run: BASE_PATH="$PAGES_BASE_PATH" bun run --cwd packages/web build:prepared
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: packages/web/build
 
@@ -130,4 +130,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
