@@ -30,13 +30,13 @@ Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and s
 
 Install the server:
 
-```sh
+```fish
 cargo install --git https://github.com/usagi-coffee/iroh-fm server
 ```
 
 Point it at your music library:
 
-```sh
+```fish
 iroh-fm --music-dir /path/to/music
 ```
 
@@ -44,13 +44,13 @@ The server scans and indexes the library, watches it for changes, and prints an 
 
 To prepare a link that opens the library directly, place the server ticket in the URL fragment:
 
-```text
+```fish
 https://usagi-coffee.github.io/iroh-fm/#ticket=SERVER_TICKET
 ```
 
 If the server allowlists a specific client identity, include that client's secret as well:
 
-```text
+```fish
 https://usagi-coffee.github.io/iroh-fm/#ticket=SERVER_TICKET&secret=CLIENT_SECRET
 ```
 
@@ -58,7 +58,7 @@ URL-encode the ticket and secret if they contain reserved URL characters. Everyt
 
 For a stable server identity, a custom relay, or a client allowlist:
 
-```sh
+```fish
 iroh-fm \
   --music-dir /path/to/music \
   --secret your-server-secret \
@@ -85,7 +85,7 @@ Browser iroh connections are currently relay-only. Their HTTPS-compatible relay 
 
 To run the web player locally:
 
-```sh
+```fish
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.125 --locked
 bun install
@@ -100,7 +100,7 @@ The first-party iroh web client is the main way to use `iroh-fm`. Subsonic compa
 
 Install and run the adapter:
 
-```sh
+```fish
 cargo install --git https://github.com/usagi-coffee/iroh-fm subsonic
 
 iroh-fm-subsonic \
