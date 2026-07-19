@@ -3,6 +3,7 @@ import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
 const START_TIMEOUT_MS = 30_000;
+const UPDATE_INTERVAL_MS = 60_000;
 let startupPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
@@ -19,6 +20,9 @@ function notifyUpdateListeners() {
 function registerServiceWorker() {
   return navigator.serviceWorker.register(workerUrl, {
     type: dev ? "module" : "classic",
+    // WebKit may otherwise reuse the HTTP-cached worker script and miss a
+    // deployment even when registration.update() is called explicitly.
+    updateViaCache: "none",
   });
 }
 
@@ -201,6 +205,15 @@ function withTimeout(promise, timeoutMs, message) {
 async function startServiceWorker() {
   let registration = await navigator.serviceWorker.getRegistration();
   if (!registration) registration = await registerServiceWorker();
+  else {
+    // Re-registering the same URL is idempotent and persists updateViaCache:
+    // "none" on registrations created by older versions of the application.
+    try {
+      registration = await registerServiceWorker();
+    } catch (error) {
+      console.info("[sw] using the existing offline registration", error);
+    }
+  }
   if (!dev) watchRegistration(registration);
 
   let target;
@@ -221,12 +234,20 @@ async function startServiceWorker() {
     reloadRequired = true;
     notifyUpdateListeners();
   }
-  registration.update().catch((error) => console.warn("[sw] update check failed", error));
+  /** @type {Promise<ServiceWorkerRegistration | void> | undefined} */
+  let updateCheck;
   const checkForUpdate = () => {
-    if (document.visibilityState === "visible")
-      registration.update().catch((error) => console.warn("[sw] update check failed", error));
+    if (document.visibilityState !== "visible" || updateCheck) return updateCheck;
+    updateCheck = registration
+      .update()
+      .catch((error) => console.warn("[sw] update check failed", error))
+      .finally(() => (updateCheck = undefined));
+    return updateCheck;
   };
+  void checkForUpdate();
   document.addEventListener("visibilitychange", checkForUpdate);
+  window.addEventListener("online", checkForUpdate);
+  setInterval(checkForUpdate, UPDATE_INTERVAL_MS);
 }
 
 /** @param {ServiceWorkerRegistration} registration */
