@@ -2,9 +2,9 @@
 
 <img src="extra/iroh-fm.png" align="right" width="180" height="180" alt="iroh-fm project icon" />
 
-**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, port forwarding, or permission from your NAT is required.
+**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, port forwarding, or permission from your firewall or NAT is required.
 
-The real music server runs on your own bare metal at home, and NAT does not get to stop it. You do not need to expose ports, obtain a public IP address, configure a reverse proxy, or move your library into somebody else's cloud. When a direct path is unavailable, iroh can carry the end-to-end encrypted connection through a relay over TCP port 443. That means `iroh-fm` can work from many restrictive or firewalled networks that block inbound traffic, UDP, and almost everything except ordinary web traffic.
+The real music server runs on your own bare metal at home, and nothing stops it. You do not need to expose ports, obtain a public IP address, configure a reverse proxy, or move your library into somebody else's cloud. When a direct path is unavailable, iroh can carry the end-to-end encrypted connection through a relay over TCP port 443. That means `iroh-fm` can work from many restrictive or firewalled networks that block inbound traffic, UDP, and almost everything except ordinary web traffic.
 
 The host does not need to be a traditional server. Run `iroh-fm` on a desktop, laptop, NAS, home server, or even an Android phone, then listen from anywhere using any modern browser. It is your unstoppable personal music server with a private, end-to-end encrypted connection.
 
@@ -42,7 +42,19 @@ iroh-fm --music-dir /path/to/music
 
 The server scans and indexes the library, watches it for changes, and prints an iroh endpoint ticket. Open the [iroh-fm web player](https://usagi-coffee.github.io/iroh-fm/), paste the ticket, and connect.
 
-From the web player, use **Copy** to create a setup URL for someone else. The URL stores the server ticket and optional client secret in its `#` fragment. That part stays inside the browser and is never included in the request sent to GitHub Pages or another static host.
+To prepare a link that opens the library directly, place the server ticket in the URL fragment:
+
+```text
+https://usagi-coffee.github.io/iroh-fm/#ticket=SERVER_TICKET
+```
+
+If the server allowlists a specific client identity, include that client's secret as well:
+
+```text
+https://usagi-coffee.github.io/iroh-fm/#ticket=SERVER_TICKET&secret=CLIENT_SECRET
+```
+
+URL-encode the ticket and secret if they contain reserved URL characters. Everything after `#` stays inside the recipient's browser and is never included in the request sent to GitHub Pages or another static host. Anyone who receives a link containing a client secret can use that identity, so only send it to people you trust.
 
 For a stable server identity, a custom relay, or a client allowlist:
 
