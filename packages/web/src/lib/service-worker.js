@@ -68,10 +68,14 @@ async function register() {
   }
   watch(registration);
   await requireActiveWorker(registration);
-  if (!dev && registration.active) {
-    void pingWorker(registration.active)
+  const active = registration.active;
+  if (!dev && active) {
+    void pingWorker(active)
       .then((info) => {
-        if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
+        if (info.updateReady) {
+          waitingWorker = active;
+          notify();
+        } else if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
           reloadRequired = true;
           notify();
         }
@@ -155,6 +159,13 @@ async function checkForUpdate() {
   const registration = await getRegistration();
   if (registration.waiting || registration.installing || !registration.active) return;
 
+  const info = await pingWorker(registration.active).catch(() => ({}));
+  if (info.updateReady) {
+    waitingWorker = registration.active;
+    notify();
+    return;
+  }
+
   try {
     await registration.update();
   } catch (error) {
@@ -229,6 +240,12 @@ export async function getServiceWorkerStatus() {
       };
 
     const info = await pingWorker(worker).catch(() => ({}));
+    if (info.updateReady)
+      return {
+        kind: "update-ready",
+        label: "SW UPDATE READY",
+        detail: "A complete application update is cached and waiting for your approval.",
+      };
     if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__)
       return {
         kind: "update-ready",
@@ -273,16 +290,18 @@ export function subscribeToServiceWorkerStatus(listener) {
 export async function activateServiceWorkerUpdate() {
   if (dev) return;
   const registration = await getRegistration();
-  const worker = registration.waiting ?? waitingWorker;
+  let worker = registration.waiting ?? waitingWorker;
+  if (!worker && registration.active) {
+    const info = await pingWorker(registration.active).catch(() => ({}));
+    if (info.updateReady) worker = registration.active;
+  }
   if (!worker) {
     if (reloadRequired) location.reload();
     return;
   }
 
-  navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), {
-    once: true,
-  });
-  worker.postMessage({ type: "skip-waiting" });
+  await Promise.all([approveUpdate(worker), waitForController(worker)]);
+  location.reload();
 }
 
 export async function forceServiceWorkerUpdate() {
@@ -292,6 +311,14 @@ export async function forceServiceWorkerUpdate() {
   }
 
   const registration = await getRegistration();
+  if (registration.active) {
+    const info = await pingWorker(registration.active).catch(() => ({}));
+    if (info.updateReady) {
+      waitingWorker = registration.active;
+      await activateServiceWorkerUpdate();
+      return;
+    }
+  }
   if (registration.waiting) {
     waitingWorker = registration.waiting;
     await activateServiceWorkerUpdate();
@@ -318,6 +345,44 @@ export async function forceServiceWorkerUpdate() {
 
   // No newer worker was found. Keep and reload the complete active shell.
   location.reload();
+}
+
+/** @param {ServiceWorker} worker */
+function approveUpdate(worker) {
+  return withTimeout(
+    new Promise((resolve, reject) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (event) => {
+        channel.port1.close();
+        if (event.data?.type === "update-activated") resolve(undefined);
+        else reject(new Error(event.data?.error ?? "The update could not be activated."));
+      };
+      worker.postMessage({ type: "activate-update" }, [channel.port2]);
+    }),
+    UPDATE_TIMEOUT_MS,
+    "The service worker did not approve the update in time.",
+  );
+}
+
+/** @param {ServiceWorker} worker */
+function waitForController(worker) {
+  if (worker.state === "activated" && navigator.serviceWorker.controller === worker) {
+    return Promise.resolve();
+  }
+
+  /** @type {() => void} */
+  let changed = () => {};
+  const controlled = new Promise((resolve) => {
+    changed = () => {
+      if (navigator.serviceWorker.controller === worker) resolve(undefined);
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", changed);
+  });
+  return withTimeout(
+    controlled,
+    UPDATE_TIMEOUT_MS,
+    "The updated service worker did not take control in time.",
+  ).finally(() => navigator.serviceWorker.removeEventListener("controllerchange", changed));
 }
 
 /** @param {ServiceWorker | null} worker */

@@ -1,6 +1,7 @@
 import { build, files, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-shell-${version}`;
+const STATE_CACHE_NAME = "iroh-fm-shell-state-v1";
 const SHELL_CACHE_PREFIXES = ["iroh-fm-shell-", "iroh-fm-"];
 // Persistent user data. Application upgrades never delete these caches.
 const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
@@ -10,6 +11,7 @@ const scoped = (path) => {
   if (path === "/") return `${SCOPE_PATH}/`;
   return `${SCOPE_PATH}${path}`;
 };
+const STATE_KEY = scoped("/__iroh-fm-active-shell__");
 const NAVIGATION_FALLBACKS = [scoped("/"), scoped("/index.html")];
 const APP_SHELL = [
   ...new Set(
@@ -40,25 +42,50 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys();
-      const oldShells = keys.filter((name) => name !== CACHE_NAME && isShellCache(name));
-      const previous = oldShells.at(-1);
-      await Promise.all(
-        oldShells.filter((name) => name !== previous).map((name) => caches.delete(name)),
-      );
+      const approved = await approvedShell();
+      await cleanShellCaches(approved.cacheName);
       await self.clients.claim();
     })(),
   );
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type === "skip-waiting") {
-    self.skipWaiting();
+  if (event.data?.type === "activate-update") {
+    event.waitUntil(
+      (async () => {
+        try {
+          await writeApprovedShell({
+            cacheName: CACHE_NAME,
+            buildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+          });
+          await cleanShellCaches(CACHE_NAME);
+          await self.skipWaiting();
+          event.ports[0]?.postMessage({ type: "update-activated" });
+        } catch (error) {
+          event.ports[0]?.postMessage({
+            type: "update-error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })(),
+    );
     return;
   }
+
   if (event.data?.type === "version") {
-    const buildVersion = typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__;
-    event.ports[0]?.postMessage({ type: "version", version, buildVersion });
+    event.waitUntil(
+      (async () => {
+        const approved = await approvedShell();
+        event.ports[0]?.postMessage({
+          type: "version",
+          version,
+          buildVersion: approved.buildVersion,
+          workerBuildVersion:
+            typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+          updateReady: approved.cacheName !== CACHE_NAME,
+        });
+      })(),
+    );
   }
 });
 
@@ -67,17 +94,20 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
-      const current = await caches.open(CACHE_NAME);
+      const approved = await approvedShell();
+      const active = await caches.open(approved.cacheName);
       if (event.request.mode === "navigate") {
         return (
-          (await current.match(event.request, { ignoreSearch: true })) ??
-          (await current.match(NAVIGATION_FALLBACKS[0])) ??
-          (await current.match(NAVIGATION_FALLBACKS[1])) ??
+          (await active.match(event.request, { ignoreSearch: true })) ??
+          (await active.match(NAVIGATION_FALLBACKS[0])) ??
+          (await active.match(NAVIGATION_FALLBACKS[1])) ??
           new Response("The offline application shell is unavailable.", { status: 503 })
         );
       }
 
-      const cached = await caches.match(event.request, { ignoreSearch: true });
+      const cached =
+        (await active.match(event.request, { ignoreSearch: true })) ??
+        (await caches.match(event.request, { ignoreSearch: true }));
       if (cached) return cached;
       try {
         return await fetch(event.request);
@@ -90,8 +120,52 @@ self.addEventListener("fetch", (event) => {
 
 function isShellCache(name) {
   return (
-    SHELL_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix)) && !DATA_CACHE_NAMES.has(name)
+    name !== STATE_CACHE_NAME &&
+    SHELL_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix)) &&
+    !DATA_CACHE_NAMES.has(name)
   );
+}
+
+async function approvedShell() {
+  const stateCache = await caches.open(STATE_CACHE_NAME);
+  const saved = await stateCache.match(STATE_KEY);
+  if (saved) {
+    const approved = await saved.json().catch(() => null);
+    if (approved?.cacheName && (await caches.has(approved.cacheName))) return approved;
+  }
+
+  const shells = (await caches.keys()).filter(isShellCache);
+  const previous = shells.filter((name) => name !== CACHE_NAME).at(-1);
+  const initial = {
+    cacheName: previous ?? CACHE_NAME,
+    // A legacy cache did not persist its corresponding web build identifier.
+    buildVersion:
+      previous == null
+        ? typeof __BUILD_VERSION__ === "undefined"
+          ? version
+          : __BUILD_VERSION__
+        : null,
+  };
+  await writeApprovedShell(initial);
+  return initial;
+}
+
+async function writeApprovedShell(approved) {
+  const stateCache = await caches.open(STATE_CACHE_NAME);
+  await stateCache.put(
+    STATE_KEY,
+    new Response(JSON.stringify(approved), {
+      headers: { "content-type": "application/json" },
+    }),
+  );
+}
+
+async function cleanShellCaches(approvedName) {
+  const shells = (await caches.keys()).filter(isShellCache);
+  const keep = new Set([approvedName, CACHE_NAME]);
+  const previous = shells.filter((name) => !keep.has(name)).at(-1);
+  if (previous) keep.add(previous);
+  await Promise.all(shells.filter((name) => !keep.has(name)).map((name) => caches.delete(name)));
 }
 
 async function verifyHtmlMatchesShell(cache) {
