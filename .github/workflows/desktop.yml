@@ -18,7 +18,7 @@ env:
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
-  release:
+  build:
     name: ${{ matrix.cache_key }}
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
     strategy:
@@ -29,6 +29,10 @@ jobs:
             cache_key: linux-x64
             rust_target: ""
             tauri_args: --config src-tauri/tauri.ci.conf.json
+          - platform: ubuntu-24.04-arm
+            cache_key: linux-arm64
+            rust_target: ""
+            tauri_args: --bundles deb,rpm --config src-tauri/tauri.ci.conf.json
           - platform: windows-latest
             cache_key: windows-x64
             rust_target: ""
@@ -92,25 +96,53 @@ jobs:
           shared-key: desktop
           key: ${{ matrix.cache_key }}
 
-      - name: Set release metadata
-        id: release
-        shell: bash
-        run: |
-          short_sha="${RELEASE_SHA::7}"
-          echo "tag=desktop-$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-          echo "title=Desktop ($short_sha)" >> "$GITHUB_OUTPUT"
-
-      - name: Build and publish Tauri release
+      - name: Build Tauri bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: packages/web
-          tagName: ${{ steps.release.outputs.tag }}
-          releaseName: ${{ steps.release.outputs.title }}
-          releaseBody: Desktop build of ${{ env.RELEASE_SHA }}.
-          releaseCommitish: ${{ env.RELEASE_SHA }}
-          releaseDraft: false
-          prerelease: false
           releaseAssetNamePattern: iroh-fm_[version]_[platform]_[arch][ext]
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: desktop-[platform]-[arch]-[bundle]
           args: ${{ matrix.tauri_args }}
+
+  publish:
+    name: publish-release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all desktop bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+
+      - name: Set release metadata
+        run: |
+          short_sha="${RELEASE_SHA::7}"
+          echo "RELEASE_TAG=desktop-$RELEASE_SHA" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Desktop ($short_sha)" >> "$GITHUB_ENV"
+
+      - name: Publish complete Desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mapfile -d '' release_assets < <(find release -type f -print0)
+          if [ "${#release_assets[@]}" -eq 0 ]; then
+            echo "No desktop bundles were downloaded." >&2
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE"
+            gh release upload "$RELEASE_TAG" "${release_assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${release_assets[@]}" \
+              --target "$RELEASE_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes "Desktop build of $RELEASE_SHA."
+          fi
