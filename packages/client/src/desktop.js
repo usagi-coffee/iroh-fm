@@ -118,8 +118,7 @@ class DesktopInner {
     });
     const binary = atob(cover.bytesBase64);
     const data = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1)
-      data[index] = binary.charCodeAt(index);
+    for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index);
     return {
       contentType: cover.contentType,
       bytes: data,
@@ -182,7 +181,6 @@ class DesktopInner {
     return invoke("desktop_player_state", { handle: this.handle });
   }
 
-
   async close() {
     if (this.closed) return;
     this.closed = true;
@@ -209,4 +207,8 @@ export function generateDesktopIdentity() {
 /** @param {string} secret */
 export function desktopEndpointIdForSecret(secret) {
   return invoke("desktop_endpoint_id_for_secret", { secret });
+}
+
+export function desktopBuildInfo() {
+  return invoke("desktop_build_info");
 }

@@ -34,6 +34,8 @@
   let ticketParseGeneration = 0;
   let endpointCopied = $state(false);
   let forcingUpdate = $state(false);
+  /** @type {{platform: string, commit: string} | null} */
+  let nativeBuildInfo = $state(null);
   let serviceWorkerStatus = $state({
     kind: "checking",
     label: "SW CHECKING",
@@ -48,6 +50,9 @@
   function initialize() {
     refreshStorageInfo();
     if (settings.ticket.trim()) syncTicketAddress(settings.ticket);
+    void ClientCore.buildInfo()
+      .then((info) => (nativeBuildInfo = info))
+      .catch((error) => console.warn("[build] could not read native build information", error));
     return subscribeToServiceWorkerStatus((status) => {
       serviceWorkerStatus = status;
     });
@@ -409,7 +414,14 @@
       <div class="text-2xs text-overlay1 flex items-start justify-between gap-4 leading-5">
         <p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
         <div class="text-4xs text-overlay0 flex shrink-0 items-center gap-2 font-mono">
-          <span title="Application build commit">BUILD {__BUILD_COMMIT__}</span>
+          <span title="Remote web build commit">WEB {__BUILD_COMMIT__}</span>
+          {#if nativeBuildInfo}
+            <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
+            <span title={`${nativeBuildInfo.platform} application build commit`}>
+              {nativeBuildInfo.platform.toUpperCase()}
+              {nativeBuildInfo.commit.slice(0, 12)}
+            </span>
+          {/if}
           <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
           <span
             title={serviceWorkerStatus.detail}

@@ -1,11 +1,12 @@
-import { MusicClient } from "./index.js";
 import {
   connectDesktop,
+  desktopBuildInfo,
   desktopEndpointIdForSecret,
   generateDesktopIdentity,
   isDesktop,
   parseDesktopTicket,
 } from "./desktop.js";
+import { MusicClient } from "./index.js";
 import { NativeMusicClient, detectNative, isNative, nativeRequest } from "./native.js";
 
 export class ClientCore {
@@ -15,6 +16,11 @@ export class ClientCore {
 
   static async prepareCaches() {
     if (!isNative()) await MusicClient.prepareCaches();
+  }
+
+  static buildInfo() {
+    if (isDesktop()) return desktopBuildInfo();
+    return isNative() ? nativeRequest("buildInfo") : Promise.resolve(null);
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -43,9 +49,7 @@ export class ClientCore {
   }
 
   static cacheStats() {
-    return isNative()
-      ? nativeRequest("cacheStats")
-      : MusicClient.cacheStats();
+    return isNative() ? nativeRequest("cacheStats") : MusicClient.cacheStats();
   }
 }
 
