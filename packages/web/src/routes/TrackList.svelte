@@ -1,4 +1,6 @@
 <script>
+  import { untrack } from "svelte";
+
   import { replaceState } from "$app/navigation";
   import { page } from "$app/state";
 
@@ -69,7 +71,10 @@
 
   /** @param {HTMLElement} host */
   function focusRequestedTrack(host) {
-    const trackId = App.library.pendingTrackFocusId ?? page.state.focusTrackId;
+    const trackId =
+      App.library.pendingTrackFocusId ??
+      page.state.focusTrackId ??
+      untrack(() => App.player.currentTrack?.id);
     if (!trackId) return;
     const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
@@ -171,7 +176,8 @@
       style="height: 100%; overscroll-behavior: contain;"
     >
       {#snippet children(item, itemIndex)}
-        {#if item.kind === "album"}
+        {#if item}
+          {#if item.kind === "album"}
           <button
             data-list-index={itemIndex}
             {@attach longPress(() =>
@@ -283,6 +289,7 @@
               {formatTime(item.track.duration_seconds)}
             </div>
           </div>
+          {/if}
         {/if}
       {/snippet}
     </VList>

@@ -94,11 +94,21 @@
           class="tablet-xl:size-12 size-10 shrink-0"
         />{/if}
       <div class="min-w-0">
-        <p class="truncate text-xs font-semibold">{track?.title || "Nothing playing"}</p>
+        {#if track}<button
+            type="button"
+            onclick={() => App.library.focusTrack(track)}
+            class="hover:text-mauve block max-w-full truncate text-left text-xs font-semibold transition"
+            title="Show currently playing track">{track.title}</button
+          >{:else}<p class="truncate text-xs font-semibold">Nothing playing</p>{/if}
         <p class="text-3xs text-overlay1 mt-1 truncate">
           {#if App.player.error}<span class="text-red">{App.player.error}</span
-            >{:else if track}{track.artist} · {track.album}{:else}{App.library.summary.track_count} tracks
-            · {App.library.summary.album_count} albums{/if}
+            >{:else if track}{track.artist} ·
+            <button
+              type="button"
+              onclick={() => App.library.focusTrack(track)}
+              class="hover:text-mauve transition"
+              title="Show currently playing track">{track.album}</button
+            >{:else}{App.library.summary.track_count} tracks · {App.library.summary.album_count} albums{/if}
         </p>
       </div>
     </div>
@@ -125,7 +135,7 @@
 
 <audio
   {@attach App.player.attachAudio}
-  src={App.player.audioSrc}
+  src={App.player.audioSrc || undefined}
   onplay={() => (App.player.playing = true)}
   onpause={() => (App.player.playing = false)}
   ontimeupdate={(event) => {

@@ -54,12 +54,14 @@
 >
   <a
     href={resolve("/tracks")}
+    onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}
     class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
     ><img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-6" /></a
   >
   <nav class="flex h-full min-w-0 items-stretch">
     <a
       href={resolve("/tracks")}
+      onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}
       class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
         '/tracks',
       )

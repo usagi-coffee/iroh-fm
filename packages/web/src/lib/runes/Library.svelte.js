@@ -170,6 +170,19 @@ export class Library {
       : this.albums;
   }
 
+  /** @param {Track | null} track */
+  requestTrackFocus(track) {
+    if (!track) return;
+    this.selectedTrackId = track.id;
+    this.pendingTrackFocusId = track.id;
+  }
+
+  /** @param {Track} track */
+  async focusTrack(track) {
+    this.requestTrackFocus(track);
+    await goto(resolve("/tracks"));
+  }
+
   /** Album cache state is derived exclusively from its individual track files. */
   /** @param {import('../types').AlbumData} album */
   isAlbumFullyCached(album) {
@@ -186,9 +199,7 @@ export class Library {
       (track) => ids.has(track.id) && (!this.offlineOnly || track.cached),
     );
     if (!first) return null;
-    this.selectedTrackId = first.id;
-    this.pendingTrackFocusId = first.id;
-    await goto(resolve("/tracks"));
+    await this.focusTrack(first);
     return first;
   }
 
