@@ -149,7 +149,7 @@
   {#snippet startupFailed(/** @type {unknown} */ error)}
     <div class="bg-base text-text grid h-dvh place-items-center p-6">
       <div class="border-red/40 bg-crust w-full max-w-sm border p-5 text-center">
-        <h1 class="text-red text-sm font-semibold">The player could not start</h1>
+        <h1 class="text-red text-sm font-semibold">The application encountered an error</h1>
         <p class="text-overlay1 mt-2 text-xs leading-5 break-words">{String(error)}</p>
         <button
           type="button"
