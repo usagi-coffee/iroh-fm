@@ -295,7 +295,14 @@ async fn download_track(
 }
 
 fn decoder(bytes: Vec<u8>) -> Result<Decoder<Cursor<Vec<u8>>>, String> {
-    Decoder::try_from(Cursor::new(bytes)).map_err(|error| error.to_string())
+    let byte_len = bytes.len() as u64;
+    Decoder::builder()
+        .with_data(Cursor::new(bytes))
+        .with_byte_len(byte_len)
+        .with_seekable(true)
+        .with_coarse_seek(true)
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 fn sync_audio(audio: &mut DesktopAudio) {
