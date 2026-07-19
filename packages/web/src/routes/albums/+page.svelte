@@ -7,5 +7,5 @@
 </script>
 
 <div class="contents">
-  <AlbumGrid {albums} />
+  <AlbumGrid {albums} followPlayingTrack />
 </div>
