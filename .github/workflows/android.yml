@@ -133,3 +133,40 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download signed APK
+        uses: actions/download-artifact@v4
+        with:
+          pattern: iroh-fm-android-*
+          path: release
+          merge-multiple: true
+
+      - name: Name release APK
+        run: |
+          safe_tag="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/-}"
+          release_apk="release/iroh-fm-android-$safe_tag.apk"
+          mv release/app-release.apk "$release_apk"
+          echo "RELEASE_APK=$release_apk" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$RELEASE_APK" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$RELEASE_APK" \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME"
+          fi

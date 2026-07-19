@@ -87,7 +87,8 @@ git commit -m "android: describe the Android change"
 git push
 ```
 
-Create a signed release artifact by pushing any tag, conventionally a version tag:
+Create a GitHub release with the signed APK attached by pushing any tag,
+conventionally a version tag:
 
 ```sh
 git tag v0.1.0
@@ -95,5 +96,10 @@ git push origin v0.1.0
 ```
 
 A tag becomes the APK `versionName` without one leading `v`. An `android:` branch build uses `0.1.0-ci.<run-number>` as its `versionName`. The workflow run number supplies the monotonically increasing `versionCode` for both paths.
+
+Tag builds are also retained as workflow artifacts. If a tag workflow is rerun,
+the existing release is kept and its APK asset is replaced with the newly built,
+signature-verified file. `android:` commit builds remain workflow artifacts only
+and never create a GitHub release.
 
 The workflow verifies that the release certificate matches the SHA-256 fingerprint published for this app, then prints that fingerprint in the workflow summary.
