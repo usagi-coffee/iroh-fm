@@ -1,4 +1,5 @@
 name: Android
+run-name: Android (${{ github.event.workflow_run.head_sha }})
 
 on:
   workflow_run:

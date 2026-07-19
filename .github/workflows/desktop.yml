@@ -1,4 +1,5 @@
 name: Desktop
+run-name: Desktop (${{ github.event.workflow_run.head_sha }})
 
 on:
   workflow_run:
@@ -18,6 +19,7 @@ env:
 
 jobs:
   release:
+    name: ${{ matrix.cache_key }}
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
     strategy:
       fail-fast: false

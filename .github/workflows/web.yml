@@ -1,4 +1,5 @@
 name: Web
+run-name: Web (${{ github.sha }})
 
 on:
   push:
