@@ -21,6 +21,7 @@
   /** @type {Props} */
   let { albums } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
+  const ALBUM_ACTIONS_MIN_WIDTH_REM = 7;
   const ALBUM_GAP_REM = 0.75;
   const ALBUM_HORIZONTAL_PADDING_REM = 1.5;
   const MAX_COLUMNS = 16;
@@ -34,7 +35,13 @@
     const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
     return Math.max(1, Math.floor((available + gap) / (albumMinWidth + gap)));
   });
-  let columns = $derived(Math.max(1, Math.min(MAX_COLUMNS, autoColumns + columnAdjustment)));
+  let maxColumns = $derived.by(() => {
+    const minimum = ALBUM_ACTIONS_MIN_WIDTH_REM * rootFontSize;
+    const gap = ALBUM_GAP_REM * rootFontSize;
+    const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
+    return Math.max(1, Math.min(MAX_COLUMNS, Math.floor((available + gap) / (minimum + gap))));
+  });
+  let columns = $derived(Math.max(1, Math.min(maxColumns, autoColumns + columnAdjustment)));
   let bufferSize = $derived(25 * rootFontSize);
   let rows = $derived.by(() => {
     /** @type {import('$lib/types').AlbumData[][]} */
@@ -67,7 +74,7 @@
 
   /** @param {-1 | 1} direction */
   function changeColumns(direction) {
-    const nextColumns = Math.max(1, Math.min(MAX_COLUMNS, columns + direction));
+    const nextColumns = Math.max(1, Math.min(maxColumns, columns + direction));
     columnAdjustment = nextColumns - autoColumns;
     localStorage.setItem(COLUMN_ADJUSTMENT_KEY, String(columnAdjustment));
   }
@@ -123,7 +130,7 @@
       <button
         type="button"
         onclick={() => changeColumns(1)}
-        disabled={columns >= MAX_COLUMNS}
+        disabled={columns >= maxColumns}
         class="hover:bg-surface0 hover:text-mauve grid size-7 place-items-center disabled:cursor-default disabled:opacity-25"
         title="More columns, smaller covers"
         aria-label="Show more album columns with smaller covers"><AddIcon class="text-sm" /></button
