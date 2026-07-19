@@ -8,6 +8,7 @@
   import { modal } from "$lib/modals/index.js";
   import SnippetModal from "$lib/modals/Snippet.svelte";
   import { App } from "$lib/runes/App.svelte.js";
+  import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
   import { longPress } from "$lib/ui/long-press.js";
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
@@ -228,7 +229,11 @@
     >
   </div>
 
-  <div class="min-h-0 flex-1" {@attach focusRequestedTrack}>
+  <div
+    class="min-h-0 flex-1"
+    {@attach immediateTauriWheelScroll}
+    {@attach focusRequestedTrack}
+  >
     <VList
       data={items}
       getKey={(item) => item.key}
