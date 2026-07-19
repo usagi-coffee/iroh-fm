@@ -3,8 +3,6 @@ import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
 const START_TIMEOUT_MS = 30_000;
-const APP_CACHE_PREFIX = "iroh-fm-";
-const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 let startupPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
@@ -151,22 +149,30 @@ export function activateServiceWorkerUpdate() {
 }
 
 export async function forceServiceWorkerUpdate() {
-  try {
-    if ("serviceWorker" in navigator) {
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration) await registration.unregister();
-    }
-    if ("caches" in globalThis) {
-      const keys = await globalThis.caches.keys();
-      await Promise.allSettled(
-        keys
-          .filter((key) => key.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(key))
-          .map((key) => globalThis.caches.delete(key)),
-      );
-    }
-  } finally {
+  if (dev || !("serviceWorker" in navigator)) {
     location.reload();
+    return;
   }
+
+  // Never unregister the active worker or delete its shell here. Doing so
+  // creates an uncontrolled load where HTML and hashed assets can come from
+  // different points in a Pages deployment. A new worker becomes eligible
+  // for activation only after its complete shell has been cached.
+  let registration = await navigator.serviceWorker.getRegistration();
+  if (!registration) registration = await registerServiceWorker();
+  watchRegistration(registration);
+  await registration.update();
+
+  const update = await waitForInstalledWorker(registration);
+  if (update) {
+    waitingWorker = update;
+    activateServiceWorkerUpdate();
+    return;
+  }
+
+  // No newer worker exists. Reload through the still-active cache-first
+  // worker, preserving the last complete offline snapshot.
+  location.reload();
 }
 
 export async function ensure_service_worker() {
@@ -282,6 +288,33 @@ function waitForActiveWorker(registration) {
     worker?.addEventListener("statechange", changed);
     found();
   });
+}
+
+/**
+ * Wait for an update that is already installing. A byte-identical update has
+ * no installing worker and therefore resolves to null immediately.
+ * @param {ServiceWorkerRegistration} registration
+ * @returns {Promise<ServiceWorker | null>}
+ */
+function waitForInstalledWorker(registration) {
+  if (registration.waiting) return Promise.resolve(registration.waiting);
+  const worker = registration.installing;
+  if (!worker) return Promise.resolve(null);
+  if (worker.state === "installed") return Promise.resolve(worker);
+  if (worker.state === "redundant") return Promise.resolve(null);
+
+  return withTimeout(
+    new Promise((resolve) => {
+      const changed = () => {
+        if (worker.state !== "installed" && worker.state !== "redundant") return;
+        worker.removeEventListener("statechange", changed);
+        resolve(worker.state === "installed" ? (registration.waiting ?? worker) : null);
+      };
+      worker.addEventListener("statechange", changed);
+    }),
+    START_TIMEOUT_MS,
+    `Service worker update timed out after ${START_TIMEOUT_MS / 1_000} seconds`,
+  );
 }
 
 /** @param {ServiceWorker} target */

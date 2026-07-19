@@ -2,6 +2,7 @@ import { build, files, prerendered, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-${version}`;
 const APP_CACHE_PREFIX = "iroh-fm-";
+// Persistent user data. Application upgrades must never delete these caches.
 const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => {
@@ -37,12 +38,7 @@ self.addEventListener("install", (event) => {
         // shell is available offline. The previous worker remains active if
         // any asset from this deployment cannot be cached.
         await cache.addAll(APP_SHELL);
-        const navigationCached = await Promise.all(
-          NAVIGATION_FALLBACKS.map((path) => safeCacheMatch(cache, path)),
-        );
-        if (!navigationCached.some(Boolean)) {
-          throw new Error("the main application document could not be cached");
-        }
+        await verifyNavigationShell(cache);
       } catch (error) {
         await caches.delete(CACHE_NAME).catch(() => {});
         console.error("[sw] application update was not cached completely", error);
@@ -58,19 +54,12 @@ self.addEventListener("activate", (event) => {
       try {
         const keys = await caches.keys();
         const previous = keys
-          .filter(
-            (key) =>
-              key !== CACHE_NAME && key.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(key),
-          )
+          .filter((key) => key !== CACHE_NAME && isDisposableAppShellCache(key))
           .at(-1);
         await Promise.all(
           keys
             .filter(
-              (key) =>
-                key !== CACHE_NAME &&
-                key !== previous &&
-                key.startsWith(APP_CACHE_PREFIX) &&
-                !DATA_CACHE_NAMES.has(key),
+              (key) => key !== CACHE_NAME && key !== previous && isDisposableAppShellCache(key),
             )
             .map((key) => caches.delete(key)),
         );
@@ -139,6 +128,15 @@ self.addEventListener("fetch", (event) => {
         }
       }
 
+      // Hashed application resources are immutable. Always look through the
+      // complete current and previous snapshots before touching the network.
+      // This also keeps an already-open tab alive while a newer Pages
+      // deployment replaces the files at the origin.
+      if (isScopedApplicationResource(url)) {
+        const cached = await safeGlobalMatch(event.request);
+        if (cached) return cached;
+      }
+
       try {
         const response = await fetch(event.request);
         if (response.ok) return response;
@@ -180,5 +178,39 @@ async function safeCacheMatch(cache, request) {
     return (await cache.match(request, { ignoreSearch: true })) ?? null;
   } catch {
     return null;
+  }
+}
+
+function isScopedApplicationResource(url) {
+  if (url.origin !== self.location.origin) return false;
+  const scope = SCOPE_PATH ? `${SCOPE_PATH}/` : "/";
+  return url.pathname.startsWith(`${scope}_app/`) || APP_SHELL.includes(url.pathname);
+}
+
+function isDisposableAppShellCache(name) {
+  return name.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(name);
+}
+
+async function verifyNavigationShell(cache) {
+  const navigationResponses = (
+    await Promise.all(NAVIGATION_FALLBACKS.map((path) => safeCacheMatch(cache, path)))
+  ).filter(Boolean);
+  if (navigationResponses.length === 0) {
+    throw new Error("the main application document could not be cached");
+  }
+
+  for (const response of navigationResponses) {
+    const html = await response.text();
+    const references = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+      .map((match) => new URL(match[1], self.registration.scope))
+      .filter((url) => isScopedApplicationResource(url));
+    if (references.length === 0) {
+      throw new Error("the application document does not reference a versioned shell");
+    }
+    for (const reference of references) {
+      if (!(await safeCacheMatch(cache, reference.href))) {
+        throw new Error(`the application document references an uncached asset: ${reference}`);
+      }
+    }
   }
 }

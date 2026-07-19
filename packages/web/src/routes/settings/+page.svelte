@@ -399,8 +399,9 @@
             Application update
           </p>
           <p class="text-3xs text-overlay1 mt-1 leading-4">
-            Reset the application shell and service worker if this client is stuck on an older
-            build. Downloaded tracks, covers, and connection settings are preserved.
+            Check for a complete application update and activate it atomically. The current offline
+            shell, downloaded media, and connection settings stay available until the new shell is
+            ready.
           </p>
         </div>
         <button
