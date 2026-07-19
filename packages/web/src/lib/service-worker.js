@@ -2,36 +2,166 @@ import { dev } from "$app/environment";
 import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
-const START_TIMEOUT_MS = 30_000;
 const UPDATE_INTERVAL_MS = 60_000;
-let startupPromise;
+const UPDATE_TIMEOUT_MS = 30_000;
+
+/** @type {Promise<ServiceWorkerRegistration> | undefined} */
+let registrationPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
 let reloadRequired = false;
+let monitorStarted = false;
 /** @type {Set<(ready: boolean) => void>} */
 const updateListeners = new Set();
 /** @type {WeakSet<ServiceWorkerRegistration>} */
 const watchedRegistrations = new WeakSet();
 
-function notifyUpdateListeners() {
-  for (const listener of updateListeners) listener(Boolean(waitingWorker) || reloadRequired);
+function updateReady() {
+  return Boolean(waitingWorker) || reloadRequired;
 }
 
-function registerServiceWorker() {
-  return navigator.serviceWorker.register(workerUrl, {
-    type: dev ? "module" : "classic",
-    // WebKit may otherwise reuse the HTTP-cached worker script and miss a
-    // deployment even when registration.update() is called explicitly.
-    updateViaCache: "none",
+function notify() {
+  for (const listener of updateListeners) listener(updateReady());
+}
+
+/** @param {ServiceWorkerRegistration} registration */
+function watch(registration) {
+  if (watchedRegistrations.has(registration)) return;
+  watchedRegistrations.add(registration);
+
+  const syncWaitingWorker = () => {
+    if (registration.waiting && (registration.active || navigator.serviceWorker.controller)) {
+      waitingWorker = registration.waiting;
+    }
+    notify();
+  };
+
+  syncWaitingWorker();
+  registration.addEventListener("updatefound", () => {
+    notify();
+    const installing = registration.installing;
+    installing?.addEventListener("statechange", () => {
+      if (
+        installing.state === "installed" &&
+        (registration.active || navigator.serviceWorker.controller)
+      ) {
+        waitingWorker = registration.waiting ?? installing;
+        notify();
+      } else if (installing.state === "redundant") notify();
+    });
   });
+}
+
+async function register() {
+  const existing = await navigator.serviceWorker.getRegistration();
+  let registration;
+  try {
+    registration = await navigator.serviceWorker.register(workerUrl, {
+      type: dev ? "module" : "classic",
+      updateViaCache: "none",
+    });
+  } catch (error) {
+    // Registration may need the network, while an already installed worker
+    // must remain usable offline.
+    if (!existing?.active) throw error;
+    registration = existing;
+  }
+  watch(registration);
+  await requireActiveWorker(registration);
+  if (!dev && registration.active) {
+    void pingWorker(registration.active)
+      .then((info) => {
+        if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
+          reloadRequired = true;
+          notify();
+        }
+      })
+      .catch(() => {});
+  }
+  return registration;
+}
+
+/** @param {ServiceWorkerRegistration} registration */
+function requireActiveWorker(registration) {
+  if (registration.active?.state === "activated") return Promise.resolve(registration.active);
+  const worker = registration.installing ?? registration.waiting ?? registration.active;
+  if (!worker) return Promise.reject(new Error("Service worker registration has no worker."));
+
+  return withTimeout(
+    new Promise((resolve, reject) => {
+      const changed = () => {
+        if (worker.state === "activated") finish(undefined);
+        else if (worker.state === "redundant") {
+          finish(new Error("Service worker installation was rejected."));
+        }
+      };
+      /** @param {Error | undefined} error */
+      const finish = (error) => {
+        worker.removeEventListener("statechange", changed);
+        if (error) reject(error);
+        else resolve(worker);
+      };
+      worker.addEventListener("statechange", changed);
+      changed();
+    }),
+    UPDATE_TIMEOUT_MS,
+    "Service worker activation timed out.",
+  );
+}
+
+export function ensure_service_worker() {
+  if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return Promise.resolve(undefined);
+  }
+  registrationPromise ??= register().catch((error) => {
+    registrationPromise = undefined;
+    throw error;
+  });
+  if (!dev) startUpdateMonitor();
+  return registrationPromise;
 }
 
 export function attach() {
   return () => {
-    if (!("serviceWorker" in navigator)) return;
-
-    ensure_service_worker().catch((error) => console.error("[sw] registration failed", error));
+    void ensure_service_worker()?.catch((error) =>
+      console.warn("[sw] service worker is unavailable; continuing without it", error),
+    );
   };
+}
+
+function startUpdateMonitor() {
+  if (monitorStarted) return;
+  monitorStarted = true;
+
+  const check = () => {
+    if (document.visibilityState !== "visible") return;
+    void checkForUpdate().catch((error) => console.warn("[sw] update check failed", error));
+  };
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    waitingWorker = undefined;
+    reloadRequired = false;
+    notify();
+  });
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("online", check);
+  setInterval(check, UPDATE_INTERVAL_MS);
+  queueMicrotask(check);
+}
+
+async function checkForUpdate() {
+  const registration = await ensure_service_worker();
+  if (!registration || registration.waiting || registration.installing || !registration.active)
+    return;
+
+  try {
+    await registration.update();
+  } catch (error) {
+    // WebKitGTK throws this while an old unregister operation is settling.
+    // It is transient and must never prevent the application from starting.
+    if (error instanceof DOMException && error.name === "InvalidStateError") return;
+    throw error;
+  }
 }
 
 /** @param {(ready: boolean) => void} listener */
@@ -41,7 +171,7 @@ export function subscribeToServiceWorkerUpdates(listener) {
     return () => {};
   }
   updateListeners.add(listener);
-  listener(Boolean(waitingWorker) || reloadRequired);
+  listener(updateReady());
   return () => updateListeners.delete(listener);
 }
 
@@ -76,17 +206,17 @@ export async function getServiceWorkerStatus() {
         label: "SW OFF",
         detail: "No service worker is registered for this application.",
       };
-    if (waitingWorker || registration.waiting || reloadRequired)
+    if (registration.waiting || updateReady())
       return {
         kind: "update-ready",
         label: "SW UPDATE READY",
-        detail: "A complete application update is cached and waiting to be activated.",
+        detail: "A complete application update is cached and waiting for activation.",
       };
     if (registration.installing)
       return {
         kind: "installing",
         label: "SW INSTALLING",
-        detail: "The service worker is caching an application update.",
+        detail: "A complete application update is being cached.",
       };
 
     const worker = registration.active ?? navigator.serviceWorker.controller;
@@ -94,7 +224,7 @@ export async function getServiceWorkerStatus() {
       return {
         kind: "checking",
         label: "SW STARTING",
-        detail: "The service worker is registered but has not activated yet.",
+        detail: "The service worker registration is settling.",
       };
 
     const info = await pingWorker(worker).catch(() => ({}));
@@ -102,14 +232,14 @@ export async function getServiceWorkerStatus() {
       return {
         kind: "update-ready",
         label: "SW RELOAD READY",
-        detail: `The active worker uses application build ${info.buildVersion}; this page uses ${__BUILD_VERSION__}.`,
+        detail: `The page uses build ${__BUILD_VERSION__}; the active shell uses ${info.buildVersion}.`,
       };
     return {
       kind: "active",
       label: "SW ACTIVE",
       detail: info.version
-        ? `Service worker ${info.version} matches application build ${info.buildVersion ?? __BUILD_VERSION__}.`
-        : "The service worker is active but did not report its version.",
+        ? `Service worker ${info.version} is serving application build ${info.buildVersion ?? __BUILD_VERSION__}.`
+        : "The active service worker did not report its version.",
     };
   } catch (error) {
     return {
@@ -129,27 +259,29 @@ export function subscribeToServiceWorkerStatus(listener) {
       if (!disposed) listener(status);
     });
   };
-  const unsubscribeUpdates = subscribeToServiceWorkerUpdates(refresh);
+  const unsubscribe = subscribeToServiceWorkerUpdates(refresh);
   navigator.serviceWorker?.addEventListener("controllerchange", refresh);
   refresh();
   return () => {
     disposed = true;
-    unsubscribeUpdates();
+    unsubscribe();
     navigator.serviceWorker?.removeEventListener("controllerchange", refresh);
   };
 }
 
-export function activateServiceWorkerUpdate() {
+export async function activateServiceWorkerUpdate() {
   if (dev) return;
-  if (!waitingWorker) {
+  const registration = await ensure_service_worker();
+  const worker = registration?.waiting ?? waitingWorker;
+  if (!worker) {
     if (reloadRequired) location.reload();
     return;
   }
+
   navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), {
     once: true,
   });
-  waitingWorker.postMessage({ type: "skip-waiting" });
-  setTimeout(() => location.reload(), 2_000);
+  worker.postMessage({ type: "skip-waiting" });
 }
 
 export async function forceServiceWorkerUpdate() {
@@ -158,38 +290,56 @@ export async function forceServiceWorkerUpdate() {
     return;
   }
 
-  // Never unregister the active worker or delete its shell here. Doing so
-  // creates an uncontrolled load where HTML and hashed assets can come from
-  // different points in a Pages deployment. A new worker becomes eligible
-  // for activation only after its complete shell has been cached.
-  let registration = await navigator.serviceWorker.getRegistration();
-  if (!registration) registration = await registerServiceWorker();
-  watchRegistration(registration);
-  await registration.update();
-
-  const update = await waitForInstalledWorker(registration);
-  if (update) {
-    waitingWorker = update;
-    activateServiceWorkerUpdate();
+  const registration = await ensure_service_worker();
+  if (!registration) {
+    location.reload();
+    return;
+  }
+  if (registration.waiting) {
+    waitingWorker = registration.waiting;
+    await activateServiceWorkerUpdate();
     return;
   }
 
-  // No newer worker exists. Reload through the still-active cache-first
-  // worker, preserving the last complete offline snapshot.
+  if (!registration.installing && registration.active) {
+    try {
+      await registration.update();
+    } catch (error) {
+      if (!(error instanceof DOMException) || error.name !== "InvalidStateError") throw error;
+      console.warn("[sw] update registration is still settling; reloading the active shell");
+      location.reload();
+      return;
+    }
+  }
+
+  const worker = registration.waiting ?? (await waitForInstallation(registration.installing));
+  if (worker?.state === "installed") {
+    waitingWorker = registration.waiting ?? worker;
+    await activateServiceWorkerUpdate();
+    return;
+  }
+
+  // No newer worker was found. Keep and reload the complete active shell.
   location.reload();
 }
 
-export async function ensure_service_worker() {
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-  startupPromise ??= withTimeout(
-    startServiceWorker(),
-    START_TIMEOUT_MS,
-    `Service worker startup timed out after ${START_TIMEOUT_MS / 1_000} seconds`,
-  ).catch((error) => {
-    startupPromise = undefined;
-    throw error;
-  });
-  return startupPromise;
+/** @param {ServiceWorker | null} worker */
+function waitForInstallation(worker) {
+  if (!worker || worker.state === "redundant") return Promise.resolve(null);
+  if (worker.state === "installed") return Promise.resolve(worker);
+
+  return withTimeout(
+    new Promise((resolve) => {
+      const changed = () => {
+        if (worker.state !== "installed" && worker.state !== "redundant") return;
+        worker.removeEventListener("statechange", changed);
+        resolve(worker.state === "installed" ? worker : null);
+      };
+      worker.addEventListener("statechange", changed);
+    }),
+    UPDATE_TIMEOUT_MS,
+    "The service worker update timed out.",
+  );
 }
 
 /** @template T @param {Promise<T>} promise @param {number} timeoutMs @param {string} message */
@@ -202,156 +352,17 @@ function withTimeout(promise, timeoutMs, message) {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timeout));
 }
 
-async function startServiceWorker() {
-  let registration = await navigator.serviceWorker.getRegistration();
-  if (!registration) registration = await registerServiceWorker();
-  else {
-    // Re-registering the same URL is idempotent and persists updateViaCache:
-    // "none" on registrations created by older versions of the application.
-    try {
-      registration = await registerServiceWorker();
-    } catch (error) {
-      console.info("[sw] using the existing offline registration", error);
-    }
-  }
-  if (!dev) watchRegistration(registration);
-
-  let target;
-  try {
-    target = await waitForActiveWorker(registration);
-  } catch (firstError) {
-    console.warn("[sw] first activation attempt failed, retrying", firstError);
-    await registration.update();
-    target = await waitForActiveWorker(registration);
-  }
-
-  const workerInfo = await pingWorker(target).catch(() => {
-    console.info("[sw] worker is active; version check timed out");
-    return {};
-  });
-  if (dev) return;
-  if (workerInfo.buildVersion && workerInfo.buildVersion !== __BUILD_VERSION__) {
-    reloadRequired = true;
-    notifyUpdateListeners();
-  }
-  /** @type {Promise<ServiceWorkerRegistration | void> | undefined} */
-  let updateCheck;
-  const checkForUpdate = () => {
-    if (document.visibilityState !== "visible" || updateCheck) return updateCheck;
-    updateCheck = registration
-      .update()
-      .catch((error) => console.warn("[sw] update check failed", error))
-      .finally(() => (updateCheck = undefined));
-    return updateCheck;
-  };
-  void checkForUpdate();
-  document.addEventListener("visibilitychange", checkForUpdate);
-  window.addEventListener("online", checkForUpdate);
-  setInterval(checkForUpdate, UPDATE_INTERVAL_MS);
-}
-
-/** @param {ServiceWorkerRegistration} registration */
-function watchRegistration(registration) {
-  if (watchedRegistrations.has(registration)) return;
-  watchedRegistrations.add(registration);
-
-  /** @param {ServiceWorker | null | undefined} worker */
-  const announceWaitingWorker = (worker) => {
-    if (!worker || (!navigator.serviceWorker.controller && !registration.active)) return;
-    waitingWorker = worker;
-    notifyUpdateListeners();
-  };
-
-  announceWaitingWorker(registration.waiting);
-  registration.addEventListener("updatefound", () => {
-    const installing = registration.installing;
-    if (!installing) return;
-    installing.addEventListener("statechange", () => {
-      if (installing.state === "installed")
-        announceWaitingWorker(registration.waiting ?? installing);
-    });
-  });
-}
-
-/** @param {ServiceWorkerRegistration} registration @returns {Promise<ServiceWorker>} */
-function waitForActiveWorker(registration) {
-  const current = registration.active ?? registration.waiting ?? registration.installing;
-  if (current?.state === "activated") return Promise.resolve(current);
-
-  return new Promise((resolve, reject) => {
-    let worker = current;
-    const timeout = setTimeout(
-      () => finish(new Error("Service worker did not start"), undefined),
-      START_TIMEOUT_MS,
-    );
-    const changed = () => {
-      if (worker?.state === "activated") finish(undefined, worker);
-      else if (worker?.state === "redundant")
-        finish(new Error("Service worker installation was rejected"), undefined);
-    };
-    const found = () => {
-      worker?.removeEventListener("statechange", changed);
-      worker = registration.installing ?? registration.waiting ?? registration.active;
-      worker?.addEventListener("statechange", changed);
-      changed();
-    };
-    /** @param {Error | undefined} error @param {ServiceWorker | undefined} active */
-    const finish = (error, active) => {
-      clearTimeout(timeout);
-      registration.removeEventListener("updatefound", found);
-      worker?.removeEventListener("statechange", changed);
-      if (error) reject(error);
-      else if (active) resolve(active);
-      else reject(new Error("Service worker is not active"));
-    };
-
-    registration.addEventListener("updatefound", found);
-    worker?.addEventListener("statechange", changed);
-    found();
-  });
-}
-
-/**
- * Wait for an update that is already installing. A byte-identical update has
- * no installing worker and therefore resolves to null immediately.
- * @param {ServiceWorkerRegistration} registration
- * @returns {Promise<ServiceWorker | null>}
- */
-function waitForInstalledWorker(registration) {
-  if (registration.waiting) return Promise.resolve(registration.waiting);
-  const worker = registration.installing;
-  if (!worker) return Promise.resolve(null);
-  if (worker.state === "installed") return Promise.resolve(worker);
-  if (worker.state === "redundant") return Promise.resolve(null);
-
-  return withTimeout(
-    new Promise((resolve) => {
-      const changed = () => {
-        if (worker.state !== "installed" && worker.state !== "redundant") return;
-        worker.removeEventListener("statechange", changed);
-        resolve(worker.state === "installed" ? (registration.waiting ?? worker) : null);
-      };
-      worker.addEventListener("statechange", changed);
-    }),
-    START_TIMEOUT_MS,
-    `Service worker update timed out after ${START_TIMEOUT_MS / 1_000} seconds`,
-  );
-}
-
-/** @param {ServiceWorker} target */
-function pingWorker(target) {
+/** @param {ServiceWorker} worker */
+function pingWorker(worker) {
   return new Promise((resolve, reject) => {
     const channel = new MessageChannel();
     const timeout = setTimeout(() => reject(new Error("Service worker did not respond")), 5_000);
-
     channel.port1.onmessage = (event) => {
-      if (event.data?.type !== "version" && event.data?.type !== "user") return;
-      console.info(`[sw] version: ${event.data.version}`);
+      if (event.data?.type !== "version") return;
       clearTimeout(timeout);
       channel.port1.close();
       resolve(event.data);
     };
-
-    target.postMessage({ type: "version" }, [channel.port2]);
+    worker.postMessage({ type: "version" }, [channel.port2]);
   });
 }

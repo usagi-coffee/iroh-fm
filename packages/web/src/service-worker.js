@@ -1,8 +1,8 @@
-import { build, files, prerendered, version } from "$service-worker";
+import { build, files, version } from "$service-worker";
 
-const CACHE_NAME = `iroh-fm-${version}`;
-const APP_CACHE_PREFIX = "iroh-fm-";
-// Persistent user data. Application upgrades must never delete these caches.
+const CACHE_NAME = `iroh-fm-shell-${version}`;
+const SHELL_CACHE_PREFIXES = ["iroh-fm-shell-", "iroh-fm-"];
+// Persistent user data. Application upgrades never delete these caches.
 const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => {
@@ -11,37 +11,26 @@ const scoped = (path) => {
   return `${SCOPE_PATH}${path}`;
 };
 const NAVIGATION_FALLBACKS = [scoped("/"), scoped("/index.html")];
-const APP_SHELL =
-  build.length === 0
-    ? []
-    : [
-        ...new Set(
-          [
-            ...build,
-            ...files.filter((path) => !path.endsWith("/.nojekyll")),
-            ...prerendered,
-            ...NAVIGATION_FALLBACKS,
-          ].map(scoped),
-        ),
-      ];
+const APP_SHELL = [
+  ...new Set(
+    [...build, ...files.filter((path) => !path.endsWith("/.nojekyll")), "/"]
+      .map(scoped)
+      .concat(NAVIGATION_FALLBACKS),
+  ),
+];
+const ENTRYPOINTS = APP_SHELL.filter((path) =>
+  /\/_app\/immutable\/entry\/(?:start|app)\.[^/]+\.js$/.test(path),
+);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      // SvelteKit does not provide an application-shell manifest to its
-      // development worker. Production builds always have one.
-      if (APP_SHELL.length === 0) return;
-
       const cache = await caches.open(CACHE_NAME);
       try {
-        // A worker is installable only when its complete, matching application
-        // shell is available offline. The previous worker remains active if
-        // any asset from this deployment cannot be cached.
-        await cache.addAll(APP_SHELL);
-        await verifyNavigationShell(cache);
+        await cache.addAll(APP_SHELL.map((path) => new Request(path, { cache: "reload" })));
+        await verifyHtmlMatchesShell(cache);
       } catch (error) {
         await caches.delete(CACHE_NAME).catch(() => {});
-        console.error("[sw] application update was not cached completely", error);
         throw error;
       }
     })(),
@@ -51,21 +40,12 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      try {
-        const keys = await caches.keys();
-        const previous = keys
-          .filter((key) => key !== CACHE_NAME && isDisposableAppShellCache(key))
-          .at(-1);
-        await Promise.all(
-          keys
-            .filter(
-              (key) => key !== CACHE_NAME && key !== previous && isDisposableAppShellCache(key),
-            )
-            .map((key) => caches.delete(key)),
-        );
-      } catch (error) {
-        console.warn("[sw] old app caches could not be cleaned", error);
-      }
+      const keys = await caches.keys();
+      const oldShells = keys.filter((name) => name !== CACHE_NAME && isShellCache(name));
+      const previous = oldShells.at(-1);
+      await Promise.all(
+        oldShells.filter((name) => name !== previous).map((name) => caches.delete(name)),
+      );
       await self.clients.claim();
     })(),
   );
@@ -76,9 +56,10 @@ self.addEventListener("message", (event) => {
     self.skipWaiting();
     return;
   }
-  if (event.data?.type !== "version" && event.data?.type !== "user") return;
-  const buildVersion = typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__;
-  event.ports[0]?.postMessage({ type: "version", version, buildVersion });
+  if (event.data?.type === "version") {
+    const buildVersion = typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__;
+    event.ports[0]?.postMessage({ type: "version", version, buildVersion });
+  }
 });
 
 self.addEventListener("fetch", (event) => {
@@ -86,131 +67,41 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
-      const url = new URL(event.request.url);
-      let cache;
-
-      try {
-        cache = await caches.open(CACHE_NAME);
-      } catch (error) {
-        // Cache Storage can fail temporarily or after the origin reaches its
-        // quota. Continue as a transparent network proxy in that case.
-        console.warn("[sw] app cache is unavailable", error);
-      }
-
+      const current = await caches.open(CACHE_NAME);
       if (event.request.mode === "navigate") {
-        const cached =
-          (cache && (await safeCacheMatch(cache, event.request))) ||
-          (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[0]))) ||
-          (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[1])));
-        if (cached) return cached;
-
-        // This is only needed for the first uncontrolled load or if Cache
-        // Storage was cleared. Controlled navigations never mix HTML from a
-        // newer deployment into the active worker's versioned cache.
-        try {
-          const response = await fetch(event.request, { cache: "no-store" });
-          if (response.ok) return response;
-        } catch {
-          // The response below explains why a complete offline shell is absent.
-        }
-        return new Response("The offline application shell is unavailable.", {
-          status: 503,
-          headers: { "content-type": "text/plain; charset=utf-8" },
-        });
+        return (
+          (await current.match(event.request, { ignoreSearch: true })) ??
+          (await current.match(NAVIGATION_FALLBACKS[0])) ??
+          (await current.match(NAVIGATION_FALLBACKS[1])) ??
+          new Response("The offline application shell is unavailable.", { status: 503 })
+        );
       }
 
-      if (cache && APP_SHELL.includes(url.pathname)) {
-        try {
-          const cached = await cache.match(event.request, { ignoreSearch: true });
-          if (cached) return cached;
-        } catch (error) {
-          console.warn("[sw] cached app resource could not be read", error);
-        }
-      }
-
-      // Hashed application resources are immutable. Always look through the
-      // complete current and previous snapshots before touching the network.
-      // This also keeps an already-open tab alive while a newer Pages
-      // deployment replaces the files at the origin.
-      if (isScopedApplicationResource(url)) {
-        const cached = await safeGlobalMatch(event.request);
-        if (cached) return cached;
-      }
-
+      const cached = await caches.match(event.request, { ignoreSearch: true });
+      if (cached) return cached;
       try {
-        const response = await fetch(event.request);
-        if (response.ok) return response;
-
-        // A tab can briefly receive HTML from the previous deployment. Keep
-        // one prior app cache so its hashed modules still resolve safely.
-        const previous = await safeGlobalMatch(event.request);
-        return previous ?? response;
+        return await fetch(event.request);
       } catch {
-        const cached = await safeGlobalMatch(event.request);
-        if (cached) return cached;
-
-        if (event.request.mode === "navigate") {
-          const fallback =
-            (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[0]))) ||
-            (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[1])));
-          if (fallback) return fallback;
-        }
-
-        return new Response("This resource is temporarily unavailable.", {
-          status: 503,
-          headers: { "content-type": "text/plain; charset=utf-8" },
-        });
+        return new Response("This resource is unavailable offline.", { status: 503 });
       }
     })(),
   );
 });
 
-async function safeGlobalMatch(request) {
-  try {
-    return (await caches.match(request, { ignoreSearch: true })) ?? null;
-  } catch {
-    return null;
-  }
+function isShellCache(name) {
+  return (
+    SHELL_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix)) && !DATA_CACHE_NAMES.has(name)
+  );
 }
 
-async function safeCacheMatch(cache, request) {
-  try {
-    return (await cache.match(request, { ignoreSearch: true })) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function isScopedApplicationResource(url) {
-  if (url.origin !== self.location.origin) return false;
-  const scope = SCOPE_PATH ? `${SCOPE_PATH}/` : "/";
-  return url.pathname.startsWith(`${scope}_app/`) || APP_SHELL.includes(url.pathname);
-}
-
-function isDisposableAppShellCache(name) {
-  return name.startsWith(APP_CACHE_PREFIX) && !DATA_CACHE_NAMES.has(name);
-}
-
-async function verifyNavigationShell(cache) {
-  const navigationResponses = (
-    await Promise.all(NAVIGATION_FALLBACKS.map((path) => safeCacheMatch(cache, path)))
-  ).filter(Boolean);
-  if (navigationResponses.length === 0) {
-    throw new Error("the main application document could not be cached");
-  }
-
-  for (const response of navigationResponses) {
+async function verifyHtmlMatchesShell(cache) {
+  if (ENTRYPOINTS.length < 2) throw new Error("the application entrypoints are missing");
+  for (const path of NAVIGATION_FALLBACKS) {
+    const response = await cache.match(path);
+    if (!response) throw new Error(`the application document is missing: ${path}`);
     const html = await response.text();
-    const references = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
-      .map((match) => new URL(match[1], self.registration.scope))
-      .filter((url) => isScopedApplicationResource(url));
-    if (references.length === 0) {
-      throw new Error("the application document does not reference a versioned shell");
-    }
-    for (const reference of references) {
-      if (!(await safeCacheMatch(cache, reference.href))) {
-        throw new Error(`the application document references an uncached asset: ${reference}`);
-      }
+    if (!ENTRYPOINTS.every((entry) => html.includes(entry))) {
+      throw new Error(`the application document and asset manifest do not match: ${path}`);
     }
   }
 }

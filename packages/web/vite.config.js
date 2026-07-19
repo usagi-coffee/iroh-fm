@@ -49,6 +49,9 @@ export default defineConfig({
       paths: {
         base,
       },
+      version: {
+        name: buildVersion,
+      },
     }),
     tailwindcss(),
     icons({ compiler: "svelte" }),
