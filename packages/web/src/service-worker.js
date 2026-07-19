@@ -50,7 +50,9 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type === "activate-update") {
+  // "skip-waiting" keeps the explicit update button from the pre-pointer
+  // client compatible with this worker during the one-time migration.
+  if (event.data?.type === "activate-update" || event.data?.type === "skip-waiting") {
     event.waitUntil(
       (async () => {
         try {
@@ -134,17 +136,9 @@ async function approvedShell() {
     if (approved?.cacheName && (await caches.has(approved.cacheName))) return approved;
   }
 
-  const shells = (await caches.keys()).filter(isShellCache);
-  const previous = shells.filter((name) => name !== CACHE_NAME).at(-1);
   const initial = {
-    cacheName: previous ?? CACHE_NAME,
-    // A legacy cache did not persist its corresponding web build identifier.
-    buildVersion:
-      previous == null
-        ? typeof __BUILD_VERSION__ === "undefined"
-          ? version
-          : __BUILD_VERSION__
-        : null,
+    cacheName: CACHE_NAME,
+    buildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
   };
   await writeApprovedShell(initial);
   return initial;

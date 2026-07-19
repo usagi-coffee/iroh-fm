@@ -49,6 +49,9 @@ export default defineConfig({
       paths: {
         base,
       },
+      serviceWorker: {
+        register: false,
+      },
       version: {
         name: buildVersion,
       },

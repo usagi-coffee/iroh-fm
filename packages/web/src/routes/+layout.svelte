@@ -118,6 +118,32 @@
     {/if}
   {/snippet}
 
+  {#snippet updateNotice(/** @type {boolean} */ overlay)}
+    {#if updateReady && !updateBannerDismissed}
+      <div
+        class:fixed={overlay}
+        class:top-0={overlay}
+        class:left-0={overlay}
+        class:z-50={overlay}
+        class="border-mauve/30 bg-mauve/10 text-mauve flex h-9 w-full border-b"
+      >
+        <button
+          type="button"
+          onclick={activateServiceWorkerUpdate}
+          class="text-3xs hover:bg-mauve/15 flex min-w-0 flex-1 items-center justify-center gap-2 font-mono font-bold tracking-[.08em]"
+          title="Install application update"><RefreshIcon class="text-sm" />UPDATE AVAILABLE</button
+        >
+        <button
+          type="button"
+          onclick={() => (updateBannerDismissed = true)}
+          class="border-mauve/20 text-mauve/80 hover:bg-mauve/15 hover:text-mauve grid w-10 shrink-0 place-items-center border-l"
+          title="Dismiss update notice"
+          aria-label="Dismiss update notice"><CloseIcon class="text-base" /></button
+        >
+      </div>
+    {/if}
+  {/snippet}
+
   {#snippet loading(/** @type {{ text: string, step: number }} */ { text, step })}
     <div class="bg-base text-text grid h-dvh place-items-center p-6">
       <div class="flex w-full max-w-56 flex-col items-center gap-4 text-center">
@@ -187,27 +213,7 @@
                   >
                     <div class="shrink-0">
                       <TopBar {updateReady} onupdate={activateServiceWorkerUpdate} />
-                      {#if updateReady && !updateBannerDismissed}
-                        <div
-                          class="border-mauve/30 bg-mauve/10 text-mauve flex h-9 w-full border-b"
-                        >
-                          <button
-                            type="button"
-                            onclick={activateServiceWorkerUpdate}
-                            class="text-3xs hover:bg-mauve/15 flex min-w-0 flex-1 items-center justify-center gap-2 font-mono font-bold tracking-[.08em]"
-                            title="Install application update"
-                            ><RefreshIcon class="text-sm" />UPDATE AVAILABLE</button
-                          >
-                          <button
-                            type="button"
-                            onclick={() => (updateBannerDismissed = true)}
-                            class="border-mauve/20 text-mauve/80 hover:bg-mauve/15 hover:text-mauve grid w-10 shrink-0 place-items-center border-l"
-                            title="Dismiss update notice"
-                            aria-label="Dismiss update notice"
-                            ><CloseIcon class="text-base" /></button
-                          >
-                        </div>
-                      {/if}
+                      {@render updateNotice(false)}
                     </div>
                     <main class="min-h-0 flex-1 overflow-hidden">{@render children()}</main>
                     <PlayerBar />
@@ -215,6 +221,7 @@
                 {/if}
               {:else if onConnectPage}
                 {@render children()}
+                {@render updateNotice(true)}
               {:else}
                 <div
                   {@attach navigate("/connect")}

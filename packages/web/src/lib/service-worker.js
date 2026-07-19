@@ -3,7 +3,7 @@ import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
 const UPDATE_INTERVAL_MS = 60_000;
-const UPDATE_TIMEOUT_MS = 30_000;
+const UPDATE_TIMEOUT_MS = 10_000;
 
 /** @type {Promise<ServiceWorkerRegistration> | undefined} */
 let registrationPromise;
