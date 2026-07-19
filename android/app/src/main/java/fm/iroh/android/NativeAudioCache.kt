@@ -22,6 +22,7 @@ object NativeAudioCache {
     private lateinit var rollingCache: SimpleCache
     private lateinit var offlineCache: SimpleCache
     private lateinit var rollingFactory: CacheDataSource.Factory
+    private lateinit var rollingPlaybackFactory: CacheDataSource.Factory
     private lateinit var offlineDownloadFactory: CacheDataSource.Factory
     private lateinit var playbackFactory: CacheDataSource.Factory
 
@@ -43,6 +44,12 @@ object NativeAudioCache {
             .setCache(rollingCache)
             .setUpstreamDataSourceFactory(IrohDataSource.Factory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        // The foreground cache writer owns rolling-cache writes. Media3 only reads cached spans.
+        rollingPlaybackFactory = CacheDataSource.Factory()
+            .setCache(rollingCache)
+            .setCacheWriteDataSinkFactory(null)
+            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         offlineDownloadFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
             // Promote any already-buffered rolling bytes before requesting missing data over iroh.
@@ -52,7 +59,7 @@ object NativeAudioCache {
         playbackFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
             .setCacheWriteDataSinkFactory(null)
-            .setUpstreamDataSourceFactory(rollingFactory)
+            .setUpstreamDataSourceFactory(rollingPlaybackFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 

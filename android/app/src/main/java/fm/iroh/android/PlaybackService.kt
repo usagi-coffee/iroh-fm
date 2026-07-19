@@ -23,8 +23,6 @@ class PlaybackService : MediaSessionService() {
     private val prefetchLock = Any()
     private var prefetchWriter: CacheWriter? = null
     private var prefetchTrackId: String? = null
-    private var prefetchScheduleGeneration = 0
-    private var waitingForTrackId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -64,6 +62,7 @@ class PlaybackService : MediaSessionService() {
                 if (
                     events.contains(Player.EVENT_TIMELINE_CHANGED) ||
                     events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                    events.contains(Player.EVENT_IS_PLAYING_CHANGED) ||
                     events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
                     events.contains(Player.EVENT_REPEAT_MODE_CHANGED) ||
                     events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
@@ -77,60 +76,56 @@ class PlaybackService : MediaSessionService() {
 
     /** Keeps one complete queue item ahead of the player without relying on the TWA process. */
     private fun scheduleNextPrefetch(player: Player) {
-        val generation = ++prefetchScheduleGeneration
-        val currentTrackId = player.currentMediaItem?.mediaId
-        val nextIndex = player.nextMediaItemIndex
-        val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
-        val nextTrackId = nextItem?.mediaId
-        val nextUri = nextItem?.localConfiguration?.uri
-        if (
-            NativeCore.offlineOnly ||
-            currentTrackId == null ||
-            nextTrackId == null ||
-            nextTrackId == currentTrackId ||
-            nextUri == null
-        ) {
-            waitingForTrackId = null
+        val currentItem = player.currentMediaItem
+        val currentTrackId = currentItem?.mediaId
+        val currentUri = currentItem?.localConfiguration?.uri
+        if (NativeCore.offlineOnly || currentTrackId == null || currentUri == null) {
             cancelPrefetch()
             return
         }
 
         if (!NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, currentTrackId)) {
             val activePrefetch = synchronized(prefetchLock) { prefetchTrackId }
-            if (activePrefetch != null && activePrefetch != currentTrackId) cancelPrefetch()
-            if (waitingForTrackId != currentTrackId) {
-                waitingForTrackId = currentTrackId
-                Log.d(TAG, "Waiting for current download before next-track prefetch: mediaId=$currentTrackId")
-            }
-            if (!player.playWhenReady) return
-            prefetchHandler.postDelayed(
-                {
-                    if (prefetchScheduleGeneration == generation) scheduleNextPrefetch(player)
-                },
-                PREFETCH_READINESS_POLL_MS,
-            )
+            if (activePrefetch == currentTrackId) return
+            if (activePrefetch != null) cancelPrefetch()
+            // Let Media3 establish playback first, then aggressively fill the rest of this file.
+            if (!player.isPlaying) return
+            startCacheFill(currentTrackId, currentUri, "Current-track download")
             return
         }
-        if (waitingForTrackId == currentTrackId) {
-            Log.d(TAG, "Current download complete; next-track prefetch is eligible: mediaId=$currentTrackId")
+
+        val nextIndex = player.nextMediaItemIndex
+        val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
+        val nextTrackId = nextItem?.mediaId
+        val nextUri = nextItem?.localConfiguration?.uri
+        if (
+            nextTrackId == null ||
+            nextTrackId == currentTrackId ||
+            nextUri == null
+        ) {
+            cancelPrefetch()
+            return
         }
-        waitingForTrackId = null
 
         if (NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, nextTrackId)) {
             cancelPrefetch()
             return
         }
 
-        synchronized(prefetchLock) {
-            if (prefetchTrackId == nextTrackId) return
-            prefetchWriter?.cancel()
-            prefetchWriter = null
-            prefetchTrackId = nextTrackId
-        }
-        prefetchExecutor.execute { prefetch(nextTrackId, nextUri) }
+        startCacheFill(nextTrackId, nextUri, "Next-track prefetch")
     }
 
-    private fun prefetch(trackId: String, uri: Uri) {
+    private fun startCacheFill(trackId: String, uri: Uri, operation: String) {
+        synchronized(prefetchLock) {
+            if (prefetchTrackId == trackId) return
+            prefetchWriter?.cancel()
+            prefetchWriter = null
+            prefetchTrackId = trackId
+        }
+        prefetchExecutor.execute { cacheTrack(trackId, uri, operation) }
+    }
+
+    private fun cacheTrack(trackId: String, uri: Uri, operation: String) {
         val writer = CacheWriter(
             NativeAudioCache.rollingDataSource(),
             DataSpec.Builder()
@@ -146,19 +141,25 @@ class PlaybackService : MediaSessionService() {
             if (prefetchTrackId != trackId) return
             prefetchWriter = writer
         }
-        Log.d(TAG, "Next-track prefetch started: mediaId=$trackId")
+        Log.d(TAG, "$operation started: mediaId=$trackId")
+        var completed = false
         try {
             writer.cache()
-            Log.d(TAG, "Next-track prefetch complete: mediaId=$trackId")
+            completed = true
+            Log.d(TAG, "$operation complete: mediaId=$trackId")
         } catch (error: Exception) {
             if (synchronized(prefetchLock) { prefetchTrackId == trackId }) {
-                Log.w(TAG, "Next-track prefetch failed: mediaId=$trackId", error)
+                Log.w(TAG, "$operation failed: mediaId=$trackId", error)
             }
         } finally {
             synchronized(prefetchLock) {
                 if (prefetchTrackId == trackId) {
                     prefetchWriter = null
+                    if (!completed) prefetchTrackId = null
                 }
+            }
+            if (completed) {
+                prefetchHandler.post { session?.player?.let(::scheduleNextPrefetch) }
             }
         }
     }
@@ -178,7 +179,6 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         Log.d(TAG, "Playback service destroyed")
-        prefetchScheduleGeneration += 1
         prefetchHandler.removeCallbacksAndMessages(null)
         cancelPrefetch()
         prefetchExecutor.shutdownNow()
@@ -194,6 +194,5 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val TAG = "iroh.fm.playback"
         private const val PREFETCH_BUFFER_BYTES = 128 * 1024
-        private const val PREFETCH_READINESS_POLL_MS = 500L
     }
 }
