@@ -13,16 +13,19 @@ class IrohDataSource : BaseDataSource(true) {
     private var streamHandle = 0L
     private var remaining = C.LENGTH_UNSET.toLong()
     private var uri: Uri? = null
+    private var trackId: String? = null
+    private var absolutePosition = 0L
+    private var fileSize = 0L
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
         val client = NativeCore.activeClientHandle
         check(client != 0L) { "iroh client is not connected" }
         uri = dataSpec.uri
-        val trackId = dataSpec.uri.lastPathSegment ?: error("missing track id")
-        val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(client, trackId)))
+        trackId = dataSpec.uri.lastPathSegment ?: error("missing track id")
+        val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(client, trackId!!)))
         streamHandle = opened.getLong("handle")
-        val fileSize = opened.getLong("fileSize")
+        fileSize = opened.getLong("fileSize")
         Log.d(TAG, "Native iroh stream opened: trackId=$trackId bytes=$fileSize position=${dataSpec.position}")
         var skipped = 0L
         val scratch = ByteArray(64 * 1024)
@@ -33,6 +36,13 @@ class IrohDataSource : BaseDataSource(true) {
             if (read < 0) throw IOException("iroh stream failed while seeking")
             skipped += read
         }
+        absolutePosition = skipped
+        NativeTransferProgress.update(
+            trackId = trackId!!,
+            receivedBytes = absolutePosition,
+            totalBytes = fileSize,
+            reset = dataSpec.position == 0L,
+        )
         remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else fileSize - skipped
         transferStarted(dataSpec)
         return remaining
@@ -45,6 +55,10 @@ class IrohDataSource : BaseDataSource(true) {
         if (read == C.RESULT_END_OF_INPUT) return C.RESULT_END_OF_INPUT
         if (read < 0) throw IOException("iroh stream read failed")
         if (remaining != C.LENGTH_UNSET.toLong()) remaining -= read
+        absolutePosition += read
+        trackId?.let {
+            NativeTransferProgress.update(it, absolutePosition, fileSize)
+        }
         bytesTransferred(read)
         return read
     }
@@ -59,6 +73,9 @@ class IrohDataSource : BaseDataSource(true) {
             transferEnded()
         }
         uri = null
+        trackId = null
+        absolutePosition = 0L
+        fileSize = 0L
     }
 
     class Factory : DataSource.Factory {

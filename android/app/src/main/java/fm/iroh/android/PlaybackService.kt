@@ -23,13 +23,15 @@ class PlaybackService : MediaSessionService() {
                 if (
                     events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
                     events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
+                    events.contains(Player.EVENT_IS_LOADING_CHANGED) ||
                     events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
                 ) {
                     Log.d(
                         TAG,
                         "Playback state: mediaId=${player.currentMediaItem?.mediaId} " +
                             "state=${player.playbackState} playWhenReady=${player.playWhenReady} " +
-                            "playing=${player.isPlaying}",
+                            "playing=${player.isPlaying} loading=${player.isLoading} " +
+                            "bufferedMs=${player.bufferedPosition}",
                     )
                 }
             }

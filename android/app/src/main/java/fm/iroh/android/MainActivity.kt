@@ -256,12 +256,18 @@ class MainActivity : ComponentActivity() {
 
     private fun playerState(): JSONObject {
         val player = controller
+        val trackId = player?.currentMediaItem?.mediaId
+        val transfer = NativeTransferProgress.snapshot(trackId)
         return JSONObject()
-            .put("trackId", player?.currentMediaItem?.mediaId ?: JSONObject.NULL)
+            .put("trackId", trackId ?: JSONObject.NULL)
             .put("playing", player?.isPlaying == true)
             .put("loading", player?.playbackState == Player.STATE_BUFFERING)
+            .put("transferring", player?.isLoading == true)
             .put("position", (player?.currentPosition ?: 0L) / 1000.0)
+            .put("bufferedPosition", (player?.bufferedPosition ?: 0L) / 1000.0)
             .put("duration", (player?.duration ?: 0L).coerceAtLeast(0L) / 1000.0)
+            .put("transferReceived", transfer?.receivedBytes ?: 0L)
+            .put("transferTotal", transfer?.totalBytes ?: 0L)
             .put("repeat", player?.repeatMode == Player.REPEAT_MODE_ONE)
             .put("shuffle", player?.shuffleModeEnabled == true)
             .put("volume", player?.volume ?: 0.5f)

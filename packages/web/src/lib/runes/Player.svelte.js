@@ -105,13 +105,15 @@ export class Player {
     this.audioLoading = true;
     this.playing = false;
     if (client.native) {
+      const downloadGeneration = track.startDownload();
       try {
         this.applyNativeState(await client.playNative(track, sourceQueue));
       } catch (error) {
-        if (generation === this.generation)
+        if (generation === this.generation) {
+          track.stopDownload(downloadGeneration);
+          this.audioLoading = false;
           this.error = friendlyError(error, "This track could not be played.");
-      } finally {
-        if (generation === this.generation) this.audioLoading = false;
+        }
       }
       return;
     }
@@ -314,6 +316,12 @@ export class Player {
     this.audioLoading = Boolean(state.loading);
     this.currentTime = Number(state.position) || 0;
     this.duration = Number(state.duration) || track?.duration_seconds || 0;
+    if (track) {
+      const received = Math.max(0, Number(state.transferReceived) || 0);
+      const total = Math.max(0, Number(state.transferTotal) || Number(track.file_size) || 0);
+      track.updateProgress(received, total);
+      track.downloading = Boolean(state.transferring) && (total <= 0 || received < total);
+    }
     this.repeat = Boolean(state.repeat);
     this.shuffle = Boolean(state.shuffle);
     if (Number.isFinite(Number(state.volume))) this.volume = Number(state.volume);
