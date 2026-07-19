@@ -350,8 +350,9 @@ export class Player {
           .filter(Boolean)
       : [];
     if (track) {
+      const trackChanged = this.currentTrack?.id !== track.id;
       this.currentTrack = track;
-      this.app.library.selectedTrackId = track.id;
+      if (trackChanged) this.app.library.selectedTrackId = track.id;
       if (nativeQueue.length) this.queue = nativeQueue;
       else if (!this.queue.length) this.queue = [...this.app.library.tracks];
     } else if (!state.trackId) {
