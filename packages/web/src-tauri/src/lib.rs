@@ -160,6 +160,28 @@ struct DesktopPlayerState {
     transfers: HashMap<String, DesktopTransfer>,
 }
 
+#[derive(Serialize)]
+struct PreparedPlay {
+    generation: u64,
+    selected: usize,
+}
+
+fn raw_header_u64(request: &tauri::ipc::Request<'_>, name: &str) -> Result<u64, String> {
+    request
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| format!("missing or invalid {name} header"))
+}
+
+fn raw_bytes(request: &tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("desktop audio upload requires a raw binary body".to_string());
+    };
+    Ok(bytes.clone())
+}
+
 fn track_cache_dir(remote_id: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -662,6 +684,132 @@ async fn start_audio(
 }
 
 #[tauri::command]
+fn desktop_prepare_play(
+    state: State<'_, DesktopState>,
+    handle: u64,
+    track_id: String,
+    queue: Vec<String>,
+) -> Result<PreparedPlay, String> {
+    let selected = queue
+        .iter()
+        .position(|id| id == &track_id)
+        .ok_or_else(|| "selected track is not in the desktop queue".to_string())?;
+    let mut registry = state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?;
+    if !registry.clients.contains_key(&handle) {
+        return Err("desktop client is closed".to_string());
+    }
+    let audio = &mut registry.audio;
+    audio.generation = audio.generation.saturating_add(1);
+    audio.client_handle = handle;
+    audio.queue = queue;
+    audio.active.clear();
+    audio.prefetching = None;
+    audio.loading = true;
+    Ok(PreparedPlay {
+        generation: audio.generation,
+        selected,
+    })
+}
+
+#[tauri::command]
+fn desktop_play_uploaded(
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<DesktopPlayerState, String> {
+    let handle = raw_header_u64(&request, "x-iroh-handle")?;
+    let generation = raw_header_u64(&request, "x-iroh-generation")?;
+    let selected = usize::try_from(raw_header_u64(&request, "x-iroh-index")?)
+        .map_err(|_| "invalid desktop queue index".to_string())?;
+    let source = decoder(raw_bytes(&request)?)?;
+    let (result, outgoing, incoming) = {
+        let mut registry = state
+            .0
+            .lock()
+            .map_err(|_| "desktop native registry lock poisoned".to_string())?;
+        let audio = &mut registry.audio;
+        if audio.client_handle != handle || audio.generation != generation {
+            return Err("desktop playback upload was replaced".to_string());
+        }
+        if audio.device.is_none() {
+            audio.device =
+                Some(DeviceSinkBuilder::open_default_sink().map_err(|error| {
+                    format!("could not open the default audio device: {error}")
+                })?);
+        }
+        let outgoing = audio.player.take();
+        let player = Arc::new(Player::connect_new(
+            &audio.device.as_ref().expect("device exists").mixer(),
+        ));
+        player.set_volume(if outgoing.is_some() {
+            0.0
+        } else {
+            audio.volume
+        });
+        player.append(source);
+        audio.player = Some(player.clone());
+        audio.active.push_back(selected);
+        audio.loading = false;
+        (player_state(audio), outgoing, player)
+    };
+    if let Some(outgoing) = outgoing {
+        let fade_state = (*state).clone();
+        tauri::async_runtime::spawn(async move {
+            for step in 1..=CROSSFADE_STEPS {
+                tokio::time::sleep(TRACK_CROSSFADE / CROSSFADE_STEPS).await;
+                let target = {
+                    let Ok(registry) = fade_state.0.lock() else {
+                        return;
+                    };
+                    if registry.audio.generation != generation {
+                        outgoing.stop();
+                        return;
+                    }
+                    registry.audio.volume
+                };
+                let progress = step as f32 / CROSSFADE_STEPS as f32;
+                outgoing.set_volume(target * (1.0 - progress));
+                incoming.set_volume(target * progress);
+            }
+            outgoing.stop();
+        });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+fn desktop_queue_uploaded(
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<bool, String> {
+    let handle = raw_header_u64(&request, "x-iroh-handle")?;
+    let generation = raw_header_u64(&request, "x-iroh-generation")?;
+    let index = usize::try_from(raw_header_u64(&request, "x-iroh-index")?)
+        .map_err(|_| "invalid desktop queue index".to_string())?;
+    let source = decoder(raw_bytes(&request)?)?;
+    let mut registry = state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?;
+    let audio = &mut registry.audio;
+    if audio.client_handle != handle || audio.generation != generation {
+        return Ok(false);
+    }
+    if audio.active.contains(&index) {
+        return Ok(true);
+    }
+    let player = audio
+        .player
+        .as_ref()
+        .ok_or_else(|| "desktop player is not ready".to_string())?;
+    player.append(source);
+    audio.active.push_back(index);
+    Ok(true)
+}
+
+#[tauri::command]
 async fn desktop_play(
     state: State<'_, DesktopState>,
     handle: u64,
@@ -687,7 +835,7 @@ async fn desktop_player_state(
             .map_err(|_| "desktop native registry lock poisoned".to_string())?;
         player_state(&mut registry.audio)
     };
-    schedule_audio_prefetch((*state).clone(), handle);
+    let _ = handle;
     Ok(result)
 }
 
@@ -950,6 +1098,9 @@ pub fn run() {
             desktop_open_stream,
             desktop_read_stream,
             desktop_close_stream,
+            desktop_prepare_play,
+            desktop_play_uploaded,
+            desktop_queue_uploaded,
             desktop_play,
             desktop_player_state,
             desktop_player_command,

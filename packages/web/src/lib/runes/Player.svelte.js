@@ -124,10 +124,19 @@ export class Player {
           .finally(() => (progressPending = false));
       }, 200);
       try {
-        const state = await client.playNative(track, sourceQueue);
+        const state = await client.playNative(
+          track,
+          sourceQueue,
+          (/** @type {number} */ received, /** @type {number} */ total) => {
+            if (downloadGeneration !== null)
+              track.updateProgress(received, total, downloadGeneration);
+          },
+        );
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
           this.applyNativeState(state);
+          if (client.nativePlayback && !client.native)
+            this.prefetchNext(track, sourceQueue, generation);
         }
       } catch (error) {
         if (generation === this.generation) {

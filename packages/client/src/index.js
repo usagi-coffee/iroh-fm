@@ -160,7 +160,6 @@ export class MusicClient {
   }
 
   async cacheStats() {
-    if (typeof this.inner.cacheStats === "function") return this.inner.cacheStats();
     return MusicClient.cacheStats();
   }
 
@@ -180,9 +179,24 @@ export class MusicClient {
     return Boolean(this.inner.nativePlayback);
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string}>} queue */
-  playNative(track, queue) {
-    return this.inner.playNative(track, queue);
+  /** @param {{id: string}} track @param {Array<{id: string}>} queue @param {(received: number, total: number) => void} [onProgress] */
+  async playNative(track, queue, onProgress = () => {}) {
+    if (typeof this.inner.playNativeBytes !== "function")
+      return this.inner.playNative(track, queue);
+    const cached = await this.cachedTrack(track.id);
+    const blob = cached?.blob ?? (await this.downloadTrackBlob(track.id, onProgress));
+    if (!cached?.persistent) await this.persistTrackBlob(track.id, blob);
+    onProgress(blob.size, blob.size);
+    const state = await this.inner.playNativeBytes(
+      track,
+      queue,
+      new Uint8Array(await blob.arrayBuffer()),
+    );
+    state.transfers = {
+      ...(state.transfers ?? {}),
+      [track.id]: { received: blob.size, total: blob.size, active: false, cached: true },
+    };
+    return state;
   }
 
   /** @param {string} command @param {Record<string, any>} [payload] */
@@ -198,12 +212,9 @@ export class MusicClient {
   setOfflineOnly(offlineOnly) {
     this.offlineOnly = Boolean(offlineOnly);
     if (!this.offlineOnly) this.drainCoverFetchQueue();
-    if (typeof this.inner.setOfflineOnly === "function")
-      return this.inner.setOfflineOnly(this.offlineOnly);
   }
 
   async cachedTrackIds() {
-    if (typeof this.inner.cachedTrackIds === "function") return this.inner.cachedTrackIds();
     const ids = new Set();
     if (!("caches" in globalThis)) return ids;
     try {
@@ -416,12 +427,14 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   prefetchTrack(id, onProgress = () => {}) {
-    if (typeof this.inner.prefetchTrack === "function")
-      return this.inner.prefetchTrack(id, onProgress);
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
-      return existing.finally(unsubscribe).then(() => this.isTrackCached(id));
+      return existing.finally(unsubscribe).then(async (blob) => {
+        if (typeof this.inner.queueNativeBytes === "function")
+          await this.inner.queueNativeBytes(id, new Uint8Array(await blob.arrayBuffer()));
+        return this.isTrackCached(id);
+      });
     }
 
     const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
@@ -442,7 +455,11 @@ export class MusicClient {
         if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
       })
       .catch(() => {});
-    return pending.finally(unsubscribe).then(() => this.isTrackCached(id));
+    return pending.finally(unsubscribe).then(async (blob) => {
+      if (typeof this.inner.queueNativeBytes === "function")
+        await this.inner.queueNativeBytes(id, new Uint8Array(await blob.arrayBuffer()));
+      return this.isTrackCached(id);
+    });
   }
 
   /** @param {string} id @param {(received: number, total: number) => void} listener */

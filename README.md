@@ -163,7 +163,9 @@ the next queue item ahead of time for uninterrupted changes, and selecting a new
 track overlaps both songs with a 1.5-second fade-out/fade-in transition. Playback
 position, loading state, queue changes, and play, pause, seek, volume, next, and
 previous controls are synchronized with the Svelte interface through the common
-player facade.
+player facade. Audio caching and offline availability remain owned by the web
+Cache API; complete cached songs cross the Tauri boundary as optimized raw
+binary IPC bodies when Rodio needs them.
 
 Run it in development mode or build an installer from `packages/web`:
 

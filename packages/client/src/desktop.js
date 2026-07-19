@@ -13,6 +13,12 @@ async function invoke(command, payload = {}) {
   return invoke(command, payload);
 }
 
+/** @param {string} command @param {Uint8Array} payload @param {Record<string, string>} headers */
+async function invokeRaw(command, payload, headers) {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke(command, payload, { headers });
+}
+
 /** @param {unknown} value */
 function bytes(value) {
   if (value instanceof Uint8Array) return value;
@@ -74,6 +80,9 @@ class DesktopInner {
     this.info = { path_type: "unknown", address: "", received_bytes: 0 };
     this.infoPending = false;
     this.closed = false;
+    /** @type {string[]} */
+    this.nativeQueueIds = [];
+    this.nativeGeneration = 0;
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -137,12 +146,30 @@ class DesktopInner {
     };
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string}>} queue */
-  playNative(track, queue) {
-    return invoke("desktop_play", {
+  /** @param {{id: string}} track @param {Array<{id: string}>} queue @param {Uint8Array} data */
+  async playNativeBytes(track, queue, data) {
+    const prepared = await invoke("desktop_prepare_play", {
       handle: this.handle,
       trackId: track.id,
       queue: queue.map(({ id }) => id),
+    });
+    this.nativeQueueIds = queue.map(({ id }) => id);
+    this.nativeGeneration = prepared.generation;
+    return invokeRaw("desktop_play_uploaded", data, {
+      "x-iroh-handle": String(this.handle),
+      "x-iroh-generation": String(prepared.generation),
+      "x-iroh-index": String(prepared.selected),
+    });
+  }
+
+  /** @param {string} trackId @param {Uint8Array} data */
+  queueNativeBytes(trackId, data) {
+    const index = this.nativeQueueIds.indexOf(trackId);
+    if (index < 0) return Promise.resolve(false);
+    return invokeRaw("desktop_queue_uploaded", data, {
+      "x-iroh-handle": String(this.handle),
+      "x-iroh-generation": String(this.nativeGeneration),
+      "x-iroh-index": String(index),
     });
   }
 
@@ -155,45 +182,6 @@ class DesktopInner {
     return invoke("desktop_player_state", { handle: this.handle });
   }
 
-  async cachedTrackIds() {
-    return new Set(await invoke("desktop_cached_track_ids", { handle: this.handle }));
-  }
-
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
-  async prefetchTrack(id, onProgress = () => {}) {
-    let polling = false;
-    const report = async () => {
-      if (polling) return;
-      polling = true;
-      try {
-        const progress = await invoke("desktop_cache_progress", { trackId: id });
-        onProgress(Number(progress.received) || 0, Number(progress.total) || 0);
-      } finally {
-        polling = false;
-      }
-    };
-    await report();
-    const timer = setInterval(report, 200);
-    try {
-      const result = await invoke("desktop_cache_track", {
-        handle: this.handle,
-        trackId: id,
-      });
-      await report();
-      return Boolean(result.cached);
-    } finally {
-      clearInterval(timer);
-    }
-  }
-
-  /** @param {boolean} enabled */
-  setOfflineOnly(enabled) {
-    return invoke("desktop_set_offline_only", { enabled: Boolean(enabled) });
-  }
-
-  cacheStats() {
-    return invoke("desktop_cache_stats", { handle: this.handle });
-  }
 
   async close() {
     if (this.closed) return;
