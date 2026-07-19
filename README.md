@@ -2,9 +2,9 @@
 
 <img src="extra/iroh-fm.png" align="right" width="180" height="180" alt="iroh-fm project icon" />
 
-**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, or port forwarding is required.
+**Ever wanted to share your music library with your friends?** With `iroh-fm`, it is as easy as sending them a URL. They open the link and your library is ready to play. No account, native app, public IP address, port forwarding, or permission from your NAT is required.
 
-The main point is that the real music server runs on your own bare metal at home, even when that machine is behind NAT. You do not need to expose ports, obtain a public IP address, configure a reverse proxy, or move your library into somebody else's cloud. iroh makes the server reachable while your files remain on your hardware.
+The real music server runs on your own bare metal at home, and NAT does not get to stop it. You do not need to expose ports, obtain a public IP address, configure a reverse proxy, or move your library into somebody else's cloud. When a direct path is unavailable, iroh can carry the end-to-end encrypted connection through a relay over TCP port 443. That means `iroh-fm` can work from many restrictive or firewalled networks that block inbound traffic, UDP, and almost everything except ordinary web traffic.
 
 The host does not need to be a traditional server. Run `iroh-fm` on a desktop, laptop, NAS, home server, or even an Android phone, then listen from anywhere using any modern browser. It is your unstoppable personal music server with a private, end-to-end encrypted connection.
 
@@ -17,11 +17,12 @@ Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and s
 ## Why “unstoppable”?
 
 - **Run it on your own bare metal:** keep the server and music library on hardware you control at home.
-- **Stay behind NAT:** the endpoint ticket carries the information needed to reach the server without port forwarding, a public IP address, or a public HTTP endpoint.
+- **NAT cannot stop it:** the endpoint ticket carries the information needed to reach the server without port forwarding, a public IP address, or a public HTTP endpoint.
+- **Gets through restrictive networks:** if direct networking is blocked, iroh can fall back to its relay path over TCP port 443, a port most networks already permit for HTTPS traffic.
 - **Host it almost anywhere:** use a desktop, laptop, NAS, home server, VPS, Android phone, or any other device that can run the `iroh-fm` binary and read your music directory.
 - **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop - there is no native client to install.
 - **No application middleman:** the browser talks to your iroh endpoint, not to a hosted iroh-fm API service.
-- **End-to-end encrypted:** browser connections travel through an iroh relay because browsers cannot open UDP sockets, but the relay cannot decrypt the connection.
+- **End-to-end encrypted:** browser connections travel through an iroh relay because browsers cannot open UDP sockets, but the relay only forwards encrypted traffic and cannot read your music.
 - **Portable client:** the web player is just static files and can be hosted on GitHub Pages, another static host, or locally.
 - **Stable identity and access control:** optionally give clients a persistent secret and allowlist their endpoint IDs on the server.
 
@@ -68,7 +69,7 @@ The first-party player is a client-rendered Svelte SPA with no SSR and no HTTP a
 - installable PWA support
 - responsive desktop and mobile layouts
 
-Browser iroh connections are currently relay-only. The server ticket must contain a reachable relay, or you can configure relay addresses in the advanced connection editor.
+Browser iroh connections are currently relay-only. Their HTTPS-compatible relay transport uses TCP port 443, allowing the player to work across many networks that block unusual protocols or ports. The server ticket must contain a reachable relay, or you can configure relay addresses in the advanced connection editor.
 
 To run the web player locally:
 
