@@ -127,6 +127,21 @@ Additional adapter options:
 
 Be careful when binding the Subsonic adapter beyond localhost: unlike the iroh transport, it exposes an HTTP service that you must secure appropriately.
 
+## Android TWA
+
+The Android app keeps the same Svelte interface as the PWA, but its transport and
+player do not depend on JavaScript remaining alive. A native Rust iroh client can
+negotiate a direct peer-to-peer path to the music server when one is available,
+falling back to the configured relay when it is not.
+
+Playback runs in an Android Media3 foreground service. The current track keeps
+playing with the screen off or while the TWA is suspended, and the service can
+download and advance through the queue without waking the web page. When the app
+is opened again, the TWA bridge synchronizes the native queue, current track,
+playback position, download progress, and controls back into the Svelte UI.
+
+See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
+
 ## Workspace
 
 ```text
@@ -143,12 +158,6 @@ android/        TWA shell and Media3 foreground playback service
 ```
 
 The architecture deliberately keeps the music library and iroh operations protocol-agnostic. Subsonic and any future compatibility service remain sibling adapters rather than becoming the source of truth.
-
-## Android TWA
-
-The optional Android client keeps the Svelte interface but replaces browser-only iroh and audio playback with a native Rust/Media3 core. It can negotiate direct iroh paths, keeps playback in a foreground media session while the TWA sleeps, and synchronizes the current native player state back into the web runes when the UI resumes.
-
-See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
 
 ## Credits
 
