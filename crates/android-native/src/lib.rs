@@ -9,7 +9,7 @@ use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey};
 use iroh_tickets::endpoint::EndpointTicket;
 use jni::{
     JNIEnv,
-    objects::{JByteArray, JClass, JString},
+    objects::{JByteArray, JClass, JObject, JString},
     sys::{jbyteArray, jint, jlong, jstring},
 };
 use protocol::{BackendRequest, TrackId};
@@ -18,6 +18,9 @@ use tokio::runtime::Runtime;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio runtime"));
 static STATE: LazyLock<Mutex<NativeState>> = LazyLock::new(|| Mutex::new(NativeState::default()));
+#[cfg(target_os = "android")]
+static ANDROID_APPLICATION_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
 
 #[derive(Default)]
 struct NativeState {
@@ -84,6 +87,36 @@ fn client_for(handle: i64) -> Result<Client, String> {
         .get(&handle)
         .cloned()
         .ok_or_else(|| "native client is closed".to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_fm_iroh_android_NativeCore_initialize(
+    mut env: JNIEnv,
+    _class: JClass,
+    _application_context: JObject,
+) -> jstring {
+    let result = (|| {
+        #[cfg(target_os = "android")]
+        {
+            if ANDROID_APPLICATION_CONTEXT.get().is_none() {
+                let vm = env.get_java_vm().map_err(|error| error.to_string())?;
+                let context = env
+                    .new_global_ref(_application_context)
+                    .map_err(|error| error.to_string())?;
+                unsafe {
+                    iroh_dns::install_android_jni_context(
+                        vm.get_java_vm_pointer().cast(),
+                        context.as_obj().as_raw().cast(),
+                    );
+                }
+                ANDROID_APPLICATION_CONTEXT.set(context).map_err(|_| {
+                    "Android application context was already initialized".to_string()
+                })?;
+            }
+        }
+        Ok("initialized".to_string())
+    })();
+    java_string(&mut env, result)
 }
 
 fn address(options: &ConnectOptions) -> Result<EndpointAddr, String> {

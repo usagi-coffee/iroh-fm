@@ -1739,6 +1739,7 @@ version = "0.1.0"
 dependencies = [
  "client",
  "iroh",
+ "iroh-dns",
  "iroh-tickets",
  "jni 0.21.1",
  "protocol",

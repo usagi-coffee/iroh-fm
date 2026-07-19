@@ -30,7 +30,7 @@ android {
         resValue 'string', 'app_name', 'iroh.fm'
         resValue 'string', 'launch_url', launchUrl
         resValue 'string', 'web_origin', webOrigin
-        resValue 'string', 'asset_statements', "[{\\\"relation\\\":[\\\"delegate_permission/common.handle_all_urls\\\"],\\\"target\\\":{\\\"namespace\\\":\\\"web\\\",\\\"site\\\":\\\"${webOrigin}\\\"}}]"
+        resValue 'string', 'asset_statements', "[{\\\"relation\\\":[\\\"delegate_permission/common.handle_all_urls\\\",\\\"delegate_permission/common.use_as_origin\\\"],\\\"target\\\":{\\\"namespace\\\":\\\"web\\\",\\\"site\\\":\\\"${webOrigin}\\\"}}]"
     }
 
     signingConfigs {

@@ -8,6 +8,7 @@ use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
     endpoint::{Connection, RecvStream, presets},
 };
+#[cfg(not(target_os = "android"))]
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::IROH_ALPN;
 pub use protocol::{
@@ -21,8 +22,43 @@ use tokio::time::{Duration, timeout};
 pub use crate::error::{Error, Result};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const ENDPOINT_BIND_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(target_os = "android")]
+#[link(name = "log")]
+unsafe extern "C" {
+    fn __android_log_write(
+        priority: std::ffi::c_int,
+        tag: *const std::ffi::c_char,
+        text: *const std::ffi::c_char,
+    ) -> std::ffi::c_int;
+}
+
+fn rpc_log(arguments: std::fmt::Arguments<'_>) {
+    #[cfg(target_os = "android")]
+    {
+        const ANDROID_LOG_DEBUG: std::ffi::c_int = 3;
+        if let Ok(message) = std::ffi::CString::new(arguments.to_string()) {
+            unsafe {
+                __android_log_write(
+                    ANDROID_LOG_DEBUG,
+                    c"iroh.fm.rust".as_ptr(),
+                    message.as_ptr(),
+                );
+            }
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    eprintln!("{arguments}");
+}
+
+macro_rules! rpc_log {
+    ($($argument:tt)*) => {
+        rpc_log(format_args!($($argument)*))
+    };
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct IrohConfig {
@@ -69,7 +105,7 @@ impl Client {
     }
 
     pub async fn connect(endpoint_id: EndpointId, relay: Option<RelayUrl>) -> Result<Self> {
-        eprintln!(
+        rpc_log!(
             "[client-rpc] local endpoint startup remote_endpoint={} relay={}",
             endpoint_id,
             relay
@@ -89,9 +125,31 @@ impl Client {
     }
 
     pub async fn connect_addr_with_config(addr: EndpointAddr, config: IrohConfig) -> Result<Self> {
-        eprintln!("[client-rpc] local endpoint startup remote_addr={addr:?}");
-        let endpoint = endpoint_builder(&config).bind().await?;
-        eprintln!(
+        rpc_log!("[client-rpc] local endpoint startup remote_addr={addr:?}");
+        let builder = endpoint_builder(&config);
+        rpc_log!(
+            "[client-rpc] local endpoint bind task spawned mdns={}",
+            if cfg!(target_os = "android") {
+                "disabled"
+            } else {
+                "enabled"
+            }
+        );
+        let mut bind_task = tokio::spawn(async move { builder.bind().await });
+        let endpoint = match timeout(ENDPOINT_BIND_TIMEOUT, &mut bind_task).await {
+            Ok(result) => result.map_err(|error| {
+                Error::InvalidRequest(format!("local endpoint startup task failed: {error}"))
+            })??,
+            Err(_) => {
+                bind_task.abort();
+                rpc_log!(
+                    "[client-rpc] local endpoint startup timed out after {}s",
+                    ENDPOINT_BIND_TIMEOUT.as_secs()
+                );
+                return Err(Error::Timeout("local endpoint startup".to_string()));
+            }
+        };
+        rpc_log!(
             "[client-rpc] local endpoint ready local_endpoint={}",
             endpoint.id()
         );
@@ -106,19 +164,19 @@ impl Client {
     }
 
     pub async fn request(&self, request: BackendRequest) -> Result<BackendResponse> {
-        eprintln!("[client-rpc] request start kind={}", request_name(&request));
+        rpc_log!("[client-rpc] request start kind={}", request_name(&request));
         let conn = self.connection().await?;
         match self
             .request_on_connection_with_timeout(&conn, &request)
             .await
         {
             Ok(response) => {
-                eprintln!("[client-rpc] request ok kind={}", request_name(&request));
+                rpc_log!("[client-rpc] request ok kind={}", request_name(&request));
                 self.log_connection_path_if_changed(&conn, "request").await;
                 Ok(response)
             }
             Err(error) => {
-                eprintln!(
+                rpc_log!(
                     "[client-rpc] request failed kind={} error={error}; reconnecting once",
                     request_name(&request)
                 );
@@ -127,7 +185,7 @@ impl Client {
                 let response = self
                     .request_on_connection_with_timeout(&conn, &request)
                     .await?;
-                eprintln!("[client-rpc] request ok kind={}", request_name(&request));
+                rpc_log!("[client-rpc] request ok kind={}", request_name(&request));
                 self.log_connection_path_if_changed(&conn, "request").await;
                 Ok(response)
             }
@@ -135,7 +193,7 @@ impl Client {
     }
 
     pub async fn stream_open(&self, track_id: TrackId) -> Result<(StreamDescriptor, RecvStream)> {
-        eprintln!("[client-rpc] stream start track_id={}", track_id.0);
+        rpc_log!("[client-rpc] stream start track_id={}", track_id.0);
         let conn = self.connection().await?;
         match self.stream_on_connection(&conn, track_id.clone()).await {
             Ok(stream) => {
@@ -143,7 +201,7 @@ impl Client {
                 Ok(stream)
             }
             Err(error) => {
-                eprintln!(
+                rpc_log!(
                     "[client-rpc] stream failed track_id={} error={error}; reconnecting once",
                     track_id.0
                 );
@@ -186,9 +244,11 @@ impl Client {
         )
         .await
         .map_err(|_| Error::Timeout(format!("stream open {}", track_id.0)))??;
-        eprintln!(
+        rpc_log!(
             "[client-rpc] stream descriptor track_id={} file_size={} content_type={} transfer_timeout=disabled",
-            descriptor.track_id.0, descriptor.file_size, descriptor.content_type
+            descriptor.track_id.0,
+            descriptor.file_size,
+            descriptor.content_type
         );
         Ok((descriptor, recv))
     }
@@ -218,14 +278,14 @@ impl Client {
             return Ok(conn.clone());
         }
 
-        eprintln!("[client-rpc] connecting backend transport");
+        rpc_log!("[client-rpc] connecting backend transport");
         let conn = timeout(
             CONNECT_TIMEOUT,
             self.endpoint.connect(self.addr.clone(), IROH_ALPN),
         )
         .await
         .map_err(|_| Error::Timeout("connect backend transport".to_string()))??;
-        eprintln!(
+        rpc_log!(
             "[client-rpc] backend transport connected remote_endpoint={}",
             conn.remote_id()
         );
@@ -247,7 +307,7 @@ impl Client {
         let label = connection_path_label(conn);
         let mut guard = self.last_path.lock().await;
         if guard.as_deref() != Some(label.as_str()) {
-            eprintln!("[client-rpc] path changed event={event} {label}");
+            rpc_log!("[client-rpc] path changed event={event} {label}");
             *guard = Some(label);
         }
     }
@@ -261,7 +321,11 @@ pub struct ConnectionInfo {
 }
 
 fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
-    let mut builder = Endpoint::builder(presets::N0).address_lookup(MdnsAddressLookup::builder());
+    let mut builder = Endpoint::builder(presets::N0);
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.address_lookup(MdnsAddressLookup::builder());
+    }
     if let Some(secret) = &config.secret {
         let secret = SecretKey::from_str(secret)
             .map_err(|error| Error::InvalidRequest(format!("invalid --secret: {error}")))
@@ -328,7 +392,7 @@ fn request_name(request: &BackendRequest) -> &'static str {
 }
 
 fn log_connection_path(prefix: &str, event: &str, conn: &Connection) {
-    eprintln!(
+    rpc_log!(
         "[{prefix}] path event={event} {}",
         connection_path_label(conn)
     );

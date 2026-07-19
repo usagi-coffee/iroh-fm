@@ -5,6 +5,7 @@ import org.json.JSONObject
 object NativeCore {
     init { System.loadLibrary("iroh_fm_android_native") }
 
+    @JvmStatic external fun initialize(applicationContext: Any): String
     @JvmStatic external fun connect(options: String): String
     @JvmStatic external fun request(handle: Long, request: String): String
     @JvmStatic external fun connectionInfo(handle: Long): String

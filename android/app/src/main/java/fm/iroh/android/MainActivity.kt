@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.browser.customtabs.*
@@ -24,14 +25,19 @@ class MainActivity : ComponentActivity() {
     private val worker = Executors.newFixedThreadPool(4)
     private lateinit var launchUri: Uri
     private lateinit var origin: Uri
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var customTabsClient: CustomTabsClient? = null
     private var session: CustomTabsSession? = null
     private var channelReady = false
-    private var relationshipValidated = false
+    private var twaRelationshipValidated = false
+    private var postMessageRelationshipValidated = false
     private var messageChannelReady = false
     private var readyDispatched = false
+    private var navigationGeneration = 0
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
+    private val sendLock = Any()
+    private var transferSequence = 0L
 
     private val callback = object : CustomTabsCallback() {
         override fun onRelationshipValidationResult(
@@ -40,8 +46,16 @@ class MainActivity : ComponentActivity() {
             result: Boolean,
             extras: Bundle?,
         ) {
-            Log.d(TAG, "Relationship result: $result")
-            relationshipValidated = result
+            val relationName = when (relation) {
+                CustomTabsService.RELATION_USE_AS_ORIGIN -> "use_as_origin"
+                CustomTabsService.RELATION_HANDLE_ALL_URLS -> "handle_all_urls"
+                else -> "unknown"
+            }
+            Log.d(TAG, "Relationship result: relation=$relationName($relation) origin=$requestedOrigin result=$result")
+            when (relation) {
+                CustomTabsService.RELATION_USE_AS_ORIGIN -> postMessageRelationshipValidated = result
+                CustomTabsService.RELATION_HANDLE_ALL_URLS -> twaRelationshipValidated = result
+            }
             dispatchReadyIfNeeded()
         }
 
@@ -50,13 +64,11 @@ class MainActivity : ComponentActivity() {
             readyDispatched = false
             channelReady = false
             messageChannelReady = false
-            val delay = if (relationshipValidated) 200L else 1_000L
-            if (!relationshipValidated)
+            val generation = ++navigationGeneration
+            val delay = if (twaRelationshipValidated) 200L else 1_000L
+            if (!twaRelationshipValidated)
                 Log.d(TAG, "Scheduling postMessage after cold-start validation delay")
-            Handler(Looper.getMainLooper()).postDelayed({
-                val requested = session?.requestPostMessageChannel(origin, origin, Bundle()) ?: false
-                Log.d(TAG, "Requested postMessage channel: $requested")
-            }, delay)
+            mainHandler.postDelayed({ requestPostMessageChannel(generation, 1) }, delay)
         }
 
         override fun onMessageChannelReady(extras: Bundle?) {
@@ -71,14 +83,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dispatchReadyIfNeeded() {
-        if (!relationshipValidated || !messageChannelReady || readyDispatched) return
-        readyDispatched = true
+        if (!postMessageRelationshipValidated || !messageChannelReady || readyDispatched) return
         channelReady = true
-        send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState()))
+        val result = send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState()))
+        readyDispatched = result == CustomTabsService.RESULT_SUCCESS
+        Log.d(TAG, "Native bridge ready dispatched: result=$result")
+        if (!readyDispatched) channelReady = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeCore.unwrap(NativeCore.initialize(applicationContext))
+        Log.d(TAG, "Native Android context initialized")
         launchUri = Uri.parse(BuildConfig.LAUNCH_URL)
             .buildUpon()
             .appendQueryParameter("iroh-native", "1")
@@ -101,15 +117,35 @@ class MainActivity : ComponentActivity() {
 
     private fun bindTwa() {
         val browser = CustomTabsClient.getPackageName(this, null) ?: return
+        Log.d(TAG, "Binding Custom Tabs provider: $browser")
         CustomTabsClient.bindCustomTabsService(this, browser, object : CustomTabsServiceConnection() {
             override fun onCustomTabsServiceConnected(name: ComponentName, client: CustomTabsClient) {
+                Log.d(TAG, "Custom Tabs service connected: ${name.packageName}/${name.className}")
                 customTabsClient = client
                 client.warmup(0)
                 session = client.newSession(callback)
+                val validationRequested = session?.validateRelationship(
+                    CustomTabsService.RELATION_USE_AS_ORIGIN,
+                    origin,
+                    Bundle(),
+                ) ?: false
+                Log.d(TAG, "Requested use_as_origin validation: $validationRequested")
                 TrustedWebActivityIntentBuilder(launchUri).build(session!!).launchTrustedWebActivity(this@MainActivity)
             }
             override fun onServiceDisconnected(name: ComponentName) { customTabsClient = null }
         })
+    }
+
+    private fun requestPostMessageChannel(generation: Int, attempt: Int) {
+        if (generation != navigationGeneration || messageChannelReady) return
+        val requested = session?.requestPostMessageChannel(origin, origin, Bundle()) ?: false
+        Log.d(TAG, "Requested postMessage channel: accepted=$requested attempt=$attempt")
+        if (!messageChannelReady && attempt < POST_MESSAGE_ATTEMPTS) {
+            mainHandler.postDelayed(
+                { requestPostMessageChannel(generation, attempt + 1) },
+                POST_MESSAGE_RETRY_DELAY_MS,
+            )
+        }
     }
 
     private fun connectPlaybackController() {
@@ -132,12 +168,30 @@ class MainActivity : ComponentActivity() {
         if (message.optString("module") != "native") return
         val id = message.optString("id")
         val action = message.optString("action")
+        Log.d(TAG, "Native request received: action=$action id=$id")
         val payload = message.optJSONObject("payload") ?: JSONObject()
         val background = action in setOf("connect", "request", "connectionInfo", "identity", "endpointId", "parseTicket", "close")
         val task = Runnable {
+            val startedAt = SystemClock.elapsedRealtime()
             runCatching { execute(action, payload) }
-                .onSuccess { reply(id, it) }
-                .onFailure { replyError(id, it.message ?: "native operation failed") }
+                .onSuccess {
+                    val replyResult = reply(id, it)
+                    Log.d(
+                        TAG,
+                        "Native request completed: action=$action id=$id " +
+                            "durationMs=${SystemClock.elapsedRealtime() - startedAt} replyResult=$replyResult",
+                    )
+                }
+                .onFailure {
+                    val error = it.message ?: "native operation failed"
+                    val replyResult = replyError(id, error)
+                    Log.e(
+                        TAG,
+                        "Native request failed: action=$action id=$id " +
+                            "durationMs=${SystemClock.elapsedRealtime() - startedAt} " +
+                            "replyResult=$replyResult error=$error",
+                    )
+                }
         }
         if (background) worker.execute(task) else runOnUiThread(task)
     }
@@ -210,11 +264,43 @@ class MainActivity : ComponentActivity() {
 
     private fun reply(id: String, result: Any) = send(JSONObject().put("module", "native").put("id", id).put("result", result))
     private fun replyError(id: String, error: String) = send(JSONObject().put("module", "native").put("id", id).put("error", error))
-    private fun send(message: JSONObject) {
-        if (channelReady) session?.postMessage(message.toString(), null)
+    private fun send(message: JSONObject): Int? {
+        val raw = message.toString()
+        synchronized(sendLock) {
+            if (!channelReady) return null
+            val activeSession = session ?: return null
+            if (raw.length <= POST_MESSAGE_CHUNK_CHARS) {
+                return activeSession.postMessage(raw, null)
+            }
+
+            val transferId = "${SystemClock.elapsedRealtimeNanos()}-${++transferSequence}"
+            val total = (raw.length + POST_MESSAGE_CHUNK_CHARS - 1) / POST_MESSAGE_CHUNK_CHARS
+            Log.d(TAG, "Sending chunked native message: transfer=$transferId chars=${raw.length} chunks=$total")
+            for (index in 0 until total) {
+                val start = index * POST_MESSAGE_CHUNK_CHARS
+                val chunk = JSONObject()
+                    .put("module", "native")
+                    .put("event", "chunk")
+                    .put("transferId", transferId)
+                    .put("index", index)
+                    .put("total", total)
+                    .put("data", raw.substring(start, minOf(start + POST_MESSAGE_CHUNK_CHARS, raw.length)))
+                val result = activeSession.postMessage(chunk.toString(), null)
+                if (result != CustomTabsService.RESULT_SUCCESS) {
+                    Log.e(TAG, "Native message chunk failed: transfer=$transferId index=$index/$total result=$result")
+                    return result
+                }
+            }
+            return CustomTabsService.RESULT_SUCCESS
+        }
     }
 
     private fun encodeJson(value: Any): String = if (value is String) JSONObject.quote(value) else value.toString()
 
-    companion object { private const val TAG = "iroh.fm" }
+    companion object {
+        private const val TAG = "iroh.fm"
+        private const val POST_MESSAGE_ATTEMPTS = 5
+        private const val POST_MESSAGE_RETRY_DELAY_MS = 1_000L
+        private const val POST_MESSAGE_CHUNK_CHARS = 32 * 1024
+    }
 }

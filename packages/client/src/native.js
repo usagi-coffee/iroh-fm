@@ -7,6 +7,8 @@ let detection;
 let sequence = 0;
 /** @type {Map<string, {resolve: (value: any) => void, reject: (reason?: any) => void, timer: ReturnType<typeof setTimeout>}>} */
 const pending = new Map();
+/** @type {Map<string, {parts: string[], received: number, total: number, timer: ReturnType<typeof setTimeout>}>} */
+const incomingTransfers = new Map();
 /** @type {Set<(state: any) => void>} */
 const stateListeners = new Set();
 
@@ -52,7 +54,45 @@ function receive(event) {
   } catch {
     return;
   }
+  receiveMessage(message);
+}
+
+/** @param {any} message */
+function receiveMessage(message) {
   if (message?.module !== "native") return;
+  if (message.event === "chunk") {
+    const transferId = String(message.transferId ?? "");
+    const index = Number(message.index);
+    const total = Number(message.total);
+    if (
+      !transferId ||
+      !Number.isSafeInteger(index) ||
+      !Number.isSafeInteger(total) ||
+      index < 0 ||
+      total < 1 ||
+      index >= total ||
+      typeof message.data !== "string"
+    )
+      return;
+    let transfer = incomingTransfers.get(transferId);
+    if (!transfer) {
+      const timer = setTimeout(() => incomingTransfers.delete(transferId), NATIVE_TIMEOUT_MS);
+      transfer = { parts: Array(total), received: 0, total, timer };
+      incomingTransfers.set(transferId, transfer);
+    }
+    if (transfer.total !== total || transfer.parts[index] !== undefined) return;
+    transfer.parts[index] = message.data;
+    transfer.received += 1;
+    if (transfer.received !== transfer.total) return;
+    clearTimeout(transfer.timer);
+    incomingTransfers.delete(transferId);
+    try {
+      receiveMessage(JSON.parse(transfer.parts.join("")));
+    } catch {
+      // Ignore malformed or incomplete native transfers.
+    }
+    return;
+  }
   if (message.event === "ready" || message.event === "state") {
     if (message.state) dispatchPlayerState(message.state);
     return;

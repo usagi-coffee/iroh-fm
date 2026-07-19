@@ -1,6 +1,7 @@
 package fm.iroh.android
 
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
@@ -22,6 +23,7 @@ class IrohDataSource : BaseDataSource(true) {
         val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(client, trackId)))
         streamHandle = opened.getLong("handle")
         val fileSize = opened.getLong("fileSize")
+        Log.d(TAG, "Native iroh stream opened: trackId=$trackId bytes=$fileSize position=${dataSpec.position}")
         var skipped = 0L
         val scratch = ByteArray(64 * 1024)
         while (skipped < dataSpec.position) {
@@ -51,6 +53,7 @@ class IrohDataSource : BaseDataSource(true) {
 
     override fun close() {
         if (streamHandle != 0L) {
+            Log.d(TAG, "Native iroh stream closed: uri=$uri")
             NativeCore.closeStream(streamHandle)
             streamHandle = 0
             transferEnded()
@@ -61,4 +64,6 @@ class IrohDataSource : BaseDataSource(true) {
     class Factory : DataSource.Factory {
         override fun createDataSource(): DataSource = IrohDataSource()
     }
+
+    companion object { private const val TAG = "iroh.fm.playback" }
 }

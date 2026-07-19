@@ -14,6 +14,26 @@ Build the Rust libraries first (install `cargo-ndk` if necessary):
 gradle -p android assembleDebug
 ```
 
+On an ARM Linux host, `build-rust.sh` keeps Cargo, rustc, dependency build
+scripts, and C compilation native to ARM. Final Android shared-library links
+use the official x86_64 NDK Clang through `muvm`. On other hosts it uses
+`cargo ndk` directly.
+
+On an ARM Linux host with `muvm`, build and sign the release APK with:
+
+```sh
+./android/build-rust.sh
+./android/build-release.sh
+```
+
+On `aarch64`/`arm64`, the script runs the x86_64 Android build tools through
+`muvm`; on other architectures it runs them directly. `build-release.sh` defaults to
+`$HOME/.local/share/iroh-fm/android-release.p12`, alias `iroh-fm`, and prompts
+for the keystore password without echoing it. Override those defaults with
+`ANDROID_KEYSTORE_PATH`, `ANDROID_KEY_ALIAS`, and
+`ANDROID_KEYSTORE_PASSWORD`. The signed APK is written to
+`android/app/build/outputs/apk/release/app-release.apk`.
+
 The default web origin is the GitHub Pages deployment. Override it for another signed origin:
 
 ```sh
