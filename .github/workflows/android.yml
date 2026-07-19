@@ -107,6 +107,7 @@ jobs:
           gradle -p android --no-daemon \
             -PirohFmVersionName="$IROH_FM_VERSION_NAME" \
             -PirohFmVersionCode="$IROH_FM_VERSION_CODE" \
+            -PirohFmBuildCommit="$RELEASE_SHA" \
             :app:assembleRelease
 
       - name: Verify release signature

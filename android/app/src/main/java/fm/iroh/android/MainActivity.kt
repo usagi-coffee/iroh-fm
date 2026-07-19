@@ -272,6 +272,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun execute(action: String, payload: JSONObject): Any = when (action) {
+        "buildInfo" -> JSONObject()
+            .put("platform", "Android")
+            .put("commit", BuildConfig.BUILD_COMMIT)
         "connect" -> JSONObject(NativeCore.unwrap(NativeCore.connect(payload.toString()))).also {
             NativeCore.activeClientHandle = it.getLong("handle")
             NativeCore.activeRemoteId = it.getString("remoteId")
