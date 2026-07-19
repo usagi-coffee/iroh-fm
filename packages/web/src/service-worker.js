@@ -9,6 +9,7 @@ const scoped = (path) => {
   if (path === "/") return `${SCOPE_PATH}/`;
   return `${SCOPE_PATH}${path}`;
 };
+const NAVIGATION_FALLBACKS = [scoped("/"), scoped("/index.html")];
 const APP_SHELL =
   build.length === 0
     ? []
@@ -18,8 +19,7 @@ const APP_SHELL =
             ...build,
             ...files.filter((path) => !path.endsWith("/.nojekyll")),
             ...prerendered,
-            "/",
-            "/index.html",
+            ...NAVIGATION_FALLBACKS,
           ].map(scoped),
         ),
       ];
@@ -29,7 +29,27 @@ self.addEventListener("install", (event) => {
     (async () => {
       try {
         const cache = await caches.open(CACHE_NAME);
-        await cache.addAll(APP_SHELL);
+        // Cache navigation HTML independently. One bad optional route must not
+        // roll back the main document and every hashed application asset.
+        const failed = [];
+        await Promise.all(
+          APP_SHELL.map(async (path) => {
+            try {
+              await cache.add(path);
+            } catch {
+              failed.push(path);
+            }
+          }),
+        );
+        const navigationCached = await Promise.all(
+          NAVIGATION_FALLBACKS.map((path) => safeCacheMatch(cache, path)),
+        );
+        if (!navigationCached.some(Boolean)) {
+          throw new Error("the main application document could not be cached");
+        }
+        if (failed.length) {
+          console.warn("[sw] some optional app-shell entries could not be cached", failed);
+        }
       } catch (error) {
         // Offline support is optional. A quota or transient Cache API failure
         // must never prevent a newer network-safe worker from activating.
@@ -130,8 +150,8 @@ self.addEventListener("fetch", (event) => {
 
         if (event.request.mode === "navigate") {
           const fallback =
-            (cache && (await safeCacheMatch(cache, scoped("/")))) ||
-            (cache && (await safeCacheMatch(cache, scoped("/index.html"))));
+            (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[0]))) ||
+            (cache && (await safeCacheMatch(cache, NAVIGATION_FALLBACKS[1])));
           if (fallback) return fallback;
         }
 
