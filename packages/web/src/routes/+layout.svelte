@@ -190,15 +190,18 @@
             class="border-surface0 bg-mantle text-4xs text-overlay1 flex w-fit max-w-full items-center justify-center gap-1.5 border px-2 py-1 font-mono"
             title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"}`}
           >
-            <span
-              class="size-1.5 shrink-0 rounded-full {App.connection.info.address
-                ? 'bg-green'
-                : 'bg-yellow animate-pulse'}"
-            ></span><span class="flex min-w-0 flex-col text-left leading-tight"
-              ><span class="text-subtext0 text-5xs w-full truncate text-center">
-                {App.connection.info.address
-                  ? connectionAddressLabel(App.connection.info)
-                  : "CONNECTING"}
+            <span class="flex min-w-0 flex-col text-left leading-tight"
+              ><span
+                class="text-subtext0 text-5xs flex w-full items-center justify-center gap-1"
+              >
+                <span class="truncate">{App.connection.info.address
+                    ? connectionAddressLabel(App.connection.info)
+                    : "CONNECTING"}</span
+                ><span
+                  class="size-1.5 shrink-0 rounded-full {App.connection.info.address
+                    ? 'bg-green'
+                    : 'bg-yellow animate-pulse'}"
+                ></span>
               </span>
               <span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
                 ><span class="flex items-center gap-1"><DatabaseIcon

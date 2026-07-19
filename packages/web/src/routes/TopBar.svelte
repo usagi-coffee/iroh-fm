@@ -97,13 +97,14 @@
       class="border-surface0 text-4xs text-overlay1 tablet-xl:flex hidden h-full min-w-36 items-center gap-2 border-l px-2 font-mono"
       title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"} · ${formatBytes(App.connection.receivedBytesPerSecond)}/s · ${formatBytes(App.connection.info.received_bytes)} received`}
     >
-      <span
-        class="size-1.5 shrink-0 rounded-full {App.connection.info.address
-          ? 'bg-green'
-          : 'bg-yellow animate-pulse'}"
-      ></span><span class="flex min-w-0 flex-1 flex-col items-end text-right leading-tight"
-        ><span class="text-subtext0 text-5xs desktop:max-w-44 max-w-28 truncate"
-          >{connectionAddressLabel(App.connection.info)}</span
+      <span class="flex min-w-0 flex-1 flex-col items-end text-right leading-tight"
+        ><span
+          class="text-subtext0 text-5xs desktop:max-w-44 flex max-w-28 items-center gap-1"
+          ><span class="truncate">{connectionAddressLabel(App.connection.info)}</span><span
+            class="size-1.5 shrink-0 rounded-full {App.connection.info.address
+              ? 'bg-green'
+              : 'bg-yellow animate-pulse'}"
+          ></span></span
         ><span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
           ><span class="flex items-center gap-1"><DatabaseIcon class="text-4xs" />{formatBytes(
               App.connection.info.received_bytes,
