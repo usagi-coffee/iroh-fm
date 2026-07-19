@@ -22,6 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore WASM build tools
+        id: wasm-tools-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-tools/bin
+          key: web-wasm-tools-v1-${{ runner.os }}-${{ runner.arch }}-bindgen-0.2.125
+
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
@@ -36,16 +43,23 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Rust and WASM tools
+      - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: web
 
       - name: Install WASM build tools
+        if: steps.wasm-tools-cache.outputs.cache-hit != 'true'
         run: |
+          mkdir -p .ci-tools/bin
           cargo install wasm-bindgen-cli --version 0.2.125 --locked
           sudo apt-get update
           sudo apt-get install --yes binaryen
+          cp "$(command -v wasm-bindgen)" .ci-tools/bin/wasm-bindgen
+          cp "$(command -v wasm-opt)" .ci-tools/bin/wasm-opt
+
+      - name: Add WASM build tools to PATH
+        run: echo "$GITHUB_WORKSPACE/.ci-tools/bin" >> "$GITHUB_PATH"
 
       - name: Set Pages base path
         run: |
