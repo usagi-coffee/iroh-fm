@@ -18,11 +18,10 @@ Start the server, copy its [iroh](https://iroh.computer/) endpoint ticket, and s
 
 ## Why “unstoppable”?
 
-- **Run it on your own bare metal:** keep the server and music library on hardware you control at home.
+- **Run it almost anywhere on infrastructure you control:** keep the server and music library on your own desktop, laptop, NAS, home server, VPS, Android phone, or any other device that can run the `iroh-fm` binary and read your music directory.
 - **NAT cannot stop it:** the endpoint ticket carries the information needed to reach the server without port forwarding, a public IP address, or a public HTTP endpoint.
 - **Gets through restrictive networks:** if direct networking is blocked, iroh can fall back to its relay path over TCP port 443, a port most networks already permit for HTTPS traffic.
-- **Host it almost anywhere:** use a desktop, laptop, NAS, home server, VPS, Android phone, or any other device that can run the `iroh-fm` binary and read your music directory.
-- **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop - there is no native client to install.
+- **Use any modern device:** open the static web player on a phone, tablet, laptop, or desktop without installing a native client. Native apps are optional when you want a direct connection instead of the browser's relay-only transport.
 - **No application middleman:** the browser talks to your iroh endpoint, not to a hosted iroh-fm API service.
 - **End-to-end encrypted:** browser connections travel through an iroh relay because browsers cannot open UDP sockets, but the relay only forwards encrypted traffic and cannot read your music.
 - **Portable client:** the web player is just static files and can be hosted on GitHub Pages, another static host, or locally.
@@ -70,7 +69,15 @@ iroh-fm \
 
 `--peer` is repeatable. Leave it out to accept any client that has the server ticket. The web player can generate and retain its own client secret; its endpoint ID is available in Settings for allowlisting.
 
-## Web player
+## Apps
+
+| App | Get it |
+| --- | --- |
+| Web | [Open the web player](https://usagi-coffee.github.io/iroh-fm/) |
+| Desktop | [Download a Desktop release](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-) |
+| Android | [Download an Android release](https://github.com/usagi-coffee/iroh-fm/releases?q=android-) |
+
+### Web player
 
 The first-party player is a client-rendered Svelte SPA with no SSR and no HTTP application backend. It includes:
 
@@ -96,38 +103,7 @@ bun run dev
 
 See [`packages/web/README.md`](packages/web/README.md) for static builds and GitHub Pages deployment.
 
-## Existing players through Subsonic
-
-The first-party iroh web client is the main way to use `iroh-fm`. Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
-
-Install and run the adapter:
-
-```fish
-cargo install --git https://github.com/usagi-coffee/iroh-fm subsonic
-
-iroh-fm-subsonic \
-  --ticket your-iroh-fm-server-ticket \
-  --bind 127.0.0.1:4040 \
-  --username admin \
-  --password admin
-```
-
-Then add `http://127.0.0.1:4040` as a Subsonic server in your player with the configured username and password. The adapter translates Subsonic HTTP requests into calls to the remote iroh music server and bridges audio back to the player.
-
-The Subsonic service is only a compatibility facade. It does not own the library index or its semantics, and the core server contains no Subsonic route or authentication logic.
-
-Additional adapter options:
-
-```text
---endpoint <ID>       connect using an endpoint ID instead of a ticket
---relay <URL>         provide or override the backend relay
---secret <SECRET>     use a stable identity for the adapter
---bind <ADDRESS>      HTTP listen address; defaults to 127.0.0.1:4040
-```
-
-Be careful when binding the Subsonic adapter beyond localhost: unlike the iroh transport, it exposes an HTTP service that you must secure appropriately.
-
-## Android TWA
+### Android app (TWA)
 
 The Android app keeps the same Svelte interface as the PWA, but its transport and
 player do not depend on JavaScript remaining alive. A native Rust iroh client can
@@ -146,10 +122,11 @@ playback position, download progress, and controls back into the Svelte UI.
 > It selects that provider directly instead of using Firefox even when Firefox is
 > the device's default browser.
 
-Download the signed APK from [GitHub Releases](https://github.com/usagi-coffee/iroh-fm/releases).
+Download the signed APK from [Android releases](https://github.com/usagi-coffee/iroh-fm/releases?q=android-).
+
 See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
 
-## Desktop app
+### Desktop app
 
 The Tauri desktop app keeps the same Svelte library, queue, and controls as the
 web player while moving both networking and audio playback into Rust. The shared
@@ -185,6 +162,39 @@ sudo dnf install ../../target/release/bundle/rpm/*.rpm
 The Tauri crate inherits the Rust workspace version. Changes under `src-tauri`
 are excluded from Vite's file watcher so Rust rebuilds do not trigger redundant
 frontend reloads.
+
+Prebuilt installers are available from [Desktop releases](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-).
+
+## Subsonic backend
+
+The first-party iroh web client is the main way to use `iroh-fm`. Subsonic compatibility is available as a secondary adapter for existing players such as **Tauon**, **Strawberry**, and other Subsonic-compatible clients.
+
+Install and run the adapter:
+
+```fish
+cargo install --git https://github.com/usagi-coffee/iroh-fm subsonic
+
+iroh-fm-subsonic \
+  --ticket your-iroh-fm-server-ticket \
+  --bind 127.0.0.1:4040 \
+  --username admin \
+  --password admin
+```
+
+Then add `http://127.0.0.1:4040` as a Subsonic server in your player with the configured username and password. The adapter translates Subsonic HTTP requests into calls to the remote iroh music server and bridges audio back to the player.
+
+The Subsonic service is only a compatibility facade. It does not own the library index or its semantics, and the core server contains no Subsonic route or authentication logic.
+
+Additional adapter options:
+
+```text
+--endpoint <ID>       connect using an endpoint ID instead of a ticket
+--relay <URL>         provide or override the backend relay
+--secret <SECRET>     use a stable identity for the adapter
+--bind <ADDRESS>      HTTP listen address; defaults to 127.0.0.1:4040
+```
+
+Be careful when binding the Subsonic adapter beyond localhost: unlike the iroh transport, it exposes an HTTP service that you must secure appropriately.
 
 ## Workspace
 
