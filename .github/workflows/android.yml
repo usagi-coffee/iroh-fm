@@ -3,25 +3,7 @@ name: Android
 on:
   push:
     branches: [master]
-    tags: ["v*"]
-    paths:
-      - ".github/workflows/android.yml"
-      - "android/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/android-native/**"
-      - "crates/client/**"
-      - "crates/protocol/**"
-  pull_request:
-    paths:
-      - ".github/workflows/android.yml"
-      - "android/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/android-native/**"
-      - "crates/client/**"
-      - "crates/protocol/**"
-  workflow_dispatch:
+    tags: ["**"]
 
 permissions:
   contents: read
@@ -32,43 +14,11 @@ concurrency:
 
 env:
   NDK_VERSION: "28.2.13676358"
+  EXPECTED_RELEASE_SHA256: "B4:39:05:72:C0:38:D1:68:0B:74:48:BC:F7:03:9B:07:00:D4:A8:8D:E2:B4:3C:17:8E:EC:50:02:33:D2:24:41"
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      build-debug: ${{ steps.classify.outputs.build-debug }}
-      build-release: ${{ steps.classify.outputs.build-release }}
-    steps:
-      - name: Checkout commit
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Classify build
-        id: classify
-        env:
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "build-debug=false" >> "$GITHUB_OUTPUT"
-            echo "build-release=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          commit="${PR_HEAD_SHA:-$GITHUB_SHA}"
-          subject="$(git log -1 --format=%s "$commit")"
-          if [[ "$subject" == android:* ]]; then
-            echo "build-debug=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build-debug=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Android debug build: commit subject does not start with 'android:'"
-          fi
-          echo "build-release=false" >> "$GITHUB_OUTPUT"
-
   build:
-    needs: gate
-    if: needs.gate.outputs.build-debug == 'true' || needs.gate.outputs.build-release == 'true'
+    if: github.ref_type == 'tag' || startsWith(github.event.head_commit.message, 'android:')
     runs-on: ubuntu-latest
 
     steps:
@@ -117,33 +67,18 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Build debug APK
-        if: needs.gate.outputs.build-debug == 'true'
-        run: gradle -p android --no-daemon :app:assembleDebug
-
-      - name: Upload debug APK
-        if: needs.gate.outputs.build-debug == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: iroh-fm-android-debug-${{ github.run_number }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Require release signing secrets
-        if: needs.gate.outputs.build-release == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
-            echo "A v* tag requires all three Android signing secrets." >&2
+            echo "Android release builds require all three signing secrets." >&2
             exit 1
           fi
 
       - name: Decode release keystore
-        if: needs.gate.outputs.build-release == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -152,20 +87,31 @@ jobs:
           chmod 600 "$keystore_path"
           echo "ANDROID_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
 
+      - name: Set release metadata
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version_name="${GITHUB_REF_NAME#v}"
+            artifact_suffix="$GITHUB_REF_NAME"
+          else
+            version_name="0.1.0-ci.$GITHUB_RUN_NUMBER"
+            artifact_suffix="ci-$GITHUB_RUN_NUMBER"
+          fi
+
+          artifact_suffix="${artifact_suffix//[^a-zA-Z0-9._-]/-}"
+          echo "IROH_FM_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "ANDROID_ARTIFACT_NAME=iroh-fm-android-$artifact_suffix" >> "$GITHUB_ENV"
+
       - name: Build signed release APK
-        if: needs.gate.outputs.build-release == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          version_name="${GITHUB_REF_NAME#v}"
           gradle -p android --no-daemon \
-            -PirohFmVersionName="$version_name" \
+            -PirohFmVersionName="$IROH_FM_VERSION_NAME" \
             -PirohFmVersionCode="$GITHUB_RUN_NUMBER" \
             :app:assembleRelease
 
       - name: Verify release signature
-        if: needs.gate.outputs.build-release == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -173,14 +119,17 @@ jobs:
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           "$apksigner_path" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk
           fingerprint="$(keytool -list -v -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p')"
+          if [ "$fingerprint" != "$EXPECTED_RELEASE_SHA256" ]; then
+            echo "Signing certificate does not match the fingerprint published in assetlinks.json." >&2
+            exit 1
+          fi
           echo "### Android release certificate" >> "$GITHUB_STEP_SUMMARY"
           echo "\`$fingerprint\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload signed release APK
-        if: needs.gate.outputs.build-release == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: iroh-fm-android-${{ github.ref_name }}
+          name: ${{ env.ANDROID_ARTIFACT_NAME }}
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30

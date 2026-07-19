@@ -20,8 +20,8 @@ android {
         applicationId 'fm.iroh.android'
         minSdk 26
         targetSdk 35
-        versionCode (project.findProperty('irohFmVersionCode') ?: '1').toInteger()
-        versionName project.findProperty('irohFmVersionName') ?: '0.1.0'
+        versionCode = (project.findProperty('irohFmVersionCode') ?: '1').toString().toInteger()
+        versionName = (project.findProperty('irohFmVersionName') ?: '0.1.0').toString()
 
         def webOrigin = project.findProperty('irohFmOrigin') ?: 'https://usagi-coffee.github.io'
         def launchUrl = project.findProperty('irohFmLaunchUrl') ?: "${webOrigin}/iroh-fm/"

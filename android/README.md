@@ -28,7 +28,7 @@ Current seek behavior reopens a stream and consumes bytes up to Media3's request
 
 ## GitHub Actions and release signing
 
-The Android workflow builds an installable debug APK for a branch, pull request, or manual run only when the commit subject starts exactly with `android:`. It builds a signed release APK only for a pushed `v*` tag, regardless of that tag's commit subject, and does not build a debug APK for the tag. A release tag fails rather than falling back to an unsigned APK when any signing secret is missing. Non-tag runs never receive the keystore or its passwords.
+The Android workflow builds only signed release APKs. It builds for every pushed tag and for pushes to `master` whose commit subject starts exactly with `android:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
 
 Create the long-lived release keystore locally. Do not create it in GitHub Actions and do not commit it:
 
@@ -60,20 +60,20 @@ The password command prompts for its value without placing it in the command lin
 - `ANDROID_KEYSTORE_PASSWORD`: the keystore password
 - `ANDROID_KEY_ALIAS`: `iroh-fm`, unless another alias was chosen
 
-Trigger a debug build with a matching commit subject:
+Trigger a signed release build from `master` with a matching commit subject:
 
 ```sh
 git commit -m "android: describe the Android change"
 git push
 ```
 
-Create a signed release artifact by pushing a version tag:
+Create a signed release artifact by pushing any tag, conventionally a version tag:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The tag becomes the APK `versionName` without its leading `v`; the workflow run number supplies the monotonically increasing `versionCode`.
+A tag becomes the APK `versionName` without one leading `v`. An `android:` branch build uses `0.1.0-ci.<run-number>` as its `versionName`. The workflow run number supplies the monotonically increasing `versionCode` for both paths.
 
-The workflow summary prints the release certificate SHA-256 fingerprint needed by the web origin's `/.well-known/assetlinks.json`.
+The workflow verifies that the release certificate matches the SHA-256 fingerprint published for this app, then prints that fingerprint in the workflow summary.
