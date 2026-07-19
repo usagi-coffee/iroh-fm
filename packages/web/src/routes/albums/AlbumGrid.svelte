@@ -17,9 +17,9 @@
 
   import { VList } from "virtua/svelte";
 
-  /** @typedef {{ albums: import('$lib/types').AlbumData[] }} Props */
+  /** @typedef {{ albums: import('$lib/types').AlbumData[], followPlayingTrack?: boolean }} Props */
   /** @type {Props} */
-  let { albums } = $props();
+  let { albums, followPlayingTrack = false } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
   const ALBUM_ACTIONS_MIN_WIDTH_REM = 7;
   const ALBUM_GAP_REM = 0.75;
@@ -30,6 +30,10 @@
   let gridWidth = $state(0);
   let rootFontSize = $state(16);
   let columnAdjustment = $state(0);
+  /** @type {import('virtua/svelte').VListHandle | undefined} */
+  let albumList = $state();
+  /** @type {string | null} */
+  let focusedAlbumId = null;
   let autoColumns = $derived.by(() => {
     const albumMinWidth = ALBUM_MIN_WIDTH_REM * rootFontSize;
     const gap = ALBUM_GAP_REM * rootFontSize;
@@ -50,6 +54,10 @@
     for (let index = 0; index < albums.length; index += columns)
       grouped.push(albums.slice(index, index + columns));
     return grouped;
+  });
+  let playingAlbumId = $derived.by(() => {
+    const track = App.player.currentTrack;
+    return track ? (App.library.albumByTrackId.get(track.id)?.id ?? null) : null;
   });
 
   /** @param {HTMLElement} node */
@@ -91,6 +99,51 @@
     };
     node.addEventListener("wheel", scroll, { passive: false, capture: true });
     return () => node.removeEventListener("wheel", scroll, true);
+  }
+
+  /** @param {HTMLElement} host */
+  function focusPlayingAlbum(host) {
+    if (!followPlayingTrack) return;
+    const track = App.player.currentTrack;
+    const album = track ? App.library.albumByTrackId.get(track.id) : null;
+    if (!album) {
+      focusedAlbumId = null;
+      return;
+    }
+    if (album.id === focusedAlbumId) return;
+    const rowIndex = rows.findIndex((row) => row.some((item) => item.id === album.id));
+    if (rowIndex < 0) return;
+    focusedAlbumId = album.id;
+    let attempts = 60;
+    let cancelled = false;
+    /** @type {number | undefined} */
+    let frame;
+    const center = () => {
+      if (cancelled || attempts-- <= 0) return;
+      const viewport = host.firstElementChild;
+      if (!(viewport instanceof HTMLElement)) {
+        frame = requestAnimationFrame(center);
+        return;
+      }
+      const target = [...host.querySelectorAll("[data-album-id]")].find(
+        (element) => element instanceof HTMLElement && element.dataset.albumId === album.id,
+      );
+      if (target instanceof HTMLElement) {
+        const viewportRect = viewport.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const offset =
+          targetRect.top + targetRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
+        if (Math.abs(offset) > 1) viewport.scrollBy({ top: offset, behavior: "auto" });
+        return;
+      }
+      albumList?.scrollToIndex(rowIndex, { align: "center" });
+      frame = requestAnimationFrame(center);
+    };
+    frame = requestAnimationFrame(center);
+    return () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+    };
   }
 
   /** @param {-1 | 1} direction */
@@ -161,9 +214,11 @@
   <div
     {@attach measureColumns}
     {@attach immediateDesktopWheelScroll}
+    {@attach focusPlayingAlbum}
     class="min-h-0 flex-1"
   >
     <VList
+      bind:this={albumList}
       data={rows}
       getKey={(row) => `${columns}:${row.map((album) => album.id).join("|")}`}
       {bufferSize}
@@ -177,12 +232,15 @@
         >
           {#each row as album (album.id)}
             <article
+              data-album-id={album.id}
               {@attach longPress(() => openActions(album))}
               oncontextmenu={(event) => openActions(album, event)}
               class="group min-w-0"
             >
               <div
-                class="bg-base hover:border-surface2 relative border-2 border-transparent transition"
+                class="bg-base relative border-4 transition {playingAlbumId === album.id
+                  ? 'border-mauve'
+                  : 'hover:border-surface2 border-transparent'}"
               >
                 <button
                   type="button"

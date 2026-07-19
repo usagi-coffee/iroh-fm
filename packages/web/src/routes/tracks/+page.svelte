@@ -20,6 +20,6 @@
     />
   </div>
   <div class="desktop:block hidden min-h-0">
-    <AlbumGrid {albums} />
+    <AlbumGrid {albums} followPlayingTrack />
   </div>
 </div>
