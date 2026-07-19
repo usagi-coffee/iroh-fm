@@ -308,10 +308,29 @@ export class Connection {
       this.app.player.stop();
       nextClient.setOfflineOnly(this.app.library.offlineOnly);
       this.client = nextClient;
+      /** @type {import('../types').AlbumData[]} */
+      const albums = /** @type {import('../types').AlbumData[]} */ (
+        variant(data.albums, "Albums", [])
+      ).sort(albumSort);
+      /** @type {Map<string, number>} */
+      const albumOrderByTrackId = new Map();
+      for (const [albumIndex, album] of albums.entries()) {
+        for (const trackId of album.track_ids) albumOrderByTrackId.set(trackId, albumIndex);
+      }
+      /** @type {import('../types').TrackData[]} */
+      const tracks = /** @type {import('../types').TrackData[]} */ (
+        variant(data.tracks, "Tracks", [])
+      );
+      tracks.sort(
+        (left, right) =>
+          (albumOrderByTrackId.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+            (albumOrderByTrackId.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+          trackSort(left, right),
+      );
       this.app.library.summary = variant(data.summary, "LibrarySummary", this.app.library.summary);
-      this.app.library.albums = variant(data.albums, "Albums", []).sort(albumSort);
+      this.app.library.albums = albums;
       this.app.library.artists = variant(data.artists, "Artists", []);
-      this.app.library.replaceTracks(variant(data.tracks, "Tracks", []).sort(trackSort), cachedIds);
+      this.app.library.replaceTracks(tracks, cachedIds);
       this.app.library.starred = variant(data.starred, "Starred", this.app.library.starred);
       if (previousClient && previousClient !== nextClient)
         await previousClient.close().catch(() => {});

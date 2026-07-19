@@ -31,11 +31,12 @@ export function trackSort(left, right) {
 /** @param {import('./types').AlbumData} left @param {import('./types').AlbumData} right */
 export function albumSort(left, right) {
   return (
+    left.title.localeCompare(right.title, undefined, { numeric: true }) ||
     (left.album_artist || left.artist).localeCompare(
       right.album_artist || right.artist,
       undefined,
       { numeric: true },
-    ) || left.title.localeCompare(right.title, undefined, { numeric: true })
+    )
   );
 }
 
