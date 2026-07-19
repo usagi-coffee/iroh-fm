@@ -160,6 +160,7 @@ export class MusicClient {
   }
 
   async cacheStats() {
+    if (typeof this.inner.cacheStats === "function") return this.inner.cacheStats();
     return MusicClient.cacheStats();
   }
 
@@ -197,9 +198,12 @@ export class MusicClient {
   setOfflineOnly(offlineOnly) {
     this.offlineOnly = Boolean(offlineOnly);
     if (!this.offlineOnly) this.drainCoverFetchQueue();
+    if (typeof this.inner.setOfflineOnly === "function")
+      return this.inner.setOfflineOnly(this.offlineOnly);
   }
 
   async cachedTrackIds() {
+    if (typeof this.inner.cachedTrackIds === "function") return this.inner.cachedTrackIds();
     const ids = new Set();
     if (!("caches" in globalThis)) return ids;
     try {
@@ -412,6 +416,8 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   prefetchTrack(id, onProgress = () => {}) {
+    if (typeof this.inner.prefetchTrack === "function")
+      return this.inner.prefetchTrack(id, onProgress);
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
     if (existing) {

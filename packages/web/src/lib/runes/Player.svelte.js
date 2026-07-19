@@ -113,6 +113,16 @@ export class Player {
     if (this.nativePlayback(client)) {
       const downloadGeneration = track.cached ? null : track.startDownload();
       this.nativePlayPendingTrackId = track.id;
+      let progressPending = false;
+      const progressTimer = setInterval(() => {
+        if (progressPending) return;
+        progressPending = true;
+        void client
+          .playerState()
+          .then((/** @type {any} */ state) => this.applyNativeState(state))
+          .catch(() => {})
+          .finally(() => (progressPending = false));
+      }, 200);
       try {
         const state = await client.playNative(track, sourceQueue);
         if (generation === this.generation) {
@@ -126,6 +136,8 @@ export class Player {
           this.audioLoading = false;
           this.error = friendlyError(error, "This track could not be played.");
         }
+      } finally {
+        clearInterval(progressTimer);
       }
       return;
     }
@@ -316,6 +328,7 @@ export class Player {
   /** @param {any} state */
   applyNativeState(state) {
     if (!state || !this.nativePlayback()) return;
+    this.applyNativeTransfers(state);
     if (
       this.nativePlayPendingTrackId &&
       state.trackId !== this.nativePlayPendingTrackId
@@ -340,6 +353,13 @@ export class Player {
     this.audioLoading = Boolean(state.loading);
     this.currentTime = Number(state.position) || 0;
     this.duration = Number(state.duration) || track?.duration_seconds || 0;
+    this.repeat = Boolean(state.repeat);
+    this.shuffle = Boolean(state.shuffle);
+    if (Number.isFinite(Number(state.volume))) this.volume = Number(state.volume);
+  }
+
+  /** @param {any} state */
+  applyNativeTransfers(state) {
     if (state.transfers && typeof state.transfers === "object") {
       for (const [id, transfer] of Object.entries(state.transfers)) {
         const queuedTrack = this.app.library.tracksById.get(id);
@@ -354,14 +374,15 @@ export class Player {
         queuedTrack.updateProgress(received, total);
         queuedTrack.downloading = Boolean(transfer.active) && (total <= 0 || received < total);
       }
-    } else if (track && !track.cached) {
-      const received = Math.max(0, Number(state.transferReceived) || 0);
-      const total = Math.max(0, Number(state.transferTotal) || Number(track.file_size) || 0);
-      track.updateProgress(received, total);
-      track.downloading = Boolean(state.transferring) && (total <= 0 || received < total);
+    } else if (state.trackId) {
+      const track = this.app.library.tracksById.get(state.trackId);
+      if (!track?.cached) {
+        const received = Math.max(0, Number(state.transferReceived) || 0);
+        const total = Math.max(0, Number(state.transferTotal) || Number(track?.file_size) || 0);
+        track?.updateProgress(received, total);
+        if (track)
+          track.downloading = Boolean(state.transferring) && (total <= 0 || received < total);
+      }
     }
-    this.repeat = Boolean(state.repeat);
-    this.shuffle = Boolean(state.shuffle);
-    if (Number.isFinite(Number(state.volume))) this.volume = Number(state.volume);
   }
 }

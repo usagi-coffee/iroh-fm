@@ -96,10 +96,13 @@ export class Track {
   updateProgress(received, total, generation = this.downloadGeneration) {
     if (generation !== this.downloadGeneration) return;
     const knownTotal = Number(total) > 0 ? Number(total) : Number(this.file_size) || 0;
-    this.received = Number(received) || 0;
-    this.total = knownTotal;
-    this.progress = knownTotal > 0 ? Math.min(1, this.received / knownTotal) : 0;
-    this.downloading = knownTotal <= 0 || this.received < knownTotal;
+    // Native state polls can finish out of order. A transfer's byte count is
+    // monotonic within one download generation, so never let a stale snapshot
+    // move its UI backward.
+    this.received = Math.max(this.received, Number(received) || 0);
+    this.total = Math.max(this.total, knownTotal);
+    this.progress = this.total > 0 ? Math.min(1, this.received / this.total) : 0;
+    this.downloading = this.total <= 0 || this.received < this.total;
   }
 
   /** @param {number} [generation] */

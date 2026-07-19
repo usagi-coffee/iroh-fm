@@ -155,6 +155,46 @@ class DesktopInner {
     return invoke("desktop_player_state", { handle: this.handle });
   }
 
+  async cachedTrackIds() {
+    return new Set(await invoke("desktop_cached_track_ids", { handle: this.handle }));
+  }
+
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async prefetchTrack(id, onProgress = () => {}) {
+    let polling = false;
+    const report = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const progress = await invoke("desktop_cache_progress", { trackId: id });
+        onProgress(Number(progress.received) || 0, Number(progress.total) || 0);
+      } finally {
+        polling = false;
+      }
+    };
+    await report();
+    const timer = setInterval(report, 200);
+    try {
+      const result = await invoke("desktop_cache_track", {
+        handle: this.handle,
+        trackId: id,
+      });
+      await report();
+      return Boolean(result.cached);
+    } finally {
+      clearInterval(timer);
+    }
+  }
+
+  /** @param {boolean} enabled */
+  setOfflineOnly(enabled) {
+    return invoke("desktop_set_offline_only", { enabled: Boolean(enabled) });
+  }
+
+  cacheStats() {
+    return invoke("desktop_cache_stats", { handle: this.handle });
+  }
+
   async close() {
     if (this.closed) return;
     this.closed = true;

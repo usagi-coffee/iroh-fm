@@ -1,12 +1,16 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::Cursor,
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
+};
 use client::{Client, IrohConfig};
 use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey, endpoint::RecvStream};
 use iroh_tickets::endpoint::EndpointTicket;
@@ -26,6 +30,15 @@ struct NativeRegistry {
     clients: HashMap<u64, Client>,
     streams: HashMap<u64, Arc<AsyncMutex<DesktopStream>>>,
     audio: DesktopAudio,
+    offline_only: bool,
+}
+
+#[derive(Clone, Default, Serialize)]
+struct DesktopTransfer {
+    received: u64,
+    total: u64,
+    active: bool,
+    cached: bool,
 }
 
 struct DesktopAudio {
@@ -40,6 +53,7 @@ struct DesktopAudio {
     volume: f32,
     repeat: bool,
     shuffle: bool,
+    transfers: HashMap<String, DesktopTransfer>,
 }
 
 impl Default for DesktopAudio {
@@ -56,6 +70,7 @@ impl Default for DesktopAudio {
             volume: 0.5,
             repeat: false,
             shuffle: false,
+            transfers: HashMap::new(),
         }
     }
 }
@@ -142,9 +157,52 @@ struct DesktopPlayerState {
     repeat: bool,
     shuffle: bool,
     volume: f32,
+    transfers: HashMap<String, DesktopTransfer>,
 }
 
-async fn download_track(client: Client, track_id: String) -> Result<Vec<u8>, String> {
+fn track_cache_dir(remote_id: &str) -> PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("iroh-fm")
+        .join("tracks")
+        .join(URL_SAFE_NO_PAD.encode(remote_id))
+}
+
+fn track_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
+    track_cache_dir(remote_id).join(URL_SAFE_NO_PAD.encode(track_id))
+}
+
+async fn download_track(
+    state: DesktopState,
+    client: Client,
+    track_id: String,
+) -> Result<Vec<u8>, String> {
+    let remote_id = client.remote_id().to_string();
+    let path = track_cache_path(&remote_id, &track_id);
+    if let Ok(bytes) = tokio::fs::read(&path).await {
+        if let Ok(mut registry) = state.0.lock() {
+            registry.audio.transfers.insert(
+                track_id,
+                DesktopTransfer {
+                    received: bytes.len() as u64,
+                    total: bytes.len() as u64,
+                    active: false,
+                    cached: true,
+                },
+            );
+        }
+        return Ok(bytes);
+    }
+    if state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?
+        .offline_only
+    {
+        return Err("track is not available in the desktop offline cache".to_string());
+    }
     let (descriptor, mut stream) = client
         .stream_open(TrackId(track_id.clone()))
         .await
@@ -152,6 +210,16 @@ async fn download_track(client: Client, track_id: String) -> Result<Vec<u8>, Str
     let capacity = usize::try_from(descriptor.file_size).unwrap_or(0);
     let mut bytes = Vec::with_capacity(capacity);
     let mut buffer = vec![0_u8; 1024 * 1024];
+    if let Ok(mut registry) = state.0.lock() {
+        registry.audio.transfers.insert(
+            track_id.clone(),
+            DesktopTransfer {
+                total: descriptor.file_size,
+                active: true,
+                ..DesktopTransfer::default()
+            },
+        );
+    }
     while let Some(read) = stream
         .read(&mut buffer)
         .await
@@ -161,6 +229,11 @@ async fn download_track(client: Client, track_id: String) -> Result<Vec<u8>, Str
             break;
         }
         bytes.extend_from_slice(&buffer[..read]);
+        if let Ok(mut registry) = state.0.lock() {
+            if let Some(transfer) = registry.audio.transfers.get_mut(&track_id) {
+                transfer.received = bytes.len() as u64;
+            }
+        }
     }
     if bytes.len() as u64 != descriptor.file_size {
         return Err(format!(
@@ -168,6 +241,25 @@ async fn download_track(client: Client, track_id: String) -> Result<Vec<u8>, Str
             bytes.len(),
             descriptor.file_size
         ));
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Ok(mut registry) = state.0.lock() {
+        registry.audio.transfers.insert(
+            track_id,
+            DesktopTransfer {
+                received: descriptor.file_size,
+                total: descriptor.file_size,
+                active: false,
+                cached: true,
+            },
+        );
     }
     Ok(bytes)
 }
@@ -207,6 +299,7 @@ fn player_state(audio: &mut DesktopAudio) -> DesktopPlayerState {
         repeat: audio.repeat,
         shuffle: audio.shuffle,
         volume: audio.volume,
+        transfers: audio.transfers.clone(),
     }
 }
 
@@ -452,7 +545,7 @@ fn schedule_audio_prefetch(state: DesktopState, client_handle: u64) {
         return;
     };
     tauri::async_runtime::spawn(async move {
-        let result = download_track(client, track_id.clone())
+        let result = download_track(state.clone(), client, track_id.clone())
             .await
             .and_then(decoder);
         let mut registry = match state.0.lock() {
@@ -507,7 +600,7 @@ async fn start_audio(
             .ok_or_else(|| "selected track is not in the desktop queue".to_string())?;
         (audio.generation, client, track_id)
     };
-    let source = download_track(client, track_id.clone())
+    let source = download_track(state.clone(), client, track_id.clone())
         .await
         .and_then(decoder)?;
     let (result, outgoing, incoming) = {
@@ -596,6 +689,93 @@ async fn desktop_player_state(
     };
     schedule_audio_prefetch((*state).clone(), handle);
     Ok(result)
+}
+
+#[tauri::command]
+async fn desktop_cached_track_ids(
+    state: State<'_, DesktopState>,
+    handle: u64,
+) -> Result<Vec<String>, String> {
+    let remote_id = state.client(handle)?.remote_id().to_string();
+    let mut ids = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(track_cache_dir(&remote_id)).await else {
+        return Ok(ids);
+    };
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        let encoded = entry.file_name();
+        let Ok(bytes) = URL_SAFE_NO_PAD.decode(encoded.to_string_lossy().as_bytes()) else {
+            continue;
+        };
+        if let Ok(id) = String::from_utf8(bytes) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+async fn desktop_cache_track(
+    state: State<'_, DesktopState>,
+    handle: u64,
+    track_id: String,
+) -> Result<Value, String> {
+    download_track((*state).clone(), state.client(handle)?, track_id).await?;
+    Ok(serde_json::json!({ "cached": true }))
+}
+
+#[tauri::command]
+fn desktop_cache_progress(
+    state: State<'_, DesktopState>,
+    track_id: String,
+) -> Result<DesktopTransfer, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?
+        .audio
+        .transfers
+        .get(&track_id)
+        .cloned()
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+fn desktop_set_offline_only(state: State<'_, DesktopState>, enabled: bool) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?
+        .offline_only = enabled;
+    Ok(())
+}
+
+#[tauri::command]
+async fn desktop_cache_stats(state: State<'_, DesktopState>, handle: u64) -> Result<Value, String> {
+    let remote_id = state.client(handle)?.remote_id().to_string();
+    let mut count = 0_u64;
+    let mut size = 0_u64;
+    if let Ok(mut entries) = tokio::fs::read_dir(track_cache_dir(&remote_id)).await {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if let Ok(metadata) = entry.metadata().await {
+                if metadata.is_file() {
+                    count += 1;
+                    size = size.saturating_add(metadata.len());
+                }
+            }
+        }
+    }
+    Ok(serde_json::json!({
+        "tracks": { "count": count, "size": size },
+        "covers": { "count": 0, "size": 0 },
+    }))
 }
 
 #[tauri::command]
@@ -773,6 +953,11 @@ pub fn run() {
             desktop_play,
             desktop_player_state,
             desktop_player_command,
+            desktop_cached_track_ids,
+            desktop_cache_track,
+            desktop_cache_progress,
+            desktop_set_offline_only,
+            desktop_cache_stats,
             desktop_close,
             desktop_generate_identity,
             desktop_endpoint_id_for_secret,
