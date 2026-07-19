@@ -27,6 +27,8 @@ export class Player {
   /** @type {number | null} */
   audioDownloadGeneration = null;
   nativeStatePending = false;
+  /** @type {string | null} */
+  nativePlayPendingTrackId = null;
 
   /** @param {import('./App.svelte.js').Application} app */
   constructor(app) {
@@ -106,10 +108,16 @@ export class Player {
     this.playing = false;
     if (client.native) {
       const downloadGeneration = track.startDownload();
+      this.nativePlayPendingTrackId = track.id;
       try {
-        this.applyNativeState(await client.playNative(track, sourceQueue));
+        const state = await client.playNative(track, sourceQueue);
+        if (generation === this.generation) {
+          this.nativePlayPendingTrackId = null;
+          this.applyNativeState(state);
+        }
       } catch (error) {
         if (generation === this.generation) {
+          this.nativePlayPendingTrackId = null;
           track.stopDownload(downloadGeneration);
           this.audioLoading = false;
           this.error = friendlyError(error, "This track could not be played.");
@@ -183,6 +191,7 @@ export class Player {
 
   stop() {
     this.generation += 1;
+    this.nativePlayPendingTrackId = null;
     const track = this.currentTrack;
     const downloadGeneration = this.audioDownloadGeneration;
     if (this.app.connection.client?.native)
@@ -303,6 +312,11 @@ export class Player {
   /** @param {any} state */
   applyNativeState(state) {
     if (!state || !this.app.connection.client?.native) return;
+    if (
+      this.nativePlayPendingTrackId &&
+      state.trackId !== this.nativePlayPendingTrackId
+    )
+      return;
     const track = state.trackId ? this.app.library.tracksById.get(state.trackId) : null;
     const nativeQueue = Array.isArray(state.queue)
       ? state.queue

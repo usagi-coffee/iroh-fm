@@ -2,6 +2,7 @@ const NATIVE_TIMEOUT_MS = 30_000;
 const NATIVE_CACHE_TIMEOUT_MS = 60 * 60 * 1_000;
 const NATIVE_CACHE_PROGRESS_MS = 250;
 const NATIVE_COVER_CONCURRENCY = 3;
+const NATIVE_REQUEST_CHUNK_CHARS = 24 * 1024;
 /** @type {MessagePort | undefined} */
 let port;
 let nativeExpected = false;
@@ -138,7 +139,33 @@ export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS)
       reject(new Error(`Native ${action} request timed out`));
     }, timeout);
     pending.set(id, { resolve, reject, timer });
-    target.postMessage(JSON.stringify({ module: "native", id, action, payload }));
+    try {
+      const raw = JSON.stringify({ module: "native", id, action, payload });
+      if (raw.length <= NATIVE_REQUEST_CHUNK_CHARS) {
+        target.postMessage(raw);
+        return;
+      }
+      const total = Math.ceil(raw.length / NATIVE_REQUEST_CHUNK_CHARS);
+      for (let index = 0; index < total; index += 1) {
+        target.postMessage(
+          JSON.stringify({
+            module: "native",
+            event: "requestChunk",
+            transferId: `request-${id}`,
+            index,
+            total,
+            data: raw.slice(
+              index * NATIVE_REQUEST_CHUNK_CHARS,
+              (index + 1) * NATIVE_REQUEST_CHUNK_CHARS,
+            ),
+          }),
+        );
+      }
+    } catch (error) {
+      clearTimeout(timer);
+      pending.delete(id);
+      reject(error);
+    }
   });
 }
 

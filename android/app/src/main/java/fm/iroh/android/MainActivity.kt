@@ -23,6 +23,12 @@ import org.json.JSONTokener
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
+    private data class IncomingRequestTransfer(
+        val parts: Array<String?>,
+        var received: Int = 0,
+        var chars: Int = 0,
+    )
+
     private val worker = Executors.newFixedThreadPool(4)
     private lateinit var launchUri: Uri
     private lateinit var origin: Uri
@@ -39,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private var controller: MediaController? = null
     private val sendLock = Any()
     private var transferSequence = 0L
+    private val incomingRequestTransfers = mutableMapOf<String, IncomingRequestTransfer>()
 
     private val callback = object : CustomTabsCallback() {
         override fun onRelationshipValidationResult(
@@ -168,6 +175,10 @@ class MainActivity : ComponentActivity() {
     private fun handleMessage(raw: String) {
         val message = runCatching { JSONObject(raw) }.getOrNull() ?: return
         if (message.optString("module") != "native") return
+        if (message.optString("event") == "requestChunk") {
+            receiveRequestChunk(message)
+            return
+        }
         val id = message.optString("id")
         val action = message.optString("action")
         val logRequest = action != "cacheProgress"
@@ -211,6 +222,38 @@ class MainActivity : ComponentActivity() {
                 }
         }
         if (background) worker.execute(task) else runOnUiThread(task)
+    }
+
+    private fun receiveRequestChunk(message: JSONObject) {
+        val transferId = message.optString("transferId")
+        val index = message.optInt("index", -1)
+        val total = message.optInt("total", -1)
+        val data = message.optString("data", null) ?: return
+        if (
+            transferId.isBlank() ||
+            total !in 1..MAX_REQUEST_CHUNKS ||
+            index !in 0 until total
+        ) return
+        val transfer = incomingRequestTransfers.getOrPut(transferId) {
+            mainHandler.postDelayed(
+                { incomingRequestTransfers.remove(transferId) },
+                REQUEST_TRANSFER_TIMEOUT_MS,
+            )
+            IncomingRequestTransfer(arrayOfNulls(total))
+        }
+        if (transfer.parts.size != total || transfer.parts[index] != null) return
+        transfer.parts[index] = data
+        transfer.received += 1
+        transfer.chars += data.length
+        if (transfer.chars > MAX_REQUEST_CHARS) {
+            incomingRequestTransfers.remove(transferId)
+            return
+        }
+        if (transfer.received != total) return
+        incomingRequestTransfers.remove(transferId)
+        val reassembled = transfer.parts.joinToString("") { it ?: "" }
+        Log.d(TAG, "Reassembled native request: transfer=$transferId chars=${reassembled.length} chunks=$total")
+        handleMessage(reassembled)
     }
 
     private fun execute(action: String, payload: JSONObject): Any = when (action) {
@@ -403,5 +446,8 @@ class MainActivity : ComponentActivity() {
         private const val POST_MESSAGE_ATTEMPTS = 5
         private const val POST_MESSAGE_RETRY_DELAY_MS = 1_000L
         private const val POST_MESSAGE_CHUNK_CHARS = 64 * 1024
+        private const val MAX_REQUEST_CHUNKS = 1_024
+        private const val MAX_REQUEST_CHARS = 24 * 1024 * 1024
+        private const val REQUEST_TRANSFER_TIMEOUT_MS = 30_000L
     }
 }
