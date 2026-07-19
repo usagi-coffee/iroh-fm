@@ -150,11 +150,12 @@ jobs:
       - name: Name release APK
         run: |
           short_sha="${RELEASE_SHA::7}"
+          release_date="$(date -u +%Y%m%d)"
           release_apk="release/iroh-fm-android-$short_sha.apk"
           mv release/app-release.apk "$release_apk"
           echo "RELEASE_APK=$release_apk" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=android-$RELEASE_SHA" >> "$GITHUB_ENV"
-          echo "RELEASE_TITLE=Android ($short_sha)" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Android $release_date ($short_sha)" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         env:

@@ -123,8 +123,9 @@ jobs:
       - name: Set release metadata
         run: |
           short_sha="${RELEASE_SHA::7}"
+          release_date="$(date -u +%Y%m%d)"
           echo "RELEASE_TAG=desktop-$RELEASE_SHA" >> "$GITHUB_ENV"
-          echo "RELEASE_TITLE=Desktop ($short_sha)" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Desktop $release_date ($short_sha)" >> "$GITHUB_ENV"
 
       - name: Publish complete Desktop release
         env:
