@@ -43,6 +43,100 @@ export function subscribeToServiceWorkerUpdates(listener) {
   return () => updateListeners.delete(listener);
 }
 
+/**
+ * @typedef {{
+ *   kind: "active" | "checking" | "development" | "error" | "installing" | "off" | "unsupported" | "update-ready";
+ *   label: string;
+ *   detail: string;
+ * }} ServiceWorkerStatus
+ */
+
+/** @returns {Promise<ServiceWorkerStatus>} */
+export async function getServiceWorkerStatus() {
+  if (dev)
+    return {
+      kind: "development",
+      label: "SW DEV",
+      detail: "The production service worker is disabled during development.",
+    };
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator))
+    return {
+      kind: "unsupported",
+      label: "SW UNSUPPORTED",
+      detail: "This webview does not support service workers.",
+    };
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration)
+      return {
+        kind: "off",
+        label: "SW OFF",
+        detail: "No service worker is registered for this application.",
+      };
+    if (waitingWorker || registration.waiting || reloadRequired)
+      return {
+        kind: "update-ready",
+        label: "SW UPDATE READY",
+        detail: "A complete application update is cached and waiting to be activated.",
+      };
+    if (registration.installing)
+      return {
+        kind: "installing",
+        label: "SW INSTALLING",
+        detail: "The service worker is caching an application update.",
+      };
+
+    const worker = registration.active ?? navigator.serviceWorker.controller;
+    if (!worker)
+      return {
+        kind: "checking",
+        label: "SW STARTING",
+        detail: "The service worker is registered but has not activated yet.",
+      };
+
+    const info = await pingWorker(worker).catch(() => ({}));
+    if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__)
+      return {
+        kind: "update-ready",
+        label: "SW RELOAD READY",
+        detail: `The active worker uses application build ${info.buildVersion}; this page uses ${__BUILD_VERSION__}.`,
+      };
+    return {
+      kind: "active",
+      label: "SW ACTIVE",
+      detail: info.version
+        ? `Service worker ${info.version} matches application build ${info.buildVersion ?? __BUILD_VERSION__}.`
+        : "The service worker is active but did not report its version.",
+    };
+  } catch (error) {
+    return {
+      kind: "error",
+      label: "SW ERROR",
+      detail:
+        error instanceof Error ? error.message : "The service worker status could not be read.",
+    };
+  }
+}
+
+/** @param {(status: ServiceWorkerStatus) => void} listener */
+export function subscribeToServiceWorkerStatus(listener) {
+  let disposed = false;
+  const refresh = () => {
+    getServiceWorkerStatus().then((status) => {
+      if (!disposed) listener(status);
+    });
+  };
+  const unsubscribeUpdates = subscribeToServiceWorkerUpdates(refresh);
+  navigator.serviceWorker?.addEventListener("controllerchange", refresh);
+  refresh();
+  return () => {
+    disposed = true;
+    unsubscribeUpdates();
+    navigator.serviceWorker?.removeEventListener("controllerchange", refresh);
+  };
+}
+
 export function activateServiceWorkerUpdate() {
   if (dev) return;
   if (!waitingWorker) {

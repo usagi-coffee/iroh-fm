@@ -3,7 +3,7 @@
   import { resolve } from "$app/paths";
 
   import { App } from "$lib/runes/App.svelte.js";
-  import { forceServiceWorkerUpdate } from "$lib/service-worker.js";
+  import { forceServiceWorkerUpdate, subscribeToServiceWorkerStatus } from "$lib/service-worker.js";
   import { cleanRelays, formatBytes, friendlyError } from "$lib/utils.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
@@ -34,6 +34,11 @@
   let ticketParseGeneration = 0;
   let endpointCopied = $state(false);
   let forcingUpdate = $state(false);
+  let serviceWorkerStatus = $state({
+    kind: "checking",
+    label: "SW CHECKING",
+    detail: "Reading service worker status.",
+  });
   let draftEndpointId = $derived(
     settings.secret.trim()
       ? ClientCore.endpointIdForSecret(settings.secret.trim())
@@ -43,6 +48,9 @@
   function initialize() {
     refreshStorageInfo();
     if (settings.ticket.trim()) syncTicketAddress(settings.ticket);
+    return subscribeToServiceWorkerStatus((status) => {
+      serviceWorkerStatus = status;
+    });
   }
 
   /** @param {string} value */
@@ -400,9 +408,32 @@
       </section>
       <div class="text-2xs text-overlay1 flex items-start justify-between gap-4 leading-5">
         <p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
-        <p class="text-4xs text-overlay0 shrink-0 font-mono" title="Application build commit">
-          BUILD {__BUILD_COMMIT__}
-        </p>
+        <div class="text-4xs text-overlay0 flex shrink-0 items-center gap-2 font-mono">
+          <span title="Application build commit">BUILD {__BUILD_COMMIT__}</span>
+          <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
+          <span
+            title={serviceWorkerStatus.detail}
+            class:text-green={serviceWorkerStatus.kind === "active"}
+            class:text-yellow={serviceWorkerStatus.kind === "installing" ||
+              serviceWorkerStatus.kind === "update-ready"}
+            class:text-red={serviceWorkerStatus.kind === "error"}
+            class="inline-flex items-center gap-1"
+          >
+            <span
+              aria-hidden="true"
+              class:bg-green={serviceWorkerStatus.kind === "active"}
+              class:bg-yellow={serviceWorkerStatus.kind === "installing" ||
+                serviceWorkerStatus.kind === "update-ready"}
+              class:bg-red={serviceWorkerStatus.kind === "error"}
+              class:bg-overlay0={serviceWorkerStatus.kind !== "active" &&
+                serviceWorkerStatus.kind !== "installing" &&
+                serviceWorkerStatus.kind !== "update-ready" &&
+                serviceWorkerStatus.kind !== "error"}
+              class="size-1.5 rounded-full"
+            ></span>
+            {serviceWorkerStatus.label}
+          </span>
+        </div>
       </div>
     </div>
 
