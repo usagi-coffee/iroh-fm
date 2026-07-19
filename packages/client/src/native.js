@@ -9,6 +9,7 @@ let nativeExpected = false;
 /** @type {Promise<boolean> | undefined} */
 let detection;
 let sequence = 0;
+let requestChunksSupported = false;
 /** @type {Map<string, {resolve: (value: any) => void, reject: (reason?: any) => void, timer: ReturnType<typeof setTimeout>}>} */
 const pending = new Map();
 /** @type {Map<string, {parts: string[], received: number, total: number, timer: ReturnType<typeof setTimeout>}>} */
@@ -141,7 +142,7 @@ export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer });
     try {
       const raw = JSON.stringify({ module: "native", id, action, payload });
-      if (raw.length <= NATIVE_REQUEST_CHUNK_CHARS) {
+      if (!requestChunksSupported || raw.length <= NATIVE_REQUEST_CHUNK_CHARS) {
         target.postMessage(raw);
         return;
       }
@@ -176,11 +177,12 @@ export function subscribeNativePlayerState(listener) {
 }
 
 export class NativeMusicClient {
-  /** @param {{handle: number, endpointId: string, remoteId: string}} connection */
+  /** @param {{handle: number, endpointId: string, remoteId: string, compactQueue?: boolean, requestChunks?: boolean}} connection */
   constructor(connection) {
     this.handle = connection.handle;
     this.endpointId = connection.endpointId;
     this.remoteId = connection.remoteId;
+    this.compactQueue = Boolean(connection.compactQueue);
     this.native = true;
     this.info = { path_type: "unknown", address: "", received_bytes: 0 };
     this.infoPending = false;
@@ -189,11 +191,14 @@ export class NativeMusicClient {
     this.coverActive = 0;
     this.coverQueue = /** @type {Array<() => void>} */ ([]);
     this.offlineOnly = false;
+    this.nativeQueueIds = /** @type {string[]} */ ([]);
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
   static async connect(options) {
-    return new NativeMusicClient(await nativeRequest("connect", options));
+    const connection = await nativeRequest("connect", options);
+    requestChunksSupported = Boolean(connection.requestChunks);
+    return new NativeMusicClient(connection);
   }
 
   /** @param {any} request */
@@ -304,16 +309,43 @@ export class NativeMusicClient {
   }
 
   /** @param {{id: string}} track @param {Array<{id: string, title: string, artist: string, album: string}>} queue */
-  playNative(track, queue) {
-    return nativeRequest("play", {
+  async playNative(track, queue) {
+    const queueIds = queue.map(({ id }) => id);
+    const queueChanged =
+      queueIds.length !== this.nativeQueueIds.length ||
+      queueIds.some((id, index) => id !== this.nativeQueueIds[index]);
+    const payload = {
       handle: this.handle,
       trackId: track.id,
-      queue: queue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
-    });
+      ...(queueChanged
+        ? {
+            queue: this.compactQueue
+              ? queueIds
+              : queue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
+          }
+        : {}),
+    };
+    try {
+      const state = await nativeRequest("play", payload);
+      if (queueChanged) this.nativeQueueIds = queueIds;
+      return state;
+    } catch (error) {
+      if (queueChanged) throw error;
+      // The Android service may have been recreated while this web client stayed alive.
+      const state = await nativeRequest("play", {
+        ...payload,
+        queue: this.compactQueue
+          ? queueIds
+          : queue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
+      });
+      this.nativeQueueIds = queueIds;
+      return state;
+    }
   }
 
   /** @param {string} command @param {Record<string, any>} [payload] */
   playerCommand(command, payload = {}) {
+    if (command === "stop") this.nativeQueueIds = [];
     return nativeRequest("playerCommand", { command, ...payload });
   }
 

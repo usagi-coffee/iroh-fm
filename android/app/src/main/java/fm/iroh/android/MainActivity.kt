@@ -261,8 +261,10 @@ class MainActivity : ComponentActivity() {
             NativeCore.activeClientHandle = it.getLong("handle")
             NativeCore.activeRemoteId = it.getString("remoteId")
             NativeCore.offlineOnly = false
+            it.put("compactQueue", true)
+            it.put("requestChunks", true)
         }
-        "request" -> JSONTokener(NativeCore.unwrap(NativeCore.request(payload.getLong("handle"), encodeJson(payload.get("request"))))).nextValue()
+        "request" -> executeBackendRequest(payload)
         "coverArt" -> JSONObject(
             NativeCore.unwrap(
                 NativeCore.coverArt(payload.getLong("handle"), payload.getString("coverArtId")),
@@ -320,6 +322,20 @@ class MainActivity : ComponentActivity() {
         else -> error("unsupported native action: $action")
     }
 
+    private fun executeBackendRequest(payload: JSONObject): Any {
+        val request = payload.get("request")
+        val response = JSONTokener(
+            NativeCore.unwrap(
+                NativeCore.request(payload.getLong("handle"), encodeJson(request)),
+            ),
+        ).nextValue()
+        if (request == "ListTracks") {
+            NativeTrackMetadata.replaceFromListTracks(NativeCore.activeRemoteId, response)
+            Log.d(TAG, "Native track metadata indexed for Media3")
+        }
+        return response
+    }
+
     private fun play(payload: JSONObject): JSONObject {
         val player = controller ?: error("native player is starting")
         val selectedTrackId = payload.getString("trackId")
@@ -328,19 +344,30 @@ class MainActivity : ComponentActivity() {
                 "track is not available in the Android offline cache"
             }
         }
-        val queue = payload.getJSONArray("queue")
+        val queue = payload.optJSONArray("queue")
+        if (queue == null) {
+            val selected = (0 until player.mediaItemCount)
+                .firstOrNull { player.getMediaItemAt(it).mediaId == selectedTrackId }
+                ?: error("native queue is not available")
+            player.seekTo(selected, 0L)
+            player.prepare()
+            player.play()
+            return playerState()
+        }
         val items = (0 until queue.length()).map { index ->
-            val track = queue.getJSONObject(index)
+            val embedded = queue.optJSONObject(index)
+            val trackId = embedded?.optString("id") ?: queue.getString(index)
+            val metadata = NativeTrackMetadata.get(NativeCore.activeRemoteId, trackId)
             MediaItem.Builder()
-                .setMediaId(track.getString("id"))
-                .setUri("iroh-fm://track/${Uri.encode(track.getString("id"))}")
+                .setMediaId(trackId)
+                .setUri("iroh-fm://track/${Uri.encode(trackId)}")
                 .setCustomCacheKey(
-                    NativeAudioCache.cacheKey(NativeCore.activeRemoteId, track.getString("id")),
+                    NativeAudioCache.cacheKey(NativeCore.activeRemoteId, trackId),
                 )
                 .setMediaMetadata(MediaMetadata.Builder()
-                    .setTitle(track.optString("title"))
-                    .setArtist(track.optString("artist"))
-                    .setAlbumTitle(track.optString("album"))
+                    .setTitle(metadata?.title ?: embedded?.optString("title") ?: trackId)
+                    .setArtist(metadata?.artist ?: embedded?.optString("artist") ?: "")
+                    .setAlbumTitle(metadata?.album ?: embedded?.optString("album") ?: "")
                     .build())
                 .build()
         }
