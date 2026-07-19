@@ -5,6 +5,7 @@
   import { page } from "$app/state";
 
   import { App } from "$lib/runes/App.svelte.js";
+  import { connectionAddressLabel, formatBytes } from "$lib/utils.js";
   import {
     activateServiceWorkerUpdate,
     attach as serviceworker,
@@ -13,6 +14,7 @@
   } from "$lib/service-worker.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
+  import DatabaseIcon from "virtual:icons/ri/database-2-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
 
   import PlayerBar from "./PlayerBar.svelte";
@@ -160,7 +162,10 @@
   {/snippet}
 
   {#snippet loading(/** @type {{ text: string, step: number }} */ { text, step })}
-    <div class="bg-base text-text grid h-dvh place-items-center p-6">
+    <div
+      {@attach App.connection.monitor(App.connection.loadingClient)}
+      class="bg-base text-text grid h-dvh place-items-center p-6"
+    >
       <div class="flex w-full max-w-56 flex-col items-center gap-4 text-center">
         <img src={asset("/pwa-icon-192.png")} alt="" class="size-12 rounded-xl" />
         <div>
@@ -180,6 +185,30 @@
             style={`width:${(step / 6) * 100}%`}
           ></div>
         </div>
+        {#if App.connection.loadingClient}
+          <div
+            class="border-surface0 bg-mantle text-4xs text-overlay1 flex w-fit max-w-full items-center justify-center gap-1.5 border px-2 py-1 font-mono"
+            title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"}`}
+          >
+            <span
+              class="size-1.5 shrink-0 rounded-full {App.connection.info.address
+                ? 'bg-green'
+                : 'bg-yellow animate-pulse'}"
+            ></span><span class="flex min-w-0 flex-col text-left leading-tight"
+              ><span class="text-subtext0 text-5xs w-full truncate text-center">
+                {App.connection.info.address
+                  ? connectionAddressLabel(App.connection.info)
+                  : "CONNECTING"}
+              </span>
+              <span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
+                ><span class="flex items-center gap-1"><DatabaseIcon
+                    class="text-4xs"
+                  />{formatBytes(App.connection.info.received_bytes)}</span
+                ><span>↓ {formatBytes(App.connection.receivedBytesPerSecond)}/s</span></span
+              ></span
+            >
+          </div>
+        {/if}
         <p class="text-4xs text-overlay0 font-mono tracking-[.08em]">
           BUILD {__BUILD_COMMIT__}
         </p>
@@ -248,7 +277,7 @@
               {@render errorToast()}
 
               {#snippet pending()}
-                {@render loading({ text: "Loading your music library…", step: 6 })}
+                {@render loading({ text: App.connection.connectionStep, step: 6 })}
               {/snippet}
             </svelte:boundary>
             {#snippet pending()}

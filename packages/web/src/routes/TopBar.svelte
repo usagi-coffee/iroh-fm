@@ -9,6 +9,7 @@
   import { connectionAddressLabel, formatBytes, friendlyError } from "$lib/utils.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
+  import DatabaseIcon from "virtual:icons/ri/database-2-line";
   import DisconnectIcon from "virtual:icons/ri/logout-box-r-line";
   import MaximizeIcon from "virtual:icons/ri/checkbox-blank-line";
   import MinimizeIcon from "virtual:icons/ri/subtract-line";
@@ -93,17 +94,22 @@
   ></div>
   <div class="flex h-full min-w-0 items-center">
     <div
-      class="border-surface0 text-4xs text-overlay1 desktop:flex hidden h-full min-w-0 items-center gap-2 border-l px-3 font-mono"
-      title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"} · ${formatBytes(App.connection.info.received_bytes)} received`}
+      class="border-surface0 text-4xs text-overlay1 tablet-xl:flex hidden h-full min-w-36 items-center gap-2 border-l px-2 font-mono"
+      title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"} · ${formatBytes(App.connection.receivedBytesPerSecond)}/s · ${formatBytes(App.connection.info.received_bytes)} received`}
     >
       <span
         class="size-1.5 shrink-0 rounded-full {App.connection.info.address
           ? 'bg-green'
           : 'bg-yellow animate-pulse'}"
-      ></span><span class="text-subtext0 max-w-44 truncate"
-        >{connectionAddressLabel(App.connection.info)}</span
-      ><span class="text-overlay0 shrink-0"
-        >↓ {formatBytes(App.connection.info.received_bytes)}</span
+      ></span><span class="flex min-w-0 flex-1 flex-col items-end text-right leading-tight"
+        ><span class="text-subtext0 text-5xs desktop:max-w-44 max-w-28 truncate"
+          >{connectionAddressLabel(App.connection.info)}</span
+        ><span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
+          ><span class="flex items-center gap-1"><DatabaseIcon class="text-4xs" />{formatBytes(
+              App.connection.info.received_bytes,
+            )}</span
+          ><span>↓ {formatBytes(App.connection.receivedBytesPerSecond)}/s</span></span
+        ></span
       >
     </div>
     {#if updateReady}<button

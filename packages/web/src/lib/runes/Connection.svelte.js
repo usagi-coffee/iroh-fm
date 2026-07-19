@@ -15,8 +15,11 @@ export class Connection {
   error = $state("");
   /** @type {any} */
   client = $state(null);
+  /** @type {any} */
+  loadingClient = $state(null);
   /** @type {import('../types').ConnectionInfo} */
   info = $state({ path_type: "unknown", address: "", received_bytes: 0 });
+  receivedBytesPerSecond = $state(0);
   ticketParseGeneration = 0;
   identityGeneration = 0;
   operationGeneration = 0;
@@ -49,11 +52,27 @@ export class Connection {
     return () => {
       if (!client) {
         this.info = { path_type: "unknown", address: "", received_bytes: 0 };
+        this.receivedBytesPerSecond = 0;
         return;
       }
+      let previousBytes = 0;
+      let previousTime = performance.now();
+      let initialized = false;
       const update = () => {
         try {
-          this.info = client.connectionInfo();
+          const info = client.connectionInfo();
+          const now = performance.now();
+          if (initialized) {
+            const elapsed = now - previousTime;
+            const received = Math.max(0, info.received_bytes - previousBytes);
+            this.receivedBytesPerSecond = elapsed > 0 ? (received * 1000) / elapsed : 0;
+          } else {
+            this.receivedBytesPerSecond = 0;
+            initialized = true;
+          }
+          previousBytes = info.received_bytes;
+          previousTime = now;
+          this.info = info;
           void this.app.player.refreshNativeState(client);
         } catch {
           // The connection may be closing while settings are applied.
@@ -298,6 +317,7 @@ export class Connection {
         await nextClient.close().catch(() => {});
         return false;
       }
+      this.loadingClient = nextClient;
       reportConnected();
       this.connectionStep = "Indexing the remote library…";
       const data = await nextClient.bootstrap(this.app.starredKey);
@@ -345,6 +365,7 @@ export class Connection {
       this.client = previousClient;
       return false;
     } finally {
+      if (this.loadingClient === nextClient) this.loadingClient = null;
       reportConnected();
       if (operation === this.operationGeneration) this.connecting = false;
     }
@@ -365,6 +386,7 @@ export class Connection {
   async disconnect() {
     this.operationGeneration += 1;
     this.connecting = false;
+    this.loadingClient = null;
     this.app.player.stop();
     const previous = this.client;
     this.client = null;
