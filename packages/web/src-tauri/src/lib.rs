@@ -18,11 +18,15 @@ use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(all(desktop, not(debug_assertions)))]
+use tauri::Manager;
 use tauri::{State, ipc::Response};
 use tokio::sync::Mutex as AsyncMutex;
 
 const TRACK_CROSSFADE: Duration = Duration::from_millis(1_500);
 const CROSSFADE_STEPS: u32 = 30;
+#[cfg(all(desktop, not(debug_assertions)))]
+const LOCALHOST_PORT: u16 = 13_592;
 
 #[derive(Default)]
 struct NativeRegistry {
@@ -1074,20 +1078,33 @@ fn desktop_parse_ticket(ticket: String) -> Result<ParsedTicket, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .manage(DesktopState::default())
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Warn)
-                        .level_for("iroh", log::LevelFilter::Error)
-                        .level_for("tracing", log::LevelFilter::Error)
-                        .level_for("quinn", log::LevelFilter::Error)
-                        .level_for("iroh_fm_desktop", log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+    let builder = tauri::Builder::default().manage(DesktopState::default());
+
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(
+        tauri_plugin_log::Builder::default()
+            .level(log::LevelFilter::Warn)
+            .level_for("iroh", log::LevelFilter::Error)
+            .level_for("tracing", log::LevelFilter::Error)
+            .level_for("quinn", log::LevelFilter::Error)
+            .level_for("iroh_fm_desktop", log::LevelFilter::Info)
+            .build(),
+    );
+
+    #[cfg(all(desktop, not(debug_assertions)))]
+    let builder = builder.plugin(
+        tauri_plugin_localhost::Builder::new(LOCALHOST_PORT)
+            .host("127.0.0.1")
+            .build(),
+    );
+
+    builder
+        .setup(move |app| {
+            #[cfg(all(desktop, not(debug_assertions)))]
+            app.get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main webview window is missing"))?
+                .navigate(format!("http://127.0.0.1:{LOCALHOST_PORT}").parse()?)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

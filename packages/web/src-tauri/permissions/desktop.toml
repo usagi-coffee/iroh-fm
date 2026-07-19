@@ -1,0 +1,27 @@
+[[permission]]
+identifier = "desktop-commands"
+description = "Allows the bundled desktop frontend to use the iroh-fm native backend."
+commands.allow = [
+  "desktop_connect",
+  "desktop_request",
+  "desktop_cover_art",
+  "desktop_connection_info",
+  "desktop_open_stream",
+  "desktop_read_stream",
+  "desktop_close_stream",
+  "desktop_prepare_play",
+  "desktop_play_uploaded",
+  "desktop_queue_uploaded",
+  "desktop_play",
+  "desktop_player_state",
+  "desktop_player_command",
+  "desktop_cached_track_ids",
+  "desktop_cache_track",
+  "desktop_cache_progress",
+  "desktop_set_offline_only",
+  "desktop_cache_stats",
+  "desktop_close",
+  "desktop_generate_identity",
+  "desktop_endpoint_id_for_secret",
+  "desktop_parse_ticket",
+]

@@ -5,7 +5,13 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:13592"
+    ]
+  },
   "permissions": [
+    "desktop-commands",
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
