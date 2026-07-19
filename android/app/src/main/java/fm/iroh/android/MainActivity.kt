@@ -313,9 +313,7 @@ class MainActivity : ComponentActivity() {
                 .put("tracks", JSONObject().put("count", it.count).put("size", it.size))
                 .put("covers", JSONObject().put("count", 0).put("size", 0))
         }
-        "setOfflineOnly" -> JSONObject().also {
-            NativeCore.offlineOnly = payload.getBoolean("enabled")
-        }
+        "setOfflineOnly" -> setOfflineOnly(payload.getBoolean("enabled"))
         "play" -> play(payload)
         "playerCommand" -> playerCommand(payload)
         "playerState" -> playerState()
@@ -354,27 +352,57 @@ class MainActivity : ComponentActivity() {
             player.play()
             return playerState()
         }
-        val items = (0 until queue.length()).map { index ->
-            val embedded = queue.optJSONObject(index)
-            val trackId = embedded?.optString("id") ?: queue.getString(index)
-            val metadata = NativeTrackMetadata.get(NativeCore.activeRemoteId, trackId)
-            MediaItem.Builder()
-                .setMediaId(trackId)
-                .setUri("iroh-fm://track/${Uri.encode(trackId)}")
-                .setCustomCacheKey(
-                    NativeAudioCache.cacheKey(NativeCore.activeRemoteId, trackId),
-                )
-                .setMediaMetadata(MediaMetadata.Builder()
-                    .setTitle(metadata?.title ?: embedded?.optString("title") ?: trackId)
-                    .setArtist(metadata?.artist ?: embedded?.optString("artist") ?: "")
-                    .setAlbumTitle(metadata?.album ?: embedded?.optString("album") ?: "")
-                    .build())
-                .build()
-        }
+        val items = (0 until queue.length())
+            .map { index ->
+                val embedded = queue.optJSONObject(index)
+                val trackId = embedded?.optString("id") ?: queue.getString(index)
+                val metadata = NativeTrackMetadata.get(NativeCore.activeRemoteId, trackId)
+                MediaItem.Builder()
+                    .setMediaId(trackId)
+                    .setUri("iroh-fm://track/${Uri.encode(trackId)}")
+                    .setCustomCacheKey(
+                        NativeAudioCache.cacheKey(NativeCore.activeRemoteId, trackId),
+                    )
+                    .setMediaMetadata(MediaMetadata.Builder()
+                        .setTitle(metadata?.title ?: embedded?.optString("title") ?: trackId)
+                        .setArtist(metadata?.artist ?: embedded?.optString("artist") ?: "")
+                        .setAlbumTitle(metadata?.album ?: embedded?.optString("album") ?: "")
+                        .build())
+                    .build()
+            }
+            .filter {
+                !NativeCore.offlineOnly ||
+                    NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, it.mediaId)
+            }
         val selected = items.indexOfFirst { it.mediaId == selectedTrackId }.coerceAtLeast(0)
         player.setMediaItems(items, selected, 0)
         player.prepare()
         player.play()
+        return playerState()
+    }
+
+    private fun setOfflineOnly(enabled: Boolean): JSONObject {
+        NativeCore.offlineOnly = enabled
+        if (!enabled) return playerState()
+        val player = controller ?: return playerState()
+        val currentTrackId = player.currentMediaItem?.mediaId
+        val retained = (0 until player.mediaItemCount)
+            .map(player::getMediaItemAt)
+            .filter {
+                NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, it.mediaId)
+            }
+        val selected = retained.indexOfFirst { it.mediaId == currentTrackId }
+        if (selected < 0) {
+            player.stop()
+            player.clearMediaItems()
+            return playerState()
+        }
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val playWhenReady = player.playWhenReady
+        player.setMediaItems(retained, selected, position)
+        player.prepare()
+        if (playWhenReady) player.play()
+        Log.d(TAG, "Offline mode retained ${retained.size} downloaded queue items")
         return playerState()
     }
 

@@ -231,9 +231,11 @@ export class NativeMusicClient {
   }
 
   /** @param {boolean} offlineOnly */
-  setOfflineOnly(offlineOnly) {
-    this.offlineOnly = Boolean(offlineOnly);
-    void nativeRequest("setOfflineOnly", { enabled: this.offlineOnly }).catch(() => {});
+  async setOfflineOnly(offlineOnly) {
+    const enabled = Boolean(offlineOnly);
+    await nativeRequest("setOfflineOnly", { enabled });
+    this.offlineOnly = enabled;
+    this.nativeQueueIds = [];
   }
 
   async cachedTrackIds() {
@@ -280,6 +282,7 @@ export class NativeMusicClient {
   async coverUrl(id) {
     if (!id) return "";
     if (this.coverUrls.has(id)) return this.coverUrls.get(id);
+    if (this.offlineOnly) throw new Error("cover is not available in Android offline mode");
     if (this.coverRequests.has(id)) return this.coverRequests.get(id);
     const request = this.withCoverSlot(async () => {
       const cover = await nativeRequest("coverArt", { handle: this.handle, coverArtId: id });

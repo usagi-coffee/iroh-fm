@@ -309,7 +309,7 @@ export class Connection {
       }
       this.connectionStep = "Preparing the music player…";
       this.app.player.stop();
-      nextClient.setOfflineOnly(this.app.library.offlineOnly);
+      await nextClient.setOfflineOnly(this.app.library.offlineOnly);
       this.client = nextClient;
       /** @type {import('../types').AlbumData[]} */
       const albums = /** @type {import('../types').AlbumData[]} */ (

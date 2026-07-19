@@ -138,7 +138,9 @@ export class Library {
       const album = this.albumByTrackId.get(track.id);
       const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
       if (albumKey !== previousAlbumKey) {
-        const albumTracks = this.tracksByAlbum.get(albumKey) ?? [track];
+        const albumTracks = (this.tracksByAlbum.get(albumKey) ?? [track]).filter(
+          (item) => !this.offlineOnly || item.cached,
+        );
         items.push({
           kind: "album",
           key: `album:${albumKey}:${track.id}`,
@@ -146,7 +148,7 @@ export class Library {
           artist: album?.album_artist ?? album?.artist ?? track.album_artist ?? track.artist,
           coverArtId: album?.cover_art_id ?? track.cover_art_id,
           durationSeconds:
-            album?.duration_seconds ??
+            (!this.offlineOnly ? album?.duration_seconds : null) ??
             albumTracks.reduce((total, item) => total + (item.duration_seconds ?? 0), 0),
           tracks: albumTracks,
           album,
@@ -163,9 +165,18 @@ export class Library {
       ? this.albums.filter(
           (album) =>
             album.track_ids.length > 0 &&
-            album.track_ids.every((id) => this.cachedTrackIds.has(id)),
+            album.track_ids.some((id) => this.cachedTrackIds.has(id)),
         )
       : this.albums;
+  }
+
+  /** Album cache state is derived exclusively from its individual track files. */
+  /** @param {import('../types').AlbumData} album */
+  isAlbumFullyCached(album) {
+    return (
+      album.track_ids.length > 0 &&
+      album.track_ids.every((id) => this.cachedTrackIds.has(id))
+    );
   }
 
   /** @param {import('../types').AlbumData} album */
@@ -227,9 +238,17 @@ export class Library {
     if (!this.offlineOnly) await this.refreshCachedTracks();
     const client = this.app.connection.client;
     if (!client) return;
-    this.offlineOnly = !this.offlineOnly;
-    client.setOfflineOnly(this.offlineOnly);
-    if (this.offlineOnly && this.app.player.currentTrack && !this.app.player.currentTrack.cached)
+    const offlineOnly = !this.offlineOnly;
+    try {
+      await client.setOfflineOnly(offlineOnly);
+    } catch (error) {
+      if (this.app.connection.client === client)
+        this.app.connection.error = friendlyError(error, "Could not change offline mode.");
+      return;
+    }
+    if (this.app.connection.client !== client) return;
+    this.offlineOnly = offlineOnly;
+    if (offlineOnly && this.app.player.currentTrack && !this.app.player.currentTrack.cached)
       this.app.player.stop();
   }
 
@@ -261,7 +280,8 @@ export class Library {
 
   /** @param {import('../types').AlbumData} album */
   tracksForAlbum(album) {
-    return this.tracksByAlbum.get(album.id) ?? [];
+    const tracks = this.tracksByAlbum.get(album.id) ?? [];
+    return this.offlineOnly ? tracks.filter((track) => track.cached) : tracks;
   }
 
   /** @param {Track[]} tracks @param {string} cacheKey */
