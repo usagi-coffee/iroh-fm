@@ -69,10 +69,25 @@
         event.isComposing ||
         event.ctrlKey ||
         event.metaKey ||
-        event.altKey ||
-        isEditableTarget(event.target)
+        event.altKey
       )
         return;
+
+      const route =
+        event.key === "F1"
+          ? resolve("/tracks")
+          : event.key === "F2"
+            ? resolve("/albums")
+            : event.key === "F3"
+              ? resolve("/starred")
+              : null;
+      if (route) {
+        event.preventDefault();
+        if (!event.repeat) void goto(route);
+        return;
+      }
+
+      if (isEditableTarget(event.target)) return;
 
       if (event.code === "Space" || event.key === " " || event.key === "Spacebar") {
         if (!event.repeat && App.player.currentTrack) {
