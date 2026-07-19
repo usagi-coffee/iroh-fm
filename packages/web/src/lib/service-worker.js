@@ -7,6 +7,7 @@ let startupPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
 let reloadRequired = false;
+let matchingWorkerActivationPending = false;
 /** @type {Set<(ready: boolean) => void>} */
 const updateListeners = new Set();
 /** @type {WeakSet<ServiceWorkerRegistration>} */
@@ -81,7 +82,11 @@ async function startServiceWorker() {
     return {};
   });
   if (dev) return;
-  if (workerInfo.buildVersion && workerInfo.buildVersion !== __BUILD_VERSION__) {
+  if (
+    workerInfo.buildVersion &&
+    workerInfo.buildVersion !== __BUILD_VERSION__ &&
+    !matchingWorkerActivationPending
+  ) {
     reloadRequired = true;
     notifyUpdateListeners();
   }
@@ -99,19 +104,38 @@ function watchRegistration(registration) {
   watchedRegistrations.add(registration);
 
   /** @param {ServiceWorker | null | undefined} worker */
-  const announceWaitingWorker = (worker) => {
+  const announceWaitingWorker = async (worker) => {
     if (!worker || !navigator.serviceWorker.controller) return;
+    const workerInfo = await pingWorker(worker).catch(() => ({}));
+    if (workerInfo.buildVersion === __BUILD_VERSION__) {
+      matchingWorkerActivationPending = true;
+      waitingWorker = undefined;
+      reloadRequired = false;
+      notifyUpdateListeners();
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => {
+          matchingWorkerActivationPending = false;
+          waitingWorker = undefined;
+          reloadRequired = false;
+          notifyUpdateListeners();
+        },
+        { once: true },
+      );
+      worker.postMessage({ type: "skip-waiting" });
+      return;
+    }
     waitingWorker = worker;
     notifyUpdateListeners();
   };
 
-  announceWaitingWorker(registration.waiting);
+  void announceWaitingWorker(registration.waiting);
   registration.addEventListener("updatefound", () => {
     const installing = registration.installing;
     if (!installing) return;
     installing.addEventListener("statechange", () => {
       if (installing.state === "installed")
-        announceWaitingWorker(registration.waiting ?? installing);
+        void announceWaitingWorker(registration.waiting ?? installing);
     });
   });
 }
