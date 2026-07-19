@@ -8,7 +8,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('desktop-{0}', github.event.workflow_run.head_branch) || format('desktop-skip-{0}', github.run_id) }}
@@ -113,6 +113,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Require release token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "RELEASE_TOKEN must be a fine-grained token with Contents: read and write access." >&2
+            exit 1
+          fi
+
       - name: Download all desktop bundles
         uses: actions/download-artifact@v4
         with:
@@ -129,7 +138,7 @@ jobs:
 
       - name: Publish complete Desktop release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           mapfile -d '' release_assets < <(find release -type f -print0)
