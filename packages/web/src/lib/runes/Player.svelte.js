@@ -27,6 +27,8 @@ export class Player {
   /** @type {number | null} */
   audioDownloadGeneration = null;
   nativeStatePending = false;
+  nativeSeekGeneration = 0;
+  nativeSeekPending = false;
   /** @type {string | null} */
   nativePlayPendingTrackId = null;
 
@@ -287,9 +289,20 @@ export class Player {
   /** @param {string | number} value */
   seek(value) {
     if (this.nativePlayback()) {
+      const generation = ++this.nativeSeekGeneration;
+      this.nativeSeekPending = true;
       void this.app.connection.client
         .playerCommand("seek", { seconds: Number(value) })
-        .then((/** @type {any} */ state) => this.applyNativeState(state));
+        .then((/** @type {any} */ state) => {
+          if (generation === this.nativeSeekGeneration) this.applyNativeState(state, true);
+        })
+        .catch((/** @type {unknown} */ error) => {
+          if (generation === this.nativeSeekGeneration)
+            this.error = friendlyError(error, "Could not seek in this track.");
+        })
+        .finally(() => {
+          if (generation === this.nativeSeekGeneration) this.nativeSeekPending = false;
+        });
       return;
     }
     const audio = this.audio;
@@ -343,8 +356,8 @@ export class Player {
     }
   }
 
-  /** @param {any} state */
-  applyNativeState(state) {
+  /** @param {any} state @param {boolean} [applySeekPosition] */
+  applyNativeState(state, applySeekPosition = false) {
     if (!state || !this.nativePlayback()) return;
     this.applyNativeTransfers(state);
     if (
@@ -370,7 +383,8 @@ export class Player {
     }
     this.playing = Boolean(state.playing);
     this.audioLoading = Boolean(state.loading);
-    this.currentTime = Number(state.position) || 0;
+    if (!this.nativeSeekPending || applySeekPosition)
+      this.currentTime = Number(state.position) || 0;
     this.duration = Number(state.duration) || track?.duration_seconds || 0;
     this.repeat = Boolean(state.repeat);
     this.shuffle = Boolean(state.shuffle);
