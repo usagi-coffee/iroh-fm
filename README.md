@@ -125,15 +125,6 @@ Additional adapter options:
 
 Be careful when binding the Subsonic adapter beyond localhost: unlike the iroh transport, it exposes an HTTP service that you must secure appropriately.
 
-## What the server does
-
-- scans a local music directory and extracts tags
-- builds a normalized artist, album, track, and artwork index
-- persists metadata in SQLite for fast warm starts
-- watches the library for real filesystem changes
-- serves library operations, cover art, and audio over iroh
-- keeps protocol-specific frontends outside the core server
-
 ## Workspace
 
 ```text
