@@ -24,7 +24,7 @@ use tokio::sync::Mutex as AsyncMutex;
 const TRACK_CROSSFADE: Duration = Duration::from_millis(1_500);
 const CROSSFADE_STEPS: u32 = 30;
 #[cfg(all(desktop, not(debug_assertions)))]
-const LOCALHOST_PORT: u16 = 13_592;
+const REMOTE_APP_URL: &str = "https://usagi-coffee.github.io/iroh-fm/";
 
 #[derive(Default)]
 struct NativeRegistry {
@@ -1107,19 +1107,12 @@ pub fn run() {
             .build(),
     );
 
-    #[cfg(all(desktop, not(debug_assertions)))]
-    let builder = builder.plugin(
-        tauri_plugin_localhost::Builder::new(LOCALHOST_PORT)
-            .host("127.0.0.1")
-            .build(),
-    );
-
     builder
         .setup(move |_app| {
             #[cfg(all(desktop, not(debug_assertions)))]
             _app.get_webview_window("main")
                 .ok_or_else(|| std::io::Error::other("main webview window is missing"))?
-                .navigate(format!("http://127.0.0.1:{LOCALHOST_PORT}").parse()?)?;
+                .navigate(REMOTE_APP_URL.parse()?)?;
 
             Ok(())
         })
