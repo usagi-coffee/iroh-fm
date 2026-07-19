@@ -107,7 +107,7 @@ export class Player {
     this.audioLoading = true;
     this.playing = false;
     if (client.native) {
-      const downloadGeneration = track.startDownload();
+      const downloadGeneration = track.cached ? null : track.startDownload();
       this.nativePlayPendingTrackId = track.id;
       try {
         const state = await client.playNative(track, sourceQueue);
@@ -118,7 +118,7 @@ export class Player {
       } catch (error) {
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
-          track.stopDownload(downloadGeneration);
+          if (downloadGeneration !== null) track.stopDownload(downloadGeneration);
           this.audioLoading = false;
           this.error = friendlyError(error, "This track could not be played.");
         }
@@ -340,12 +340,13 @@ export class Player {
       for (const [id, transfer] of Object.entries(state.transfers)) {
         const queuedTrack = this.app.library.tracksById.get(id);
         if (!queuedTrack || !transfer || typeof transfer !== "object") continue;
+        if (queuedTrack.cached) continue;
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);
         queuedTrack.downloading = Boolean(transfer.active) && (total <= 0 || received < total);
       }
-    } else if (track) {
+    } else if (track && !track.cached) {
       const received = Math.max(0, Number(state.transferReceived) || 0);
       const total = Math.max(0, Number(state.transferTotal) || Number(track.file_size) || 0);
       track.updateProgress(received, total);
