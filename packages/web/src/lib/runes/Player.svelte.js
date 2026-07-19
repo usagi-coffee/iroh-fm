@@ -18,7 +18,7 @@ export class Player {
   error = $state("");
   currentTime = $state(0);
   duration = $state(0);
-  volume = $state(0.8);
+  volume = $state(0.5);
   repeat = $state(false);
   shuffle = $state(false);
   generation = 0;

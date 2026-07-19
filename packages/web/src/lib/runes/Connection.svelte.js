@@ -73,9 +73,11 @@ export class Connection {
       localStorage.getItem("iroh-fm-starred-key") ??
       localStorage.getItem("iroh-fm-loved-key") ??
       "";
-    const storedVolume = Number(localStorage.getItem("iroh-fm-volume"));
-    if (Number.isFinite(storedVolume))
-      this.app.player.volume = Math.min(1, Math.max(0, storedVolume));
+    const storedVolume = localStorage.getItem("iroh-fm-volume");
+    if (storedVolume !== null) {
+      const volume = Number(storedVolume);
+      if (Number.isFinite(volume)) this.app.player.volume = Math.min(1, Math.max(0, volume));
+    }
   }
 
   readStoredRelays() {
