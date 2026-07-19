@@ -299,6 +299,15 @@ export class Player {
     if (duration && audio) audio.currentTime = Math.min(Number(value), duration);
   }
 
+  /** @param {number} seconds */
+  seekBy(seconds) {
+    if (!this.currentTrack) return;
+    const duration = this.duration || this.currentTrack.duration_seconds || Number.POSITIVE_INFINITY;
+    const position = Math.max(0, Math.min(duration, this.currentTime + seconds));
+    this.currentTime = position;
+    this.seek(position);
+  }
+
   /** @param {string | number} value */
   changeVolume(value) {
     this.volume = Math.min(1, Math.max(0, Number(value)));

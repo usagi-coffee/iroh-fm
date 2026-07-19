@@ -72,7 +72,12 @@
       )
         return;
 
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        if (!App.player.currentTrack) return;
+        event.preventDefault();
+        event.stopPropagation();
+        App.player.seekBy(event.key === "ArrowRight" ? 5 : -5);
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         if (!tracks.length) return;
         event.preventDefault();
         event.stopPropagation();

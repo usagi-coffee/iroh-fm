@@ -125,6 +125,7 @@
           step="0.01"
           value={App.player.volume}
           oninput={(event) => App.player.changeVolume(event.currentTarget.value)}
+          onchange={(event) => event.currentTarget.blur()}
           class="accent-teal h-1 w-20 cursor-pointer"
           aria-label="Volume"
         />
