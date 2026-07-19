@@ -40,7 +40,7 @@ jobs:
           - platform: macos-latest
             cache_key: macos-arm64
             rust_target: aarch64-apple-darwin
-            tauri_args: --target aarch64-apple-darwin --config src-tauri/tauri.ci.conf.json
+            tauri_args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.ci.conf.json
     runs-on: ${{ matrix.platform }}
 
     steps:
