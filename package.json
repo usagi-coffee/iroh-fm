@@ -13,6 +13,7 @@
     "lint": "oxlint .; cargo clippy"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/bun": "latest",
     "oxfmt": "latest",
     "oxlint": "latest",

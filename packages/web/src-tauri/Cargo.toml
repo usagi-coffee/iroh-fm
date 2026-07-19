@@ -1,0 +1,27 @@
+[package]
+name = "iroh-fm-desktop"
+version.workspace = true
+description = "Native desktop shell for iroh-fm"
+edition = "2024"
+publish = false
+
+[lib]
+name = "iroh_fm_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+base64 = "0.22"
+client = { path = "../../../crates/client" }
+iroh.workspace = true
+iroh-tickets.workspace = true
+log = "0.4"
+protocol = { path = "../../../crates/protocol" }
+rodio = "0.22.2"
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.11.3", features = [] }
+tauri-plugin-log = "2"
+tokio.workspace = true

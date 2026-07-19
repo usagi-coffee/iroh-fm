@@ -6,6 +6,7 @@ members = [
   "crates/server",
   "crates/subsonic",
   "crates/web-wasm",
+  "packages/web/src-tauri",
 ]
 resolver = "3"
 

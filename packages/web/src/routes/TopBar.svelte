@@ -8,7 +8,10 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { connectionAddressLabel, formatBytes, friendlyError } from "$lib/utils.js";
 
+  import CloseIcon from "virtual:icons/ri/close-line";
   import DisconnectIcon from "virtual:icons/ri/logout-box-r-line";
+  import MaximizeIcon from "virtual:icons/ri/checkbox-blank-line";
+  import MinimizeIcon from "virtual:icons/ri/subtract-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
   import SettingsIcon from "virtual:icons/ri/settings-3-line";
   import OfflineIcon from "virtual:icons/ri/wifi-off-line";
@@ -17,6 +20,13 @@
   /** @type {Props} */
   let { updateReady, onupdate } = $props();
   let path = $derived(page.url.pathname.replace(/\/$/, ""));
+  const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  /** @param {'minimize' | 'toggleMaximize' | 'close'} command */
+  async function windowCommand(command) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow()[command]();
+  }
 
   async function confirmDisconnect() {
     try {
@@ -38,7 +48,10 @@
   }
 </script>
 
-<header class="border-surface0 bg-crust text-2xs flex h-9 min-w-0 items-center border-b">
+<header
+  data-tauri-drag-region={desktop ? "" : undefined}
+  class="border-surface0 bg-crust text-2xs flex h-9 min-w-0 items-center border-b"
+>
   <a
     href={resolve("/tracks")}
     class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
@@ -70,7 +83,13 @@
         : 'text-overlay1'}">STARRED</a
     >
   </nav>
-  <div class="ml-auto flex h-full min-w-0 items-center">
+  <div
+    data-tauri-drag-region={desktop ? "" : undefined}
+    ondblclick={() => desktop && windowCommand("toggleMaximize")}
+    role="presentation"
+    class="h-full min-w-4 flex-1"
+  ></div>
+  <div class="flex h-full min-w-0 items-center">
     <div
       class="border-surface0 text-4xs text-overlay1 desktop:flex hidden h-full min-w-0 items-center gap-2 border-l px-3 font-mono"
       title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"} · ${formatBytes(App.connection.info.received_bytes)} received`}
@@ -117,5 +136,24 @@
       class="border-surface0 text-overlay1 hover:bg-surface0 hover:text-red grid h-full w-9 place-items-center border-l"
       title="Disconnect"><DisconnectIcon class="text-sm" /></button
     >
+    {#if desktop}<button
+        type="button"
+        onclick={() => windowCommand("minimize")}
+        class="border-surface0 text-overlay1 hover:bg-surface0 hover:text-text grid h-full w-10 place-items-center border-l"
+        title="Minimize"
+        aria-label="Minimize window"><MinimizeIcon class="text-sm" /></button
+      ><button
+        type="button"
+        onclick={() => windowCommand("toggleMaximize")}
+        class="border-surface0 text-overlay1 hover:bg-surface0 hover:text-text grid h-full w-10 place-items-center border-l"
+        title="Maximize or restore"
+        aria-label="Maximize or restore window"><MaximizeIcon class="text-xs" /></button
+      ><button
+        type="button"
+        onclick={() => windowCommand("close")}
+        class="border-surface0 text-overlay1 hover:bg-red hover:text-crust grid h-full w-10 place-items-center border-l"
+        title="Close"
+        aria-label="Close window"><CloseIcon class="text-base" /></button
+      >{/if}
   </div>
 </header>

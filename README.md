@@ -149,6 +149,41 @@ playback position, download progress, and controls back into the Svelte UI.
 Download the signed APK from [GitHub Releases](https://github.com/usagi-coffee/iroh-fm/releases).
 See [`android/README.md`](android/README.md) for build, signing, and Digital Asset Links setup.
 
+## Desktop app
+
+The Tauri desktop app keeps the same Svelte library, queue, and controls as the
+web player while moving both networking and audio playback into Rust. The shared
+native iroh client handles endpoint discovery and can negotiate a direct path to
+the music server, falling back to its configured relay when necessary.
+
+Desktop audio is decoded and played by [Rodio](https://github.com/RustAudio/rodio)
+instead of WebKitGTK's browser media pipeline. The current track therefore does
+not depend on JavaScript audio or GStreamer playback. The native player prepares
+the next queue item ahead of time for uninterrupted changes, and selecting a new
+track overlaps both songs with a 1.5-second fade-out/fade-in transition. Playback
+position, loading state, queue changes, and play, pause, seek, volume, next, and
+previous controls are synchronized with the Svelte interface through the common
+player facade.
+
+Run it in development mode or build an installer from `packages/web`:
+
+```sh
+bun run desktop:dev
+bun run desktop:build
+```
+
+On Fedora, build only the native RPM package to avoid requiring AppImage's
+`linuxdeploy` tooling:
+
+```sh
+bun run desktop:build:rpm
+sudo dnf install ../../target/release/bundle/rpm/*.rpm
+```
+
+The Tauri crate inherits the Rust workspace version. Changes under `src-tauri`
+are excluded from Vite's file watcher so Rust rebuilds do not trigger redundant
+frontend reloads.
+
 ## Workspace
 
 ```text
@@ -160,7 +195,8 @@ crates/
   web-wasm/     browser wasm-bindgen bridge
 packages/
   client/       reusable JavaScript/WASM browser client
-  web/          fully static Svelte/Tailwind player
+  web/          Svelte/Tailwind player and Tauri desktop shell
+    src-tauri/  native desktop iroh transport and Rodio player
 android/        TWA shell and Media3 foreground playback service
 ```
 

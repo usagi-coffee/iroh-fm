@@ -57,5 +57,8 @@ export default defineConfig({
     fs: {
       allow: [workspaceRoot],
     },
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
   },
 });

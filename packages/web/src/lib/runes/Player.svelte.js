@@ -36,6 +36,10 @@ export class Player {
     subscribeNativePlayerState((/** @type {any} */ state) => this.applyNativeState(state));
   }
 
+  nativePlayback(client = this.app.connection.client) {
+    return Boolean(client?.native || client?.nativePlayback);
+  }
+
   /** @param {HTMLAudioElement} element */
   attachAudio = (element) => {
     this.audio = element;
@@ -106,7 +110,7 @@ export class Player {
     this.duration = track.duration_seconds || 0;
     this.audioLoading = true;
     this.playing = false;
-    if (client.native) {
+    if (this.nativePlayback(client)) {
       const downloadGeneration = track.cached ? null : track.startDownload();
       this.nativePlayPendingTrackId = track.id;
       try {
@@ -182,7 +186,7 @@ export class Player {
     this.app.library.selectedTrackId = track.id;
     if (
       this.currentTrack?.id === track.id &&
-      (this.app.connection.client?.native || this.audioSource) &&
+      (this.nativePlayback() || this.audioSource) &&
       !this.error
     )
       await this.toggle();
@@ -194,7 +198,7 @@ export class Player {
     this.nativePlayPendingTrackId = null;
     const track = this.currentTrack;
     const downloadGeneration = this.audioDownloadGeneration;
-    if (this.app.connection.client?.native)
+    if (this.nativePlayback())
       void this.app.connection.client.playerCommand("stop").catch(() => {});
     this.audio?.pause();
     this.audioSource?.dispose();
@@ -213,7 +217,7 @@ export class Player {
   }
 
   async toggle() {
-    if (this.app.connection.client?.native) {
+    if (this.nativePlayback()) {
       if (!this.currentTrack) return;
       this.applyNativeState(await this.app.connection.client.playerCommand("toggle"));
       return;
@@ -240,7 +244,7 @@ export class Player {
 
   /** @param {number} direction */
   async skip(direction) {
-    if (this.app.connection.client?.native) {
+    if (this.nativePlayback()) {
       this.applyNativeState(
         await this.app.connection.client.playerCommand(direction < 0 ? "previous" : "next"),
       );
@@ -261,7 +265,7 @@ export class Player {
 
   /** @param {string | number} value */
   seek(value) {
-    if (this.app.connection.client?.native) {
+    if (this.nativePlayback()) {
       void this.app.connection.client
         .playerCommand("seek", { seconds: Number(value) })
         .then((/** @type {any} */ state) => this.applyNativeState(state));
@@ -278,7 +282,7 @@ export class Player {
   changeVolume(value) {
     this.volume = Math.min(1, Math.max(0, Number(value)));
     localStorage.setItem("iroh-fm-volume", String(this.volume));
-    if (this.app.connection.client?.native) {
+    if (this.nativePlayback()) {
       void this.app.connection.client.playerCommand("volume", { value: this.volume });
       return;
     }
@@ -287,18 +291,18 @@ export class Player {
 
   toggleRepeat() {
     this.repeat = !this.repeat;
-    if (this.app.connection.client?.native)
+    if (this.nativePlayback())
       void this.app.connection.client.playerCommand("repeat", { enabled: this.repeat });
   }
 
   toggleShuffle() {
     this.shuffle = !this.shuffle;
-    if (this.app.connection.client?.native)
+    if (this.nativePlayback())
       void this.app.connection.client.playerCommand("shuffle", { enabled: this.shuffle });
   }
 
   async refreshNativeState(client = this.app.connection.client) {
-    if (!client?.native || this.nativeStatePending) return;
+    if (!this.nativePlayback(client) || this.nativeStatePending) return;
     this.nativeStatePending = true;
     try {
       this.applyNativeState(await client.playerState());
@@ -311,7 +315,7 @@ export class Player {
 
   /** @param {any} state */
   applyNativeState(state) {
-    if (!state || !this.app.connection.client?.native) return;
+    if (!state || !this.nativePlayback()) return;
     if (
       this.nativePlayPendingTrackId &&
       state.trackId !== this.nativePlayPendingTrackId

@@ -175,6 +175,24 @@ export class MusicClient {
     return JSON.parse(this.inner.connectionInfo());
   }
 
+  get nativePlayback() {
+    return Boolean(this.inner.nativePlayback);
+  }
+
+  /** @param {{id: string}} track @param {Array<{id: string}>} queue */
+  playNative(track, queue) {
+    return this.inner.playNative(track, queue);
+  }
+
+  /** @param {string} command @param {Record<string, any>} [payload] */
+  playerCommand(command, payload = {}) {
+    return this.inner.playerCommand(command, payload);
+  }
+
+  playerState() {
+    return this.inner.playerState();
+  }
+
   /** @param {boolean} offlineOnly */
   setOfflineOnly(offlineOnly) {
     this.offlineOnly = Boolean(offlineOnly);
@@ -364,7 +382,7 @@ export class MusicClient {
           this.notifyTrackProgress(id, received, total);
         };
         reportProgress(0, fileSize);
-        if (canUseMediaSource(contentType)) {
+        if (this.inner.supportsProgressivePlayback !== false && canUseMediaSource(contentType)) {
           return new ProgressiveTrackSource(
             stream,
             contentType,
