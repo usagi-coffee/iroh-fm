@@ -18,9 +18,7 @@ use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-#[cfg(all(desktop, not(debug_assertions)))]
-use tauri::Manager;
-use tauri::{State, ipc::Response};
+use tauri::{Manager, State, ipc::Response};
 use tokio::sync::Mutex as AsyncMutex;
 
 const TRACK_CROSSFADE: Duration = Duration::from_millis(1_500);
@@ -298,6 +296,26 @@ fn sync_audio(audio: &mut DesktopAudio) {
     let remaining = audio.player.as_ref().map_or(0, |player| player.len());
     while audio.active.len() > remaining {
         audio.active.pop_front();
+    }
+}
+
+fn close_audio_device(audio: &mut DesktopAudio) {
+    audio.generation = audio.generation.saturating_add(1);
+    if let Some(player) = audio.player.take() {
+        player.stop();
+    }
+    // Drop the CPAL stream after the player so ALSA/PipeWire sees an orderly
+    // disconnect. A later play request will open a completely new device.
+    audio.device.take();
+    audio.active.clear();
+    audio.queue.clear();
+    audio.prefetching = None;
+    audio.loading = false;
+}
+
+fn close_native_audio(state: &DesktopState) {
+    if let Ok(mut registry) = state.0.lock() {
+        close_audio_device(&mut registry.audio);
     }
 }
 
@@ -1040,9 +1058,7 @@ fn desktop_close(state: State<'_, DesktopState>, handle: u64) -> Result<(), Stri
         .map_err(|_| "desktop native registry lock poisoned".to_string())?;
     registry.clients.remove(&handle);
     if registry.audio.client_handle == handle {
-        registry.audio.player.take();
-        registry.audio.queue.clear();
-        registry.audio.active.clear();
+        close_audio_device(&mut registry.audio);
     }
     Ok(())
 }
@@ -1099,9 +1115,9 @@ pub fn run() {
     );
 
     builder
-        .setup(move |app| {
+        .setup(move |_app| {
             #[cfg(all(desktop, not(debug_assertions)))]
-            app.get_webview_window("main")
+            _app.get_webview_window("main")
                 .ok_or_else(|| std::io::Error::other("main webview window is missing"))?
                 .navigate(format!("http://127.0.0.1:{LOCALHOST_PORT}").parse()?)?;
 
@@ -1131,6 +1147,14 @@ pub fn run() {
             desktop_endpoint_id_for_secret,
             desktop_parse_ticket,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running iroh-fm desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building iroh-fm desktop")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                close_native_audio(&app.state::<DesktopState>());
+            }
+        });
 }
