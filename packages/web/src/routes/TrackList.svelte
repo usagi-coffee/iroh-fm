@@ -176,6 +176,7 @@
     if (!trackId) return;
     const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
+    App.library.selectedTrackId = trackId;
     let attempts = 120;
     let cancelled = false;
     let centeredFrames = 0;
