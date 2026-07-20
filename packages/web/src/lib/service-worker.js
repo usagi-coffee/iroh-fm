@@ -114,7 +114,9 @@ export async function ensure_service_worker(build) {
   startMonitor();
   const registration = await getRegistration();
   await inspect(registration);
-  await checkForUpdate();
+  await checkForUpdate().catch((error) => logError("check:unavailable", error));
+  if (availableBuild && nativeNewerThanWeb(build))
+    await install(availableBuild).catch((error) => logError("compatibility:check-failed", error));
   return {
     updateReady: updateReady(),
     nativeUpgrade,
@@ -408,12 +410,19 @@ export async function activateServiceWorkerUpdate() {
     location.reload();
   } catch (error) {
     logError("activation:fallback", error);
+    try {
+      await remoteVersion();
+    } catch (networkError) {
+      logError("activation:deferred-offline", networkError);
+      return;
+    }
     await resetAndReload("activation-failed");
   }
 }
 
 export async function forceServiceWorkerUpdate() {
   if (DEVELOPMENT || !("serviceWorker" in navigator)) return location.reload();
+  await remoteVersion();
   await resetAndReload("manual-reset");
 }
 
