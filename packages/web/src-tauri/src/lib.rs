@@ -444,15 +444,15 @@ pub fn run() {
             main_webview.eval(
                 r#"
                 if ('serviceWorker' in navigator) {
-                  navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+                  navigator.serviceWorker.getRegistration().then(async (registration) => {
+                    if (!registration) return;
                     const controlled = Boolean(navigator.serviceWorker.controller);
-                    await Promise.all(registrations.map((registration) => registration.unregister()));
-                    if (registrations.length) {
-                      console.info('[tauri dev] unregistered service workers', {
-                        count: registrations.length,
-                        controlled,
-                      });
-                    }
+                    const unregistered = await registration.unregister();
+                    console.info('[tauri dev] unregistered service worker', {
+                      scope: registration.scope,
+                      unregistered,
+                      controlled,
+                    });
                     if (controlled) location.reload();
                   }).catch((error) => console.error('[tauri dev] service worker cleanup failed', error));
                 }

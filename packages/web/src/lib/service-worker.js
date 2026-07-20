@@ -27,6 +27,8 @@ let installingBuild;
 let waitingWorker;
 /** @type {string | undefined} */
 let availableBuild;
+/** @type {string | undefined} */
+let activeBuild;
 /** @type {any} */
 let nativeBuild;
 /** @type {ReturnType<typeof nativeRequirement>} */
@@ -114,6 +116,12 @@ export async function ensure_service_worker(build) {
   startMonitor();
   const registration = await getRegistration();
   await inspect(registration);
+  if (activeBuild && activeBuild !== PAGE_BUILD) {
+    availableBuild = PAGE_BUILD;
+    log("active:behind-page", { activeBuild, pageBuild: PAGE_BUILD });
+    notifyUpdates();
+    void install(PAGE_BUILD).catch((error) => logError("active:upgrade-failed", error));
+  }
   await checkForUpdate().catch((error) => logError("check:unavailable", error));
   if (availableBuild && nativeNewerThanWeb(build))
     await install(availableBuild).catch((error) => logError("compatibility:check-failed", error));
@@ -155,6 +163,7 @@ async function inspect(registration) {
     return null;
   });
   if (metadata) {
+    activeBuild = metadata.buildVersion;
     log("active:metadata", metadataState(metadata, registration.active));
     if (!availableBuild) applyWorkerMetadata(metadata);
   }
@@ -428,20 +437,20 @@ export async function forceServiceWorkerUpdate() {
 
 /** @param {string} reason */
 async function resetAndReload(reason) {
-  const registrations = await navigator.serviceWorker.getRegistrations();
-  await Promise.all(registrations.map((registration) => registration.unregister()));
+  const registration = await navigator.serviceWorker.getRegistration();
+  const unregistered = registration ? await registration.unregister() : false;
   const caches = await removeShellCaches();
-  log("reset:reload", { reason, registrations: registrations.length, caches });
+  log("reset:reload", { reason, unregistered, caches });
   location.reload();
 }
 
 async function disableDevelopmentWorker() {
-  const registrations = await navigator.serviceWorker.getRegistrations();
-  if (!registrations.length) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (!registration) return;
   const controlled = Boolean(navigator.serviceWorker.controller);
-  await Promise.all(registrations.map((registration) => registration.unregister()));
+  const unregistered = await registration.unregister();
   const caches = await removeShellCaches();
-  log("development:cleanup", { registrations: registrations.length, caches, controlled });
+  log("development:cleanup", { unregistered, caches, controlled });
   if (controlled) location.reload();
 }
 
