@@ -285,7 +285,11 @@ class MainActivity : ComponentActivity() {
         "request" -> executeBackendRequest(payload)
         "coverArt" -> JSONObject(
             NativeCore.unwrap(
-                NativeCore.coverArt(payload.getLong("handle"), payload.getString("coverArtId")),
+                NativeCore.coverArt(
+                    payload.getLong("handle"),
+                    payload.getString("coverArtId"),
+                    payload.optBoolean("fullQuality", false),
+                ),
             ),
         )
         "connectionInfo" -> JSONObject(NativeCore.unwrap(NativeCore.connectionInfo(payload.getLong("handle"))))
