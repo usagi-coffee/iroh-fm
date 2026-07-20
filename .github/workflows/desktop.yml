@@ -128,6 +128,12 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
       - name: Download all desktop bundles
         uses: actions/download-artifact@v8
         with:
@@ -137,10 +143,10 @@ jobs:
 
       - name: Set release metadata
         run: |
-          short_sha="${RELEASE_SHA::7}"
-          release_date="$(date -u +%Y%m%d)"
+          epoch_commit="$(git log --format=%H --grep='^desktop:' -1 "$RELEASE_SHA")"
+          epoch="$(git rev-list --count "$epoch_commit")"
           echo "RELEASE_TAG=desktop-$RELEASE_SHA" >> "$GITHUB_ENV"
-          echo "RELEASE_TITLE=Desktop $release_date ($short_sha)" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Desktop v$epoch" >> "$GITHUB_ENV"
 
       - name: Publish complete Desktop release
         env:
