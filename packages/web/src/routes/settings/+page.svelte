@@ -40,6 +40,7 @@
     kind: "checking",
     label: "SW CHECKING",
     detail: "Reading service worker status.",
+    hash: "—",
   });
   let draftEndpointId = $derived(
     settings.secret.trim()
@@ -417,6 +418,10 @@
         <div class="text-4xs text-overlay0 flex shrink-0 flex-col items-end gap-0.5 font-mono">
           <div class="flex items-center gap-2">
             <span title="Remote web build commit">WEB {__BUILD_COMMIT__}</span>
+            <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
+            <span title="Running service worker build commit">
+              SW {serviceWorkerStatus.hash}
+            </span>
             <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>
             <span
               title={serviceWorkerStatus.detail}

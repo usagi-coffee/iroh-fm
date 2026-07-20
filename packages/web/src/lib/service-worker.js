@@ -228,6 +228,7 @@ export function subscribeToNativeUpgrade(listener) {
  *   kind: "active" | "checking" | "development" | "error" | "installing" | "off" | "unsupported" | "update-ready";
  *   label: string;
  *   detail: string;
+ *   hash: string;
  * }} ServiceWorkerStatus
  */
 
@@ -238,12 +239,14 @@ export async function getServiceWorkerStatus() {
       kind: "development",
       label: "SW DEV",
       detail: "The production service worker is disabled during development.",
+      hash: "—",
     };
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator))
     return {
       kind: "unsupported",
       label: "SW UNSUPPORTED",
       detail: "This webview does not support service workers.",
+      hash: "—",
     };
 
   try {
@@ -253,40 +256,47 @@ export async function getServiceWorkerStatus() {
         kind: "off",
         label: "SW OFF",
         detail: "No service worker is registered for this application.",
+        hash: "—",
       };
+    const active = registration.active ?? navigator.serviceWorker.controller;
+    const info = active ? await pingWorker(active).catch(() => ({})) : {};
+    const hash = workerHash(active ?? registration.installing, info);
     if (registration.waiting || updateReady())
       return {
         kind: "update-ready",
         label: "SW UPDATE READY",
         detail: "A complete application update is cached and waiting for activation.",
+        hash,
       };
     if (registration.installing)
       return {
         kind: "installing",
         label: "SW INSTALLING",
         detail: "A complete application update is being cached.",
+        hash,
       };
 
-    const worker = registration.active ?? navigator.serviceWorker.controller;
-    if (!worker)
+    if (!active)
       return {
         kind: "checking",
         label: "SW STARTING",
         detail: "The service worker registration is settling.",
+        hash,
       };
 
-    const info = await pingWorker(worker).catch(() => ({}));
     if (info.updateReady)
       return {
         kind: "update-ready",
         label: "SW UPDATE READY",
         detail: "A complete application update is cached and waiting for your approval.",
+        hash,
       };
     if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__)
       return {
         kind: "update-ready",
         label: "SW RELOAD READY",
         detail: `The page uses build ${__BUILD_VERSION__}; the active shell uses ${info.buildVersion}.`,
+        hash,
       };
     return {
       kind: "active",
@@ -294,6 +304,7 @@ export async function getServiceWorkerStatus() {
       detail: info.version
         ? `Service worker ${info.version} is serving application build ${info.buildVersion ?? __BUILD_VERSION__}.`
         : "The active service worker did not report its version.",
+      hash,
     };
   } catch (error) {
     return {
@@ -301,8 +312,16 @@ export async function getServiceWorkerStatus() {
       label: "SW ERROR",
       detail:
         error instanceof Error ? error.message : "The service worker status could not be read.",
+      hash: "—",
     };
   }
+}
+
+/** @param {ServiceWorker | null} worker @param {Record<string, any>} info */
+function workerHash(worker, info) {
+  const scriptVersion = worker ? new URL(worker.scriptURL).searchParams.get("v") : null;
+  const value = info.workerBuildVersion ?? scriptVersion ?? info.version;
+  return value ? String(value).slice(0, 12) : "—";
 }
 
 /** @param {(status: ServiceWorkerStatus) => void} listener */
