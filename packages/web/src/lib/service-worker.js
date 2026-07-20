@@ -20,8 +20,6 @@ let nativeUpgrade = null;
 const updateListeners = new Set();
 /** @type {Set<(upgrade: ReturnType<typeof nativeRequirement>) => void>} */
 const nativeUpgradeListeners = new Set();
-/** @type {WeakSet<ServiceWorkerRegistration>} */
-const watchedRegistrations = new WeakSet();
 
 function updateReady() {
   return Boolean(waitingWorker) || reloadRequired;
@@ -72,47 +70,19 @@ export function currentNativeRequirement(buildInfo) {
   });
 }
 
-/** @param {ServiceWorkerRegistration} registration */
-function watch(registration) {
-  if (watchedRegistrations.has(registration)) return;
-  watchedRegistrations.add(registration);
-
-  const syncWaitingWorker = () => {
-    if (registration.waiting && (registration.active || navigator.serviceWorker.controller)) {
-      waitingWorker = registration.waiting;
-    }
-    notify();
-  };
-
-  syncWaitingWorker();
-  registration.addEventListener("updatefound", () => {
-    notify();
-    const installing = registration.installing;
-    installing?.addEventListener("statechange", () => {
-      if (
-        installing.state === "installed" &&
-        (registration.active || navigator.serviceWorker.controller)
-      ) {
-        waitingWorker = registration.waiting ?? installing;
-        notify();
-      } else if (installing.state === "redundant") notify();
-    });
-  });
-}
-
 async function register() {
   const existing = await navigator.serviceWorker.getRegistration();
   const remoteVersion = dev ? null : await fetchRemoteVersion().catch(() => null);
   let registration;
   try {
-    registration = await registerWorker(remoteVersion);
+    registration =
+      !remoteVersion && existing?.active ? existing : await registerWorker(remoteVersion);
   } catch (error) {
     // Registration may need the network, while an already installed worker
     // must remain usable offline.
     if (!existing?.active) throw error;
     registration = existing;
   }
-  watch(registration);
   await requireActiveWorker(registration);
   const active = registration.active;
   if (!dev && active) {
@@ -212,19 +182,7 @@ async function checkForUpdate() {
 
   const remoteVersion = await fetchRemoteVersion().catch(() => null);
   const workerVersion = info.workerBuildVersion ?? info.version;
-  if (remoteVersion && remoteVersion !== workerVersion) {
-    watch(await registerWorker(remoteVersion));
-    return;
-  }
-
-  try {
-    await registration.update();
-  } catch (error) {
-    // WebKitGTK throws this while an old unregister operation is settling.
-    // It is transient and must never prevent the application from starting.
-    if (error instanceof DOMException && error.name === "InvalidStateError") return;
-    throw error;
-  }
+  if (remoteVersion && remoteVersion !== workerVersion) await registerWorker(remoteVersion);
 }
 
 /** @param {string | null} version */
@@ -389,8 +347,7 @@ export async function forceServiceWorkerUpdate() {
     return;
   }
 
-  let registration = await getRegistration();
-  const remoteVersion = await fetchRemoteVersion().catch(() => null);
+  const registration = await getRegistration();
   if (registration.active) {
     const info = await pingWorker(registration.active).catch(() => ({}));
     if (info.updateReady) {
@@ -398,12 +355,12 @@ export async function forceServiceWorkerUpdate() {
       await activateServiceWorkerUpdate();
       return;
     }
+    const remoteVersion = await fetchRemoteVersion();
     const workerVersion = info.workerBuildVersion ?? info.version;
-    if (remoteVersion && remoteVersion !== workerVersion) {
-      registration = await registerWorker(remoteVersion);
-      watch(registration);
-      const candidate = workerForVersion(registration, remoteVersion);
-      const worker = await waitForInstallation(candidate ?? null);
+    if (remoteVersion !== workerVersion) {
+      const updated = await registerWorker(remoteVersion);
+      const candidate = workerForVersion(updated, remoteVersion);
+      const worker = await waitForInstallation(candidate ?? updated.installing);
       if (!worker) throw new Error("The cache-busted service worker was not installed.");
       waitingWorker = worker;
       await activateServiceWorkerUpdate();
@@ -414,17 +371,6 @@ export async function forceServiceWorkerUpdate() {
     waitingWorker = registration.waiting;
     await activateServiceWorkerUpdate();
     return;
-  }
-
-  if (!registration.installing && registration.active) {
-    try {
-      await registration.update();
-    } catch (error) {
-      if (!(error instanceof DOMException) || error.name !== "InvalidStateError") throw error;
-      console.warn("[sw] update registration is still settling; reloading the active shell");
-      location.reload();
-      return;
-    }
   }
 
   const worker = registration.waiting ?? (await waitForInstallation(registration.installing));
