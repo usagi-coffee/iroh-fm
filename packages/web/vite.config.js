@@ -8,8 +8,8 @@ import { defineConfig } from "vite";
 
 const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
-const commitHash = (process.env.GITHUB_SHA ?? localCommit()).slice(0, 12);
-const buildVersion = process.env.GITHUB_SHA ?? String(Date.now());
+const buildVersion = process.env.GITHUB_SHA ?? localCommit();
+const commitHash = buildVersion.slice(0, 12);
 const desktopEpochCommit =
   process.env.DESKTOP_EPOCH_COMMIT ??
   git(["log", "--format=%H", "--grep=^desktop:", "-1"]) ??

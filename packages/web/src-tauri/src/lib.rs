@@ -440,6 +440,25 @@ pub fn run() {
                 .get_webview_window("main")
                 .ok_or_else(|| std::io::Error::other("main webview window is missing"))?;
 
+            #[cfg(debug_assertions)]
+            main_webview.eval(
+                r#"
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+                    const controlled = Boolean(navigator.serviceWorker.controller);
+                    await Promise.all(registrations.map((registration) => registration.unregister()));
+                    if (registrations.length) {
+                      console.info('[tauri dev] unregistered service workers', {
+                        count: registrations.length,
+                        controlled,
+                      });
+                    }
+                    if (controlled) location.reload();
+                  }).catch((error) => console.error('[tauri dev] service worker cleanup failed', error));
+                }
+                "#,
+            )?;
+
             #[cfg(all(desktop, not(debug_assertions)))]
             main_webview.navigate(REMOTE_APP_URL.parse()?)?;
 
