@@ -35,11 +35,17 @@ function nativeRequirement(buildInfo, epochs) {
   const platform = buildInfo?.platform;
   const required = platform ? epochs?.[platform] : null;
   if (!required || Number(required.minimum) <= (Number(buildInfo?.epoch) || 0)) return null;
+  const commit = String(required.commit ?? "");
+  const releaseUrl = `https://github.com/usagi-coffee/iroh-fm/releases?q=${platform.toLowerCase()}-`;
   return {
     platform,
     minimum: Number(required.minimum),
-    commit: String(required.commit ?? ""),
-    releaseUrl: `https://github.com/usagi-coffee/iroh-fm/releases?q=${platform.toLowerCase()}-`,
+    commit,
+    releaseUrl,
+    downloadUrl:
+      platform === "Android" && /^[0-9a-f]{40}$/.test(commit)
+        ? `https://github.com/usagi-coffee/iroh-fm/releases/download/android-${commit}/iroh-fm-android-${commit.slice(0, 7)}.apk`
+        : releaseUrl,
   };
 }
 

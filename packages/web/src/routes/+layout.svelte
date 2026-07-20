@@ -165,13 +165,32 @@
         <span class="text-3xs font-mono font-bold tracking-[.06em] uppercase">
           Upgrade {nativeUpgrade.platform} app to use the newest web version.
         </span>
-        <a
-          href={nativeUpgrade.releaseUrl}
-          target="_blank"
-          rel="noreferrer"
-          class="border-yellow/50 hover:bg-yellow/10 text-3xs shrink-0 border px-2 py-1 font-mono font-bold"
-          >DOWNLOAD</a
-        >
+        {#if nativeUpgrade.platform === "Android"}
+          <div class="flex shrink-0 flex-col gap-1">
+            <a
+              href={nativeUpgrade.downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              class="bg-yellow text-crust text-3xs px-2 py-1 font-mono font-bold"
+              >DOWNLOAD</a
+            >
+            <a
+              href={nativeUpgrade.releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+              class="border-yellow/50 hover:bg-yellow/10 text-3xs border px-2 py-1 font-mono font-bold"
+              >RELEASES</a
+            >
+          </div>
+        {:else}
+          <a
+            href={nativeUpgrade.releaseUrl}
+            target="_blank"
+            rel="noreferrer"
+            class="border-yellow/50 hover:bg-yellow/10 text-3xs shrink-0 border px-2 py-1 font-mono font-bold"
+            >RELEASES</a
+          >
+        {/if}
       </div>
     {:else if updateReady && !updateBannerDismissed}
       <div

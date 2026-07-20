@@ -209,8 +209,9 @@ export class MusicClient {
     return this.inner.playerCommand(command, payload);
   }
 
-  playerState() {
-    return this.inner.playerState();
+  /** @param {{includeQueue?: boolean}} [options] */
+  playerState(options) {
+    return this.inner.playerState(options);
   }
 
   /** @param {boolean} offlineOnly */

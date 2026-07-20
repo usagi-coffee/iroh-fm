@@ -180,11 +180,9 @@ export class NativeFixtureClient extends FixtureClient {
   volume = 0.5;
   transfers = {};
 
-  snapshot() {
-    return {
+  snapshot({ includeQueue = true } = {}) {
+    const state = {
       trackId: this.trackId,
-      queue: [...this.queue],
-      currentIndex: this.currentIndex,
       playing: this.playing,
       loading: this.loading,
       position: this.position,
@@ -194,6 +192,11 @@ export class NativeFixtureClient extends FixtureClient {
       volume: this.volume,
       transfers: { ...this.transfers },
     };
+    if (includeQueue) {
+      state.queue = [...this.queue];
+      state.currentIndex = this.currentIndex;
+    }
+    return state;
   }
 
   async playNative(track, queue, onProgress = () => {}) {
@@ -215,8 +218,8 @@ export class NativeFixtureClient extends FixtureClient {
     return this.snapshot();
   }
 
-  playerState() {
-    return Promise.resolve(this.snapshot());
+  playerState(options) {
+    return Promise.resolve(this.snapshot(options));
   }
 
   playerCommand(command, payload = {}) {

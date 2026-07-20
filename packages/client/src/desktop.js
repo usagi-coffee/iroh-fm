@@ -148,8 +148,9 @@ class DesktopInner {
     return invoke("desktop_player_command", { handle: this.handle, command, payload });
   }
 
-  playerState() {
-    return invoke("desktop_player_state", { handle: this.handle });
+  /** @param {{includeQueue?: boolean}} [options] */
+  playerState({ includeQueue = false } = {}) {
+    return invoke("desktop_player_state", { handle: this.handle, includeQueue });
   }
 
   async cachedTrackIds() {

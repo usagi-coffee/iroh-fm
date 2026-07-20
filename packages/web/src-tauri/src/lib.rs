@@ -159,8 +159,10 @@ struct NativeBuildInfo {
 #[serde(rename_all = "camelCase")]
 struct DesktopPlayerState {
     track_id: Option<String>,
-    queue: Vec<String>,
-    current_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queue: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_index: Option<usize>,
     playing: bool,
     loading: bool,
     position: f64,
@@ -168,6 +170,7 @@ struct DesktopPlayerState {
     repeat: bool,
     shuffle: bool,
     volume: f32,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     transfers: HashMap<String, DesktopTransfer>,
 }
 
@@ -313,17 +316,27 @@ fn close_native_audio(state: &DesktopState) {
     }
 }
 
-fn player_state(audio: &mut DesktopAudio) -> DesktopPlayerState {
+fn player_state(
+    audio: &mut DesktopAudio,
+    include_queue: bool,
+    drain_completed_transfers: bool,
+) -> DesktopPlayerState {
     sync_audio(audio);
     let current_index = audio.active.front().copied().unwrap_or(0);
+    let transfers = audio.transfers.clone();
+    if drain_completed_transfers {
+        // Active transfers remain available to progress polls. A completed
+        // transfer is a one-shot notification and must not grow every later state.
+        audio.transfers.retain(|_, transfer| transfer.active);
+    }
     DesktopPlayerState {
         track_id: audio
             .active
             .front()
             .and_then(|index| audio.queue.get(*index))
             .cloned(),
-        queue: audio.queue.clone(),
-        current_index,
+        queue: include_queue.then(|| audio.queue.clone()),
+        current_index: include_queue.then_some(current_index),
         playing: audio
             .player
             .as_ref()
@@ -337,7 +350,7 @@ fn player_state(audio: &mut DesktopAudio) -> DesktopPlayerState {
         repeat: audio.repeat,
         shuffle: audio.shuffle,
         volume: audio.volume,
-        transfers: audio.transfers.clone(),
+        transfers,
     }
 }
 
@@ -672,7 +685,7 @@ async fn start_audio(
         audio.active.push_back(selected);
         audio.loading = false;
         log::info!("desktop player started track_id={track_id}");
-        (player_state(audio), outgoing, player)
+        (player_state(audio, true, true), outgoing, player)
     };
     if let Some(outgoing) = outgoing {
         let fade_state = state.clone();
@@ -719,13 +732,14 @@ async fn desktop_play(
 async fn desktop_player_state(
     state: State<'_, DesktopState>,
     handle: u64,
+    include_queue: Option<bool>,
 ) -> Result<DesktopPlayerState, String> {
     let result = {
         let mut registry = state
             .0
             .lock()
             .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-        player_state(&mut registry.audio)
+        player_state(&mut registry.audio, include_queue.unwrap_or(false), true)
     };
     let _ = handle;
     Ok(result)
@@ -906,7 +920,11 @@ async fn desktop_player_command(
     if let Some((selected, queue)) = switch {
         return start_audio((*state).clone(), handle, queue, selected).await;
     }
-    desktop_player_state(state, handle).await
+    let mut registry = state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?;
+    Ok(player_state(&mut registry.audio, false, false))
 }
 
 #[tauri::command]
@@ -974,6 +992,50 @@ fn desktop_build_info() -> NativeBuildInfo {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_player_state_omits_queue_and_drains_completed_transfers() {
+        let mut audio = DesktopAudio {
+            queue: vec!["first".into(), "second".into()],
+            transfers: HashMap::from([
+                (
+                    "first".into(),
+                    DesktopTransfer {
+                        received: 10,
+                        total: 10,
+                        active: false,
+                        cached: true,
+                    },
+                ),
+                (
+                    "second".into(),
+                    DesktopTransfer {
+                        received: 5,
+                        total: 10,
+                        active: true,
+                        cached: false,
+                    },
+                ),
+            ]),
+            ..DesktopAudio::default()
+        };
+
+        let state = player_state(&mut audio, false, true);
+        assert!(state.queue.is_none());
+        assert!(state.current_index.is_none());
+        assert_eq!(state.transfers.len(), 2);
+        assert!(!audio.transfers.contains_key("first"));
+        assert!(audio.transfers.contains_key("second"));
+
+        let state = player_state(&mut audio, true, false);
+        assert_eq!(state.queue.as_deref(), Some(audio.queue.as_slice()));
+        assert!(state.current_index.is_some());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default().manage(DesktopState::default());
@@ -990,11 +1052,13 @@ pub fn run() {
     );
 
     builder
-        .setup(move |_app| {
+        .setup(move |app| {
+            let main_webview = app
+                .get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main webview window is missing"))?;
+
             #[cfg(all(desktop, not(debug_assertions)))]
-            _app.get_webview_window("main")
-                .ok_or_else(|| std::io::Error::other("main webview window is missing"))?
-                .navigate(REMOTE_APP_URL.parse()?)?;
+            main_webview.navigate(REMOTE_APP_URL.parse()?)?;
 
             Ok(())
         })
