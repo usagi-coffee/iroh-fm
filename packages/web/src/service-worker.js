@@ -4,7 +4,11 @@ const CACHE_NAME = `iroh-fm-shell-${version}`;
 const STATE_CACHE_NAME = "iroh-fm-shell-state-v1";
 const SHELL_CACHE_PREFIXES = ["iroh-fm-shell-", "iroh-fm-"];
 // Persistent user data. Application upgrades never delete these caches.
-const DATA_CACHE_NAMES = new Set(["iroh-fm-cover-art-v1", "iroh-fm-track-audio-v1"]);
+const DATA_CACHE_NAMES = new Set([
+  "iroh-fm-cover-art-v1",
+  "iroh-fm-cover-art-v2",
+  "iroh-fm-track-audio-v1",
+]);
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => {
   if (!SCOPE_PATH || path.startsWith(`${SCOPE_PATH}/`)) return path;

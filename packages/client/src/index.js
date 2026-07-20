@@ -1,5 +1,5 @@
 let modulePromise;
-const COVER_CACHE_NAME = "iroh-fm-cover-art-v1";
+const COVER_CACHE_NAME = "iroh-fm-cover-art-v2";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
 const TRACK_CACHE_NAME = "iroh-fm-track-audio-v1";
 const TRACK_CACHE_ORIGIN = "https://track-cache.iroh-fm.invalid";
@@ -90,7 +90,7 @@ export class MusicClient {
     this.activeTrackRequests = new Map();
     /** @type {Map<string, {received: number, total: number, listeners: Set<(received: number, total: number) => void>}>} */
     this.trackProgress = new Map();
-    /** @type {Array<{id: string, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
+    /** @type {Array<{id: string, fullQuality: boolean, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
     this.coverFetchPaused = false;
@@ -250,25 +250,26 @@ export class MusicClient {
     return { summary, albums, artists, tracks, starred };
   }
 
-  /** @param {string} id */
-  coverUrl(id) {
-    let pending = this.coverCache.get(id);
+  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
+  coverUrl(id, { fullQuality = false } = {}) {
+    const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
+    let pending = this.coverCache.get(key);
     if (!pending) {
-      const created = this.loadCoverUrl(id);
-      this.coverCache.set(id, created);
+      const created = this.loadCoverUrl(id, fullQuality);
+      this.coverCache.set(key, created);
       created.catch(() => {
-        if (this.coverCache.get(id) === created) this.coverCache.delete(id);
+        if (this.coverCache.get(key) === created) this.coverCache.delete(key);
       });
       pending = created;
     }
     return pending;
   }
 
-  /** @param {string} id */
-  async loadCoverUrl(id) {
+  /** @param {string} id @param {boolean} fullQuality */
+  async loadCoverUrl(id, fullQuality) {
     let cache;
     let request;
-    if ("caches" in globalThis) {
+    if (!fullQuality && "caches" in globalThis) {
       try {
         cache = await globalThis.caches.open(COVER_CACHE_NAME);
         request = coverCacheRequest(this.remoteId, id);
@@ -286,7 +287,7 @@ export class MusicClient {
 
     if (this.offlineOnly) throw new Error("cover is not available offline");
 
-    const media = await this.enqueueCoverFetch(id);
+    const media = await this.enqueueCoverFetch(id, fullQuality);
     let blob;
     try {
       blob = new Blob([media.bytes], { type: media.contentType });
@@ -313,12 +314,12 @@ export class MusicClient {
     return URL.createObjectURL(blob);
   }
 
-  /** @param {string} id @returns {Promise<any>} */
-  enqueueCoverFetch(id) {
+  /** @param {string} id @param {boolean} fullQuality @returns {Promise<any>} */
+  enqueueCoverFetch(id, fullQuality) {
     if (this.closed) return Promise.reject(new Error("music client is closed"));
     if (this.offlineOnly) return Promise.reject(new Error("cover is not available offline"));
     return new Promise((resolve, reject) => {
-      this.coverFetchQueue.push({ id, resolve, reject });
+      this.coverFetchQueue.push({ id, fullQuality, resolve, reject });
       this.drainCoverFetchQueue();
     });
   }
@@ -337,7 +338,7 @@ export class MusicClient {
       if (!job) return;
       this.activeCoverFetches += 1;
       Promise.resolve()
-        .then(() => this.inner.fetchCover(job.id))
+        .then(() => this.inner.fetchCover(job.id, job.fullQuality))
         .then(job.resolve, (error) => {
           if (this.coverFetchPaused && !this.closed) this.coverFetchQueue.unshift(job);
           else job.reject(error);

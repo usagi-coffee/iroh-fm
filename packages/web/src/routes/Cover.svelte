@@ -6,17 +6,32 @@
    * @property {string} [title]
    * @property {string} [class]
    * @property {string} [rootMargin]
+   * @property {boolean} [fullQuality]
    */
-  /** @typedef {{ client: import('@iroh-fm/client').MusicClient | null, id: string | null }} FailedRequest */
+  /** @typedef {{ client: import('@iroh-fm/client').MusicClient | null, id: string | null, fullQuality: boolean }} FailedRequest */
   /** @type {Props} */
-  let { client, id = null, title = "", class: className = "", rootMargin = "100%" } = $props();
+  let {
+    client,
+    id = null,
+    title = "",
+    class: className = "",
+    rootMargin = "100%",
+    fullQuality = false,
+  } = $props();
   let visible = $state(false);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
   let imageFailed = $derived(
-    Boolean(failedRequest && failedRequest.client === client && failedRequest.id === id),
+    Boolean(
+      failedRequest &&
+      failedRequest.client === client &&
+      failedRequest.id === id &&
+      failedRequest.fullQuality === fullQuality,
+    ),
   );
   let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
-  let coverPromise = $derived(visible && client && id ? client.coverUrl(id) : null);
+  let coverPromise = $derived(
+    visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
+  );
 
   /** @param {HTMLElement} node */
   function findScrollRoot(node) {
@@ -62,7 +77,7 @@
       <img
         src={await coverPromise}
         alt={`${title} cover`}
-        onerror={() => (failedRequest = { client, id })}
+        onerror={() => (failedRequest = { client, id, fullQuality })}
       />
     {:else}
       {@render fallback()}

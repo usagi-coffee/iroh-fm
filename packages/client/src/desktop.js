@@ -110,11 +110,12 @@ class DesktopInner {
     return JSON.stringify(this.info);
   }
 
-  /** @param {string} id */
-  async fetchCover(id) {
+  /** @param {string} id @param {boolean} fullQuality */
+  async fetchCover(id, fullQuality) {
     const cover = await invoke("desktop_cover_art", {
       handle: this.handle,
       coverArtId: id,
+      fullQuality,
     });
     const binary = atob(cover.bytesBase64);
     const data = new Uint8Array(binary.length);

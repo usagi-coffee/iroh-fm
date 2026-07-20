@@ -278,23 +278,28 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {string} id */
-  async coverUrl(id) {
+  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
+  async coverUrl(id, { fullQuality = false } = {}) {
     if (!id) return "";
-    if (this.coverUrls.has(id)) return this.coverUrls.get(id);
+    const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
+    if (this.coverUrls.has(key)) return this.coverUrls.get(key);
     if (this.offlineOnly) throw new Error("cover is not available in Android offline mode");
-    if (this.coverRequests.has(id)) return this.coverRequests.get(id);
+    if (this.coverRequests.has(key)) return this.coverRequests.get(key);
     const request = this.withCoverSlot(async () => {
-      const cover = await nativeRequest("coverArt", { handle: this.handle, coverArtId: id });
+      const cover = await nativeRequest("coverArt", {
+        handle: this.handle,
+        coverArtId: id,
+        fullQuality,
+      });
       const binary = atob(cover.bytesBase64);
       const bytes = new Uint8Array(binary.length);
       for (let index = 0; index < binary.length; index += 1)
         bytes[index] = binary.charCodeAt(index);
       const url = URL.createObjectURL(new Blob([bytes], { type: cover.contentType }));
-      this.coverUrls.set(id, url);
+      this.coverUrls.set(key, url);
       return url;
-    }).finally(() => this.coverRequests.delete(id));
-    this.coverRequests.set(id, request);
+    }).finally(() => this.coverRequests.delete(key));
+    this.coverRequests.set(key, request);
     return request;
   }
 
