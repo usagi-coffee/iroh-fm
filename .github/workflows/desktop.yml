@@ -48,6 +48,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
 
       - name: Download desktop web assets
         uses: actions/download-artifact@v8

@@ -11,8 +11,14 @@ let registrationPromise;
 let waitingWorker;
 let reloadRequired = false;
 let monitorStarted = false;
+/** @type {any} */
+let nativeBuildInfo = null;
+/** @type {ReturnType<typeof nativeRequirement>} */
+let nativeUpgrade = null;
 /** @type {Set<(ready: boolean) => void>} */
 const updateListeners = new Set();
+/** @type {Set<(upgrade: ReturnType<typeof nativeRequirement>) => void>} */
+const nativeUpgradeListeners = new Set();
 /** @type {WeakSet<ServiceWorkerRegistration>} */
 const watchedRegistrations = new WeakSet();
 
@@ -22,6 +28,41 @@ function updateReady() {
 
 function notify() {
   for (const listener of updateListeners) listener(updateReady());
+}
+
+/** @param {any} buildInfo @param {Record<string, {minimum?: number, commit?: string}> | undefined} epochs */
+function nativeRequirement(buildInfo, epochs) {
+  const platform = buildInfo?.platform;
+  const required = platform ? epochs?.[platform] : null;
+  if (!required || Number(required.minimum) <= (Number(buildInfo?.epoch) || 0)) return null;
+  return {
+    platform,
+    minimum: Number(required.minimum),
+    commit: String(required.commit ?? ""),
+    releaseUrl: `https://github.com/usagi-coffee/iroh-fm/releases/tag/${platform.toLowerCase()}-${required.commit}`,
+  };
+}
+
+/** @param {ServiceWorker | undefined} worker @param {Record<string, any>} info */
+function syncWorkerInfo(worker, info) {
+  nativeUpgrade = nativeRequirement(nativeBuildInfo, info.nativeEpochs);
+  for (const listener of nativeUpgradeListeners) listener(nativeUpgrade);
+  if (info.updateReady && worker) {
+    waitingWorker = worker;
+    reloadRequired = false;
+    notify();
+  } else if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
+    reloadRequired = true;
+    notify();
+  }
+}
+
+/** @param {any} buildInfo */
+export function currentNativeRequirement(buildInfo) {
+  return nativeRequirement(buildInfo, {
+    Desktop: { minimum: __DESKTOP_EPOCH__, commit: __DESKTOP_EPOCH_COMMIT__ },
+    Android: { minimum: __ANDROID_EPOCH__, commit: __ANDROID_EPOCH_COMMIT__ },
+  });
 }
 
 /** @param {ServiceWorkerRegistration} registration */
@@ -70,17 +111,8 @@ async function register() {
   await requireActiveWorker(registration);
   const active = registration.active;
   if (!dev && active) {
-    void pingWorker(active)
-      .then((info) => {
-        if (info.updateReady) {
-          waitingWorker = active;
-          notify();
-        } else if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
-          reloadRequired = true;
-          notify();
-        }
-      })
-      .catch(() => {});
+    const info = await pingWorker(active).catch(() => null);
+    if (info) syncWorkerInfo(active, info);
   }
   return registration;
 }
@@ -121,18 +153,12 @@ function getRegistration() {
   return registrationPromise;
 }
 
-export async function ensure_service_worker() {
+/** @param {any} [buildInfo] */
+export async function ensure_service_worker(buildInfo) {
   if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  nativeBuildInfo = buildInfo ?? null;
   if (!dev) startUpdateMonitor();
   await getRegistration();
-}
-
-export function attach() {
-  return () => {
-    void ensure_service_worker()?.catch((error) =>
-      console.warn("[sw] service worker is unavailable; continuing without it", error),
-    );
-  };
 }
 
 function startUpdateMonitor() {
@@ -148,6 +174,18 @@ function startUpdateMonitor() {
     waitingWorker = undefined;
     reloadRequired = false;
     notify();
+    const worker = navigator.serviceWorker.controller;
+    if (worker)
+      void pingWorker(worker)
+        .then((info) => syncWorkerInfo(worker, info))
+        .catch(() => {});
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type !== "worker-activated") return;
+    syncWorkerInfo(
+      /** @type {ServiceWorker | undefined} */ (event.source ?? undefined),
+      event.data,
+    );
   });
   document.addEventListener("visibilitychange", check);
   window.addEventListener("online", check);
@@ -160,6 +198,7 @@ async function checkForUpdate() {
   if (registration.waiting || registration.installing || !registration.active) return;
 
   const info = await pingWorker(registration.active).catch(() => ({}));
+  syncWorkerInfo(registration.active, info);
   if (info.updateReady) {
     waitingWorker = registration.active;
     notify();
@@ -185,6 +224,13 @@ export function subscribeToServiceWorkerUpdates(listener) {
   updateListeners.add(listener);
   listener(updateReady());
   return () => updateListeners.delete(listener);
+}
+
+/** @param {(upgrade: ReturnType<typeof nativeRequirement>) => void} listener */
+export function subscribeToNativeUpgrade(listener) {
+  nativeUpgradeListeners.add(listener);
+  listener(nativeUpgrade);
+  return () => nativeUpgradeListeners.delete(listener);
 }
 
 /**
@@ -289,6 +335,7 @@ export function subscribeToServiceWorkerStatus(listener) {
 
 export async function activateServiceWorkerUpdate() {
   if (dev) return;
+  if (nativeUpgrade) return;
   const registration = await getRegistration();
   let worker = registration.waiting ?? waitingWorker;
   if (!worker && registration.active) {

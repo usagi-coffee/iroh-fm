@@ -1,6 +1,10 @@
 import { build, files, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-shell-${version}`;
+const NATIVE_EPOCHS = {
+  Desktop: { minimum: __DESKTOP_EPOCH__, commit: __DESKTOP_EPOCH_COMMIT__ },
+  Android: { minimum: __ANDROID_EPOCH__, commit: __ANDROID_EPOCH_COMMIT__ },
+};
 const STATE_CACHE_NAME = "iroh-fm-shell-state-v1";
 const SHELL_CACHE_PREFIXES = ["iroh-fm-shell-", "iroh-fm-"];
 // Persistent user data. Application upgrades never delete these caches.
@@ -35,6 +39,9 @@ self.addEventListener("install", (event) => {
       try {
         await cache.addAll(APP_SHELL.map((path) => new Request(path, { cache: "reload" })));
         await verifyHtmlMatchesShell(cache);
+        // Activate the worker so the old page can discover this shell, but do
+        // not select the new shell until the user approves the update.
+        await self.skipWaiting();
       } catch (error) {
         await caches.delete(CACHE_NAME).catch(() => {});
         throw error;
@@ -49,6 +56,9 @@ self.addEventListener("activate", (event) => {
       const approved = await approvedShell();
       await cleanShellCaches(approved.cacheName);
       await self.clients.claim();
+      const clients = await self.clients.matchAll({ type: "window" });
+      for (const client of clients)
+        client.postMessage({ type: "worker-activated", ...workerInfo(approved) });
     })(),
   );
 });
@@ -84,11 +94,7 @@ self.addEventListener("message", (event) => {
         const approved = await approvedShell();
         event.ports[0]?.postMessage({
           type: "version",
-          version,
-          buildVersion: approved.buildVersion,
-          workerBuildVersion:
-            typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
-          updateReady: approved.cacheName !== CACHE_NAME,
+          ...workerInfo(approved),
         });
       })(),
     );
@@ -156,6 +162,16 @@ async function writeApprovedShell(approved) {
       headers: { "content-type": "application/json" },
     }),
   );
+}
+
+function workerInfo(approved) {
+  return {
+    version,
+    buildVersion: approved.buildVersion,
+    workerBuildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+    nativeEpochs: NATIVE_EPOCHS,
+    updateReady: approved.cacheName !== CACHE_NAME,
+  };
 }
 
 async function cleanShellCaches(approvedName) {

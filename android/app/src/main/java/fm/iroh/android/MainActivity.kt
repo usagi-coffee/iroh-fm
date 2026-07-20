@@ -275,6 +275,8 @@ class MainActivity : ComponentActivity() {
         "buildInfo" -> JSONObject()
             .put("platform", "Android")
             .put("commit", BuildConfig.BUILD_COMMIT)
+            .put("epoch", BuildConfig.EPOCH)
+            .put("epochCommit", BuildConfig.EPOCH_COMMIT)
         "connect" -> JSONObject(NativeCore.unwrap(NativeCore.connect(payload.toString()))).also {
             NativeCore.activeClientHandle = it.getLong("handle")
             NativeCore.activeRemoteId = it.getString("remoteId")

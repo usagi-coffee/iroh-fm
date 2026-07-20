@@ -40,7 +40,15 @@ class AndroidMusicClient extends NativeFixtureClient {
   }
 }
 
-export const ClientCore = fixtureCore(AndroidMusicClient);
+export class ClientCore extends fixtureCore(AndroidMusicClient) {
+  static buildInfo() {
+    return Promise.resolve({
+      platform: "Android",
+      epoch: __ANDROID_EPOCH__,
+      epochCommit: __ANDROID_EPOCH_COMMIT__,
+    });
+  }
+}
 
 export function subscribeNativePlayerState(listener) {
   stateListeners.add(listener);

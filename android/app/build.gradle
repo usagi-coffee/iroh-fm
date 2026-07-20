@@ -11,6 +11,28 @@ def buildCommit = (
     System.getenv('RELEASE_SHA') ?:
     'development'
 ).toString()
+def gitOutput = { List<String> arguments ->
+    try {
+        return providers.exec {
+            workingDir rootProject.projectDir.parentFile
+            commandLine(['git'] + arguments)
+        }.standardOutput.asText.get().trim()
+    } catch (ignored) {
+        return null
+    }
+}
+def epochCommit = (
+    project.findProperty('irohFmEpochCommit') ?:
+    System.getenv('ANDROID_EPOCH_COMMIT') ?:
+    gitOutput(['log', '--format=%H', '--grep=^android:', '-1']) ?:
+    buildCommit
+).toString()
+def epoch = (
+    project.findProperty('irohFmEpoch') ?:
+    System.getenv('ANDROID_EPOCH') ?:
+    gitOutput(['rev-list', '--count', epochCommit]) ?:
+    '0'
+).toString().toInteger()
 def hasReleaseSigning = [
     releaseKeystorePath,
     releaseKeystorePassword,
@@ -33,6 +55,8 @@ android {
         buildConfigField 'String', 'LAUNCH_URL', "\"${launchUrl}\""
         buildConfigField 'String', 'WEB_ORIGIN', "\"${webOrigin}\""
         buildConfigField 'String', 'BUILD_COMMIT', "\"${buildCommit}\""
+        buildConfigField 'int', 'EPOCH', epoch.toString()
+        buildConfigField 'String', 'EPOCH_COMMIT', "\"${epochCommit}\""
         resValue 'string', 'app_name', 'iroh.fm'
         resValue 'string', 'launch_url', launchUrl
         resValue 'string', 'web_origin', webOrigin

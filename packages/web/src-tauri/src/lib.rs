@@ -150,6 +150,9 @@ struct ParsedTicket {
 struct NativeBuildInfo {
     platform: &'static str,
     commit: &'static str,
+    epoch: u64,
+    #[serde(rename = "epochCommit")]
+    epoch_commit: &'static str,
 }
 
 #[derive(Serialize)]
@@ -966,6 +969,8 @@ fn desktop_build_info() -> NativeBuildInfo {
         commit: option_env!("RELEASE_SHA")
             .or(option_env!("GITHUB_SHA"))
             .unwrap_or("development"),
+        epoch: env!("DESKTOP_EPOCH").parse().unwrap_or(0),
+        epoch_commit: env!("DESKTOP_EPOCH_COMMIT"),
     }
 }
 

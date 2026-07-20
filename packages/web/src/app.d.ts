@@ -5,6 +5,10 @@
 declare global {
   const __BUILD_COMMIT__: string;
   const __BUILD_VERSION__: string;
+  const __DESKTOP_EPOCH__: number;
+  const __DESKTOP_EPOCH_COMMIT__: string;
+  const __ANDROID_EPOCH__: number;
+  const __ANDROID_EPOCH_COMMIT__: string;
 
   namespace App {
     // interface Error {}

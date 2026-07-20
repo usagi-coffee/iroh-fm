@@ -100,7 +100,11 @@ export class ClientCore {
   static prepare() {}
   static prepareCaches() {}
   static buildInfo() {
-    return Promise.resolve(null);
+    return Promise.resolve({
+      platform: "Desktop",
+      epoch: __DESKTOP_EPOCH__,
+      epochCommit: __DESKTOP_EPOCH_COMMIT__,
+    });
   }
   static parseTicket() {
     return Promise.resolve({ endpointId: "e2e-server", relays: [] });

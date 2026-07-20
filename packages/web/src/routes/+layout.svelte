@@ -5,13 +5,14 @@
   import { page } from "$app/state";
 
   import { App } from "$lib/runes/App.svelte.js";
-  import { connectionAddressLabel, formatBytes } from "$lib/utils.js";
   import {
     activateServiceWorkerUpdate,
-    attach as serviceworker,
+    currentNativeRequirement,
     ensure_service_worker,
+    subscribeToNativeUpgrade,
     subscribeToServiceWorkerUpdates,
   } from "$lib/service-worker.js";
+  import { connectionAddressLabel, formatBytes } from "$lib/utils.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
   import DatabaseIcon from "virtual:icons/ri/database-2-line";
@@ -28,9 +29,21 @@
   let { children } = $props();
   let updateReady = $state(false);
   let updateBannerDismissed = $state(false);
+  /** @type {ReturnType<typeof currentNativeRequirement>} */
+  let nativeUpgrade = $state(null);
+  /** @type {ReturnType<typeof currentNativeRequirement>} */
+  let initialNativeRequirement = $state(null);
   let connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
   let onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
-  const sw = ensure_service_worker();
+  const nativeBuild = ClientCore.buildInfo();
+  const nativeCompatibility = nativeBuild.then((buildInfo) => {
+    initialNativeRequirement = currentNativeRequirement(buildInfo);
+    return initialNativeRequirement;
+  });
+  const registeredWorker = nativeBuild.then((buildInfo) => ensure_service_worker(buildInfo));
+  const sw = Promise.all([registeredWorker, nativeCompatibility]).then(([, requirement]) => {
+    if (requirement) throw new Error("The native application is out of date.");
+  });
   const wasm = sw.then(() => ClientCore.prepare());
   const cache = wasm.then(() => ClientCore.prepareCaches());
   const identity = cache.then(() => App.prepareIdentity());
@@ -45,10 +58,15 @@
   }
 
   function watchUpdates() {
-    return subscribeToServiceWorkerUpdates((ready) => {
+    const unsubscribeUpdates = subscribeToServiceWorkerUpdates((ready) => {
       updateReady = ready;
       if (!ready) updateBannerDismissed = false;
     });
+    const unsubscribeNative = subscribeToNativeUpgrade((upgrade) => (nativeUpgrade = upgrade));
+    return () => {
+      unsubscribeUpdates();
+      unsubscribeNative();
+    };
   }
 
   /** @param {EventTarget | null} target */
@@ -116,7 +134,6 @@
 
 <div
   id="content"
-  {@attach serviceworker()}
   {@attach watchUpdates}
   {@attach globalKeybinds}
   {@attach App.connection.attachHashChanges}
@@ -136,7 +153,28 @@
   {/snippet}
 
   {#snippet updateNotice(/** @type {boolean} */ overlay)}
-    {#if updateReady && !updateBannerDismissed}
+    {#if nativeUpgrade}
+      <div
+        class:fixed={overlay}
+        class:top-0={overlay}
+        class:left-0={overlay}
+        class:z-50={overlay}
+        class="border-yellow/40 bg-crust text-yellow flex min-h-9 w-full items-center justify-center gap-3 border-b px-3 py-2 text-center"
+        role="status"
+      >
+        <span class="text-3xs font-mono font-bold tracking-[.06em] uppercase">
+          Your {nativeUpgrade.platform} application is out of date. Upgrade your {nativeUpgrade.platform}
+          application to use the new web version.
+        </span>
+        <a
+          href={nativeUpgrade.releaseUrl}
+          target="_blank"
+          rel="noreferrer"
+          class="border-yellow/50 hover:bg-yellow/10 text-3xs shrink-0 border px-2 py-1 font-mono font-bold"
+          >GET {nativeUpgrade.platform.toUpperCase()}</a
+        >
+      </div>
+    {:else if updateReady && !updateBannerDismissed}
       <div
         class:fixed={overlay}
         class:top-0={overlay}
@@ -159,6 +197,28 @@
         >
       </div>
     {/if}
+  {/snippet}
+
+  {#snippet nativeBlocked(
+    /** @type {NonNullable<ReturnType<typeof currentNativeRequirement>>} */ requirement,
+  )}
+    <div class="bg-base text-text grid h-dvh place-items-center p-6">
+      <div class="border-yellow/40 bg-crust w-full max-w-md border p-5 text-center">
+        <h1 class="text-yellow text-sm font-semibold">
+          Your {requirement.platform} application is out of date
+        </h1>
+        <p class="text-overlay1 mt-2 text-xs leading-5">
+          This web version requires a newer {requirement.platform} application before it can start.
+        </p>
+        <a
+          href={requirement.releaseUrl}
+          target="_blank"
+          rel="noreferrer"
+          class="bg-yellow text-3xs text-crust mt-4 inline-block px-4 py-2 font-mono font-bold"
+          >GET {requirement.platform.toUpperCase()}</a
+        >
+      </div>
+    </div>
   {/snippet}
 
   {#snippet loading(/** @type {{ text: string, step: number }} */ { text, step })}
@@ -191,10 +251,9 @@
             title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"}`}
           >
             <span class="flex min-w-0 flex-col text-left leading-tight"
-              ><span
-                class="text-subtext0 text-5xs flex w-full items-center justify-center gap-1"
-              >
-                <span class="truncate">{App.connection.info.address
+              ><span class="text-subtext0 text-5xs flex w-full items-center justify-center gap-1">
+                <span class="truncate"
+                  >{App.connection.info.address
                     ? connectionAddressLabel(App.connection.info)
                     : "CONNECTING"}</span
                 ><span
@@ -204,9 +263,10 @@
                 ></span>
               </span>
               <span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
-                ><span class="flex items-center gap-1"><DatabaseIcon
-                    class="text-4xs"
-                  />{formatBytes(App.connection.info.received_bytes)}</span
+                ><span class="flex items-center gap-1"
+                  ><DatabaseIcon class="text-4xs" />{formatBytes(
+                    App.connection.info.received_bytes,
+                  )}</span
                 ><span>↓ {formatBytes(App.connection.receivedBytesPerSecond)}/s</span></span
               ></span
             >
@@ -259,7 +319,10 @@
                     class="bg-base text-text flex h-dvh flex-col overflow-hidden"
                   >
                     <div class="shrink-0">
-                      <TopBar {updateReady} onupdate={activateServiceWorkerUpdate} />
+                      <TopBar
+                        updateReady={updateReady && !nativeUpgrade}
+                        onupdate={activateServiceWorkerUpdate}
+                      />
                       {@render updateNotice(false)}
                     </div>
                     <main class="min-h-0 flex-1 overflow-hidden">{@render children()}</main>
@@ -302,6 +365,12 @@
     {#snippet pending()}
       {@render loading({ text: "Starting the service worker…", step: 1 })}
     {/snippet}
-    {#snippet failed(error)}{@render startupFailed(error)}{/snippet}
+    {#snippet failed(error)}
+      {#if initialNativeRequirement}
+        {@render nativeBlocked(initialNativeRequirement)}
+      {:else}
+        {@render startupFailed(error)}
+      {/if}
+    {/snippet}
   </svelte:boundary>
 </div>

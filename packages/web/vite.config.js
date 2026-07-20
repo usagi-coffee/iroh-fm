@@ -10,17 +10,41 @@ const base = /** @type {'' | `/${string}`} */ (process.env.BASE_PATH ?? "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const commitHash = (process.env.GITHUB_SHA ?? localCommit()).slice(0, 12);
 const buildVersion = process.env.GITHUB_SHA ?? String(Date.now());
+const desktopEpochCommit =
+  process.env.DESKTOP_EPOCH_COMMIT ??
+  git(["log", "--format=%H", "--grep=^desktop:", "-1"]) ??
+  commitHash;
+const desktopEpoch = Number(
+  process.env.DESKTOP_EPOCH ?? git(["rev-list", "--count", desktopEpochCommit]) ?? 0,
+);
+const androidEpochCommit =
+  process.env.ANDROID_EPOCH_COMMIT ??
+  git(["log", "--format=%H", "--grep=^android:", "-1"]) ??
+  commitHash;
+const androidEpoch = Number(
+  process.env.ANDROID_EPOCH ?? git(["rev-list", "--count", androidEpochCommit]) ?? 0,
+);
 
-function localCommit() {
+if (!Number.isSafeInteger(desktopEpoch) || desktopEpoch <= 0)
+  throw new Error("The desktop epoch is invalid.");
+if (!Number.isSafeInteger(androidEpoch) || androidEpoch <= 0)
+  throw new Error("The Android epoch is invalid.");
+
+/** @param {string[]} args */
+function git(args) {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
+    return execFileSync("git", args, {
       cwd: workspaceRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {
-    return "development";
+    return undefined;
   }
+}
+
+function localCommit() {
+  return git(["rev-parse", "HEAD"]) ?? "development";
 }
 
 export default defineConfig(({ mode }) => ({
@@ -28,6 +52,10 @@ export default defineConfig(({ mode }) => ({
   define: {
     __BUILD_COMMIT__: JSON.stringify(commitHash),
     __BUILD_VERSION__: JSON.stringify(buildVersion),
+    __DESKTOP_EPOCH__: JSON.stringify(desktopEpoch),
+    __DESKTOP_EPOCH_COMMIT__: JSON.stringify(desktopEpochCommit),
+    __ANDROID_EPOCH__: JSON.stringify(androidEpoch),
+    __ANDROID_EPOCH_COMMIT__: JSON.stringify(androidEpochCommit),
   },
   plugins: [
     sveltekit({

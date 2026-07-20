@@ -18,9 +18,9 @@ export class ClientCore {
     if (!isNative()) await MusicClient.prepareCaches();
   }
 
-  static buildInfo() {
+  static async buildInfo() {
     if (isDesktop()) return desktopBuildInfo();
-    return isNative() ? nativeRequest("buildInfo") : Promise.resolve(null);
+    return isNative() || (await detectNative()) ? nativeRequest("buildInfo") : null;
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
