@@ -1,6 +1,8 @@
-import { build, files, version } from "$service-worker";
+import { build, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-shell-${version}`;
+const BUILD_VERSION = __BUILD_VERSION__;
+const PROTOCOL_VERSION = 1;
 const NATIVE_EPOCHS = {
   Desktop: { minimum: __DESKTOP_EPOCH__, commit: __DESKTOP_EPOCH_COMMIT__ },
   Android: { minimum: __ANDROID_EPOCH__, commit: __ANDROID_EPOCH_COMMIT__ },
@@ -21,16 +23,22 @@ const scoped = (path) => {
 };
 const STATE_KEY = scoped("/__iroh-fm-active-shell__");
 const NAVIGATION_FALLBACKS = [scoped("/"), scoped("/index.html")];
+const STATIC_SHELL_FILES = [
+  "/favicon.ico",
+  "/manifest.webmanifest",
+  "/pwa-icon-192.png",
+  "/pwa-icon-512.png",
+  "/pwa-maskable-192.png",
+  "/pwa-maskable-512.png",
+];
 const APP_SHELL = [
-  ...new Set(
-    [...build, ...files.filter((path) => !path.endsWith("/.nojekyll")), "/"]
-      .map(scoped)
-      .concat(NAVIGATION_FALLBACKS),
-  ),
+  ...new Set([...build, ...STATIC_SHELL_FILES, "/"].map(scoped).concat(NAVIGATION_FALLBACKS)),
 ];
 const ENTRYPOINTS = APP_SHELL.filter((path) =>
   /\/_app\/immutable\/entry\/(?:start|app)\.[^/]+\.js$/.test(path),
 );
+/** @type {Promise<{cacheName: string, buildVersion: string}> | undefined} */
+let approvedShellPromise;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -72,7 +80,7 @@ self.addEventListener("message", (event) => {
         try {
           await writeApprovedShell({
             cacheName: CACHE_NAME,
-            buildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+            buildVersion: BUILD_VERSION,
           });
           await cleanShellCaches(CACHE_NAME);
           await self.skipWaiting();
@@ -117,9 +125,7 @@ self.addEventListener("fetch", (event) => {
         );
       }
 
-      const cached =
-        (await active.match(event.request, { ignoreSearch: true })) ??
-        (await caches.match(event.request, { ignoreSearch: true }));
+      const cached = await active.match(event.request, { ignoreSearch: true });
       if (cached) return cached;
       try {
         return await fetch(event.request);
@@ -139,6 +145,11 @@ function isShellCache(name) {
 }
 
 async function approvedShell() {
+  approvedShellPromise ??= readApprovedShell();
+  return approvedShellPromise;
+}
+
+async function readApprovedShell() {
   const stateCache = await caches.open(STATE_CACHE_NAME);
   const saved = await stateCache.match(STATE_KEY);
   if (saved) {
@@ -148,7 +159,7 @@ async function approvedShell() {
 
   const initial = {
     cacheName: CACHE_NAME,
-    buildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+    buildVersion: BUILD_VERSION,
   };
   await writeApprovedShell(initial);
   return initial;
@@ -162,13 +173,15 @@ async function writeApprovedShell(approved) {
       headers: { "content-type": "application/json" },
     }),
   );
+  approvedShellPromise = Promise.resolve(approved);
 }
 
 function workerInfo(approved) {
   return {
+    protocolVersion: PROTOCOL_VERSION,
     version,
     buildVersion: approved.buildVersion,
-    workerBuildVersion: typeof __BUILD_VERSION__ === "undefined" ? version : __BUILD_VERSION__,
+    workerBuildVersion: BUILD_VERSION,
     nativeEpochs: NATIVE_EPOCHS,
     updateReady: approved.cacheName !== CACHE_NAME,
   };
@@ -177,8 +190,6 @@ function workerInfo(approved) {
 async function cleanShellCaches(approvedName) {
   const shells = (await caches.keys()).filter(isShellCache);
   const keep = new Set([approvedName, CACHE_NAME]);
-  const previous = shells.filter((name) => !keep.has(name)).at(-1);
-  if (previous) keep.add(previous);
   await Promise.all(shells.filter((name) => !keep.has(name)).map((name) => caches.delete(name)));
 }
 
