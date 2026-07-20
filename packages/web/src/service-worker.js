@@ -2,6 +2,7 @@ import { build, version } from "$service-worker";
 
 const CACHE_NAME = `iroh-fm-shell-${version}`;
 const BUILD_VERSION = __BUILD_VERSION__;
+const LOG_PREFIX = `[sw ${BUILD_VERSION.slice(0, 12)}]`;
 const PROTOCOL_VERSION = 1;
 const NATIVE_EPOCHS = {
   Desktop: { minimum: __DESKTOP_EPOCH__, commit: __DESKTOP_EPOCH_COMMIT__ },
@@ -43,14 +44,27 @@ let approvedShellPromise;
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(CACHE_NAME);
+      let stage = "opening the shell cache";
+      console.info(LOG_PREFIX, "install started", {
+        scriptUrl: self.location.href,
+        cacheName: CACHE_NAME,
+        files: APP_SHELL.length,
+      });
       try {
+        const cache = await caches.open(CACHE_NAME);
+        stage = "caching the application shell";
         await cache.addAll(APP_SHELL.map((path) => new Request(path, { cache: "reload" })));
+        console.info(LOG_PREFIX, "application shell cached");
+        stage = "verifying the application shell";
         await verifyHtmlMatchesShell(cache);
+        console.info(LOG_PREFIX, "application shell verified");
         // Activate the worker so the old page can discover this shell, but do
         // not select the new shell until the user approves the update.
+        stage = "requesting activation";
         await self.skipWaiting();
+        console.info(LOG_PREFIX, "install completed");
       } catch (error) {
+        console.error(LOG_PREFIX, "install failed", { stage, cacheName: CACHE_NAME, error });
         await caches.delete(CACHE_NAME).catch(() => {});
         throw error;
       }
@@ -61,12 +75,23 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const approved = await approvedShell();
-      await cleanShellCaches(approved.cacheName);
-      await self.clients.claim();
-      const clients = await self.clients.matchAll({ type: "window" });
-      for (const client of clients)
-        client.postMessage({ type: "worker-activated", ...workerInfo(approved) });
+      console.info(LOG_PREFIX, "activation started");
+      try {
+        const approved = await approvedShell();
+        await cleanShellCaches(approved.cacheName);
+        await self.clients.claim();
+        const clients = await self.clients.matchAll({ type: "window" });
+        for (const client of clients)
+          client.postMessage({ type: "worker-activated", ...workerInfo(approved) });
+        console.info(LOG_PREFIX, "activation completed", {
+          approvedCache: approved.cacheName,
+          updateReady: approved.cacheName !== CACHE_NAME,
+          clients: clients.length,
+        });
+      } catch (error) {
+        console.error(LOG_PREFIX, "activation failed", error);
+        throw error;
+      }
     })(),
   );
 });
@@ -77,6 +102,7 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "activate-update" || event.data?.type === "skip-waiting") {
     event.waitUntil(
       (async () => {
+        console.info(LOG_PREFIX, "update approval received", { type: event.data.type });
         try {
           await writeApprovedShell({
             cacheName: CACHE_NAME,
@@ -84,8 +110,10 @@ self.addEventListener("message", (event) => {
           });
           await cleanShellCaches(CACHE_NAME);
           await self.skipWaiting();
+          console.info(LOG_PREFIX, "update approved", { cacheName: CACHE_NAME });
           event.ports[0]?.postMessage({ type: "update-activated" });
         } catch (error) {
+          console.error(LOG_PREFIX, "update approval failed", error);
           event.ports[0]?.postMessage({
             type: "update-error",
             error: error instanceof Error ? error.message : String(error),
@@ -154,7 +182,10 @@ async function readApprovedShell() {
   const saved = await stateCache.match(STATE_KEY);
   if (saved) {
     const approved = await saved.json().catch(() => null);
-    if (approved?.cacheName && (await caches.has(approved.cacheName))) return approved;
+    if (approved?.cacheName && (await caches.has(approved.cacheName))) {
+      console.info(LOG_PREFIX, "restored approved shell", approved);
+      return approved;
+    }
   }
 
   const initial = {
@@ -162,6 +193,7 @@ async function readApprovedShell() {
     buildVersion: BUILD_VERSION,
   };
   await writeApprovedShell(initial);
+  console.info(LOG_PREFIX, "initialized approved shell", initial);
   return initial;
 }
 
@@ -190,7 +222,9 @@ function workerInfo(approved) {
 async function cleanShellCaches(approvedName) {
   const shells = (await caches.keys()).filter(isShellCache);
   const keep = new Set([approvedName, CACHE_NAME]);
-  await Promise.all(shells.filter((name) => !keep.has(name)).map((name) => caches.delete(name)));
+  const removed = shells.filter((name) => !keep.has(name));
+  await Promise.all(removed.map((name) => caches.delete(name)));
+  if (removed.length) console.info(LOG_PREFIX, "removed old shell caches", removed);
 }
 
 async function verifyHtmlMatchesShell(cache) {

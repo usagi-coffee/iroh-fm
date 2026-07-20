@@ -22,6 +22,8 @@ let nativeUpgrade = null;
 const updateListeners = new Set();
 /** @type {Set<(upgrade: ReturnType<typeof nativeRequirement>) => void>} */
 const nativeUpgradeListeners = new Set();
+/** @type {WeakSet<ServiceWorker>} */
+const loggedWorkers = new WeakSet();
 
 function updateReady() {
   return Boolean(availableVersion || waitingWorker) || reloadRequired;
@@ -222,18 +224,47 @@ async function checkForUpdate() {
   const remoteVersion = await fetchRemoteVersion().catch(() => null);
   const workerVersion = info.workerBuildVersion ?? info.version;
   if (remoteVersion && remoteVersion !== workerVersion) {
+    console.info("[sw client] remote update detected", {
+      currentVersion: workerVersion,
+      remoteVersion,
+      activeScript: registration.active.scriptURL,
+    });
     markUpdateAvailable(remoteVersion);
     if (!registration.installing) await registerWorker(remoteVersion);
   }
 }
 
 /** @param {string | null} version */
-function registerWorker(version) {
+async function registerWorker(version) {
   const url = workerScriptUrl(version);
-  return navigator.serviceWorker.register(url, {
+  console.info("[sw client] registering worker", { version, scriptUrl: url.href });
+  const registration = await navigator.serviceWorker.register(url, {
     type: dev ? "module" : "classic",
     updateViaCache: "none",
   });
+  observeWorker(registration.installing, "installing");
+  observeWorker(registration.waiting, "waiting");
+  observeWorker(registration.active, "active");
+  console.info("[sw client] registration resolved", {
+    installing: registration.installing?.scriptURL,
+    waiting: registration.waiting?.scriptURL,
+    active: registration.active?.scriptURL,
+  });
+  return registration;
+}
+
+/** @param {ServiceWorker | null} worker @param {string} slot */
+function observeWorker(worker, slot) {
+  if (!worker || loggedWorkers.has(worker)) return;
+  loggedWorkers.add(worker);
+  const report = () =>
+    console.info("[sw client] worker state", {
+      slot,
+      state: worker.state,
+      scriptUrl: worker.scriptURL,
+    });
+  report();
+  worker.addEventListener("statechange", report);
 }
 
 /** @param {string | null} version */
