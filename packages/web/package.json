@@ -10,7 +10,7 @@
     "dev:e2e:desktop": "vite dev --mode e2e-desktop --host 127.0.0.1 --port 4174 --strictPort",
     "dev:e2e:android": "vite dev --mode e2e-android --host 127.0.0.1 --port 4175 --strictPort",
     "build": "bun run build:wasm && bun run build:prepared",
-    "build:prepared": "vite build",
+    "build:prepared": "vite build && bun scripts/version-service-worker.js",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "bun run build:wasm && bun run check:prepared",

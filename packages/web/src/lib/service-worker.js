@@ -10,6 +10,8 @@ const UPDATE_TIMEOUT_MS = 10_000;
 let registrationPromise;
 /** @type {ServiceWorker | undefined} */
 let waitingWorker;
+/** @type {string | undefined} */
+let availableVersion;
 let reloadRequired = false;
 let monitorStarted = false;
 /** @type {any} */
@@ -22,11 +24,22 @@ const updateListeners = new Set();
 const nativeUpgradeListeners = new Set();
 
 function updateReady() {
+  return Boolean(availableVersion || waitingWorker) || reloadRequired;
+}
+
+function activationReady() {
   return Boolean(waitingWorker) || reloadRequired;
 }
 
 function notify() {
   for (const listener of updateListeners) listener(updateReady());
+}
+
+/** @param {string} version */
+function markUpdateAvailable(version) {
+  if (availableVersion === version) return;
+  availableVersion = version;
+  notify();
 }
 
 /** @param {any} buildInfo @param {Record<string, {minimum?: number, commit?: string}> | undefined} epochs */
@@ -54,10 +67,14 @@ function syncWorkerInfo(worker, info) {
   for (const listener of nativeUpgradeListeners) listener(nativeUpgrade);
   if (info.updateReady && worker) {
     waitingWorker = worker;
+    availableVersion = info.workerBuildVersion ?? availableVersion;
     reloadRequired = false;
     notify();
   } else if (info.buildVersion && info.buildVersion !== __BUILD_VERSION__) {
     reloadRequired = true;
+    notify();
+  } else if (info.workerBuildVersion && info.workerBuildVersion === availableVersion) {
+    availableVersion = undefined;
     notify();
   }
 }
@@ -98,7 +115,11 @@ async function register() {
   const active = registration.active;
   if (!dev && active) {
     const info = await pingWorker(active).catch(() => null);
-    if (info) syncWorkerInfo(active, info);
+    if (info) {
+      syncWorkerInfo(active, info);
+      const workerVersion = info.workerBuildVersion ?? info.version;
+      if (remoteVersion && remoteVersion !== workerVersion) markUpdateAvailable(remoteVersion);
+    }
   }
   return registration;
 }
@@ -148,7 +169,7 @@ export async function ensure_service_worker(buildInfo) {
   if (!dev) startUpdateMonitor();
   await getRegistration();
   return {
-    updateReady: updateReady(),
+    updateReady: activationReady(),
     nativeUpgrade,
     nativeNewerThanWeb: nativeNewerThanWeb(buildInfo),
   };
@@ -188,7 +209,7 @@ function startUpdateMonitor() {
 
 async function checkForUpdate() {
   const registration = await getRegistration();
-  if (registration.waiting || registration.installing || !registration.active) return;
+  if (!registration.active) return;
 
   const info = await pingWorker(registration.active).catch(() => ({}));
   syncWorkerInfo(registration.active, info);
@@ -200,17 +221,24 @@ async function checkForUpdate() {
 
   const remoteVersion = await fetchRemoteVersion().catch(() => null);
   const workerVersion = info.workerBuildVersion ?? info.version;
-  if (remoteVersion && remoteVersion !== workerVersion) await registerWorker(remoteVersion);
+  if (remoteVersion && remoteVersion !== workerVersion) {
+    markUpdateAvailable(remoteVersion);
+    if (!registration.installing) await registerWorker(remoteVersion);
+  }
 }
 
 /** @param {string | null} version */
 function registerWorker(version) {
-  const url = new URL(workerUrl, location.href);
-  if (version) url.searchParams.set("v", version);
+  const url = workerScriptUrl(version);
   return navigator.serviceWorker.register(url, {
     type: dev ? "module" : "classic",
     updateViaCache: "none",
   });
+}
+
+/** @param {string | null} version */
+function workerScriptUrl(version) {
+  return new URL(version ? asset(`/service-worker-${version}.js`) : workerUrl, location.href);
 }
 
 async function fetchRemoteVersion() {
@@ -369,6 +397,7 @@ export async function activateServiceWorkerUpdate() {
     const info = await pingWorker(registration.active).catch(() => ({}));
     if (info.updateReady) worker = registration.active;
   }
+  if (!worker && availableVersion) worker = await installWorker(availableVersion);
   if (!worker) {
     if (reloadRequired) location.reload();
     return;
@@ -395,11 +424,7 @@ export async function forceServiceWorkerUpdate() {
     const remoteVersion = await fetchRemoteVersion();
     const workerVersion = info.workerBuildVersion ?? info.version;
     if (remoteVersion !== workerVersion) {
-      const updated = await registerWorker(remoteVersion);
-      const candidate = workerForVersion(updated, remoteVersion);
-      const worker = await waitForInstallation(candidate ?? updated.installing);
-      if (!worker) throw new Error("The cache-busted service worker was not installed.");
-      waitingWorker = worker;
+      markUpdateAvailable(remoteVersion);
       await activateServiceWorkerUpdate();
       return;
     }
@@ -421,11 +446,21 @@ export async function forceServiceWorkerUpdate() {
   location.reload();
 }
 
+/** @param {string} version */
+async function installWorker(version) {
+  const registration = await registerWorker(version);
+  const candidate = workerForVersion(registration, version);
+  const worker = await waitForInstallation(candidate ?? registration.installing);
+  if (!worker) throw new Error(`Service worker ${version.slice(0, 12)} could not be installed.`);
+  waitingWorker = worker;
+  return worker;
+}
+
 /** @param {ServiceWorkerRegistration} registration @param {string} version */
 function workerForVersion(registration, version) {
+  const expectedUrl = workerScriptUrl(version).href;
   return [registration.installing, registration.waiting, registration.active].find((worker) => {
-    if (!worker) return false;
-    return new URL(worker.scriptURL).searchParams.get("v") === version;
+    return worker?.scriptURL === expectedUrl;
   });
 }
 
