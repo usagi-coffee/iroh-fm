@@ -1,28 +1,23 @@
+mod cover;
+mod player;
+mod track;
+
 use std::{
-    collections::{HashMap, VecDeque},
-    io::Cursor,
-    path::PathBuf,
+    collections::HashMap,
     str::FromStr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
-use base64::{
-    Engine as _,
-    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
-};
 use client::{Client, IrohConfig};
 use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey, endpoint::RecvStream};
 use iroh_tickets::endpoint::EndpointTicket;
-use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
+use player::{desktop_cache_progress, desktop_play, desktop_player_command, desktop_player_state};
+use protocol::{BackendRequest, TrackId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Manager, State, ipc::Response};
 use tokio::sync::Mutex as AsyncMutex;
 
-const TRACK_CROSSFADE: Duration = Duration::from_millis(1_500);
-const CROSSFADE_STEPS: u32 = 30;
 #[cfg(all(desktop, not(debug_assertions)))]
 const REMOTE_APP_URL: &str = "https://usagi-coffee.github.io/iroh-fm/";
 
@@ -31,50 +26,8 @@ struct NativeRegistry {
     next_handle: u64,
     clients: HashMap<u64, Client>,
     streams: HashMap<u64, Arc<AsyncMutex<DesktopStream>>>,
-    audio: DesktopAudio,
+    audio: player::DesktopAudio,
     offline_only: bool,
-}
-
-#[derive(Clone, Default, Serialize)]
-struct DesktopTransfer {
-    received: u64,
-    total: u64,
-    active: bool,
-    cached: bool,
-}
-
-struct DesktopAudio {
-    device: Option<MixerDeviceSink>,
-    player: Option<Arc<Player>>,
-    client_handle: u64,
-    generation: u64,
-    queue: Vec<String>,
-    active: VecDeque<usize>,
-    prefetching: Option<usize>,
-    loading: bool,
-    volume: f32,
-    repeat: bool,
-    shuffle: bool,
-    transfers: HashMap<String, DesktopTransfer>,
-}
-
-impl Default for DesktopAudio {
-    fn default() -> Self {
-        Self {
-            device: None,
-            player: None,
-            client_handle: 0,
-            generation: 0,
-            queue: Vec::new(),
-            active: VecDeque::new(),
-            prefetching: None,
-            loading: false,
-            volume: 0.5,
-            repeat: false,
-            shuffle: false,
-            transfers: HashMap::new(),
-        }
-    }
 }
 
 struct DesktopStream {
@@ -153,228 +106,6 @@ struct NativeBuildInfo {
     epoch: u64,
     #[serde(rename = "epochCommit")]
     epoch_commit: &'static str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopPlayerState {
-    track_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    queue: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    current_index: Option<usize>,
-    playing: bool,
-    loading: bool,
-    position: f64,
-    duration: f64,
-    repeat: bool,
-    shuffle: bool,
-    volume: f32,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    transfers: HashMap<String, DesktopTransfer>,
-}
-
-fn track_cache_dir(remote_id: &str) -> PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("iroh-fm")
-        .join("tracks")
-        .join(URL_SAFE_NO_PAD.encode(remote_id))
-}
-
-fn track_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
-    track_cache_dir(remote_id).join(format!(
-        "{}.track",
-        blake3::hash(track_id.as_bytes()).to_hex()
-    ))
-}
-
-fn track_cache_id_path(remote_id: &str, track_id: &str) -> PathBuf {
-    track_cache_dir(remote_id).join(format!("{}.id", blake3::hash(track_id.as_bytes()).to_hex()))
-}
-
-fn legacy_track_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
-    track_cache_dir(remote_id).join(URL_SAFE_NO_PAD.encode(track_id))
-}
-
-async fn download_track(
-    state: DesktopState,
-    client: Client,
-    track_id: String,
-) -> Result<Vec<u8>, String> {
-    let remote_id = client.remote_id().to_string();
-    let path = track_cache_path(&remote_id, &track_id);
-    let cached = match tokio::fs::read(&path).await {
-        Ok(bytes) => Some(bytes),
-        Err(_) => tokio::fs::read(legacy_track_cache_path(&remote_id, &track_id))
-            .await
-            .ok(),
-    };
-    if let Some(bytes) = cached {
-        if let Ok(mut registry) = state.0.lock() {
-            registry.audio.transfers.insert(
-                track_id,
-                DesktopTransfer {
-                    received: bytes.len() as u64,
-                    total: bytes.len() as u64,
-                    active: false,
-                    cached: true,
-                },
-            );
-        }
-        return Ok(bytes);
-    }
-    if state
-        .0
-        .lock()
-        .map_err(|_| "desktop native registry lock poisoned".to_string())?
-        .offline_only
-    {
-        return Err("track is not available in the desktop offline cache".to_string());
-    }
-    let (descriptor, mut stream) = client
-        .stream_open(TrackId(track_id.clone()))
-        .await
-        .map_err(|error| error.to_string())?;
-    let capacity = usize::try_from(descriptor.file_size).unwrap_or(0);
-    let mut bytes = Vec::with_capacity(capacity);
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    if let Ok(mut registry) = state.0.lock() {
-        registry.audio.transfers.insert(
-            track_id.clone(),
-            DesktopTransfer {
-                total: descriptor.file_size,
-                active: true,
-                ..DesktopTransfer::default()
-            },
-        );
-    }
-    while let Some(read) = stream
-        .read(&mut buffer)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        if read == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-        if let Ok(mut registry) = state.0.lock() {
-            if let Some(transfer) = registry.audio.transfers.get_mut(&track_id) {
-                transfer.received = bytes.len() as u64;
-            }
-        }
-    }
-    if bytes.len() as u64 != descriptor.file_size {
-        return Err(format!(
-            "track {track_id} ended at {} of {} bytes",
-            bytes.len(),
-            descriptor.file_size
-        ));
-    }
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|error| error.to_string())?;
-    tokio::fs::write(
-        track_cache_id_path(&remote_id, &track_id),
-        track_id.as_bytes(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    if let Ok(mut registry) = state.0.lock() {
-        registry.audio.transfers.insert(
-            track_id,
-            DesktopTransfer {
-                received: descriptor.file_size,
-                total: descriptor.file_size,
-                active: false,
-                cached: true,
-            },
-        );
-    }
-    Ok(bytes)
-}
-
-fn decoder(bytes: Vec<u8>) -> Result<Decoder<Cursor<Vec<u8>>>, String> {
-    let byte_len = bytes.len() as u64;
-    Decoder::builder()
-        .with_data(Cursor::new(bytes))
-        .with_byte_len(byte_len)
-        .with_seekable(true)
-        .with_coarse_seek(true)
-        .build()
-        .map_err(|error| error.to_string())
-}
-
-fn sync_audio(audio: &mut DesktopAudio) {
-    let remaining = audio.player.as_ref().map_or(0, |player| player.len());
-    while audio.active.len() > remaining {
-        audio.active.pop_front();
-    }
-}
-
-fn close_audio_device(audio: &mut DesktopAudio) {
-    audio.generation = audio.generation.saturating_add(1);
-    if let Some(player) = audio.player.take() {
-        player.stop();
-    }
-    // Drop the CPAL stream after the player so ALSA/PipeWire sees an orderly
-    // disconnect. A later play request will open a completely new device.
-    audio.device.take();
-    audio.active.clear();
-    audio.queue.clear();
-    audio.prefetching = None;
-    audio.loading = false;
-}
-
-fn close_native_audio(state: &DesktopState) {
-    if let Ok(mut registry) = state.0.lock() {
-        close_audio_device(&mut registry.audio);
-    }
-}
-
-fn player_state(
-    audio: &mut DesktopAudio,
-    include_queue: bool,
-    drain_completed_transfers: bool,
-) -> DesktopPlayerState {
-    sync_audio(audio);
-    let current_index = audio.active.front().copied().unwrap_or(0);
-    let transfers = audio.transfers.clone();
-    if drain_completed_transfers {
-        // Active transfers remain available to progress polls. A completed
-        // transfer is a one-shot notification and must not grow every later state.
-        audio.transfers.retain(|_, transfer| transfer.active);
-    }
-    DesktopPlayerState {
-        track_id: audio
-            .active
-            .front()
-            .and_then(|index| audio.queue.get(*index))
-            .cloned(),
-        queue: include_queue.then(|| audio.queue.clone()),
-        current_index: include_queue.then_some(current_index),
-        playing: audio
-            .player
-            .as_ref()
-            .is_some_and(|player| !player.is_paused() && !player.empty()),
-        loading: audio.loading,
-        position: audio
-            .player
-            .as_ref()
-            .map_or(0.0, |player| player.get_pos().as_secs_f64()),
-        duration: 0.0,
-        repeat: audio.repeat,
-        shuffle: audio.shuffle,
-        volume: audio.volume,
-        transfers,
-    }
 }
 
 fn address(options: &ConnectOptions) -> Result<EndpointAddr, String> {
@@ -457,22 +188,14 @@ async fn desktop_cover_art(
     handle: u64,
     cover_art_id: String,
     full_quality: bool,
-) -> Result<Value, String> {
-    let response = state
-        .client(handle)?
-        .request(BackendRequest::GetCoverArt {
-            cover_art_id: CoverArtId(cover_art_id),
-            full_quality,
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-    let BackendResponse::CoverArt(cover) = response else {
-        return Err("backend returned an unexpected cover response".to_string());
-    };
-    Ok(serde_json::json!({
-        "contentType": cover.content_type,
-        "bytesBase64": BASE64.encode(cover.bytes),
-    }))
+) -> Result<Response, String> {
+    let client = state.client(handle)?;
+    let offline_only = state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?
+        .offline_only;
+    cover::fetch(client, cover_art_id, full_quality, offline_only).await
 }
 
 #[tauri::command]
@@ -591,221 +314,13 @@ async fn desktop_read_stream(
     Ok(Response::new(buffer))
 }
 
-fn schedule_audio_prefetch(state: DesktopState, client_handle: u64) {
-    let scheduled = {
-        let mut registry = match state.0.lock() {
-            Ok(registry) => registry,
-            Err(_) => return,
-        };
-        let audio = &mut registry.audio;
-        sync_audio(audio);
-        let Some(&current) = audio.active.front() else {
-            return;
-        };
-        if audio.queue.len() < 2 || audio.active.len() >= 2 || audio.prefetching.is_some() {
-            return;
-        }
-        let next = (current + 1) % audio.queue.len();
-        if audio.active.contains(&next) {
-            return;
-        }
-        audio.prefetching = Some(next);
-        (
-            audio.generation,
-            next,
-            audio.queue[next].clone(),
-            registry.clients.get(&client_handle).cloned(),
-        )
-    };
-    let (generation, index, track_id, Some(client)) = scheduled else {
-        return;
-    };
-    tauri::async_runtime::spawn(async move {
-        let result = download_track(state.clone(), client, track_id.clone())
-            .await
-            .and_then(decoder);
-        let mut registry = match state.0.lock() {
-            Ok(registry) => registry,
-            Err(_) => return,
-        };
-        let audio = &mut registry.audio;
-        if audio.generation != generation || audio.prefetching != Some(index) {
-            return;
-        }
-        audio.prefetching = None;
-        match result {
-            Ok(source) => {
-                if let Some(player) = &audio.player {
-                    player.append(source);
-                    audio.active.push_back(index);
-                    log::info!("desktop player queued track_id={track_id}");
-                }
-            }
-            Err(error) => log::warn!("desktop player prefetch failed track_id={track_id}: {error}"),
-        }
-    });
-}
-
-async fn start_audio(
-    state: DesktopState,
-    client_handle: u64,
-    queue: Vec<String>,
-    selected: usize,
-) -> Result<DesktopPlayerState, String> {
-    let (generation, client, track_id) = {
-        let mut registry = state
-            .0
-            .lock()
-            .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-        let client = registry
-            .clients
-            .get(&client_handle)
-            .cloned()
-            .ok_or_else(|| "desktop client is closed".to_string())?;
-        let audio = &mut registry.audio;
-        audio.generation = audio.generation.saturating_add(1);
-        audio.client_handle = client_handle;
-        audio.queue = queue;
-        audio.active.clear();
-        audio.prefetching = None;
-        audio.loading = true;
-        let track_id = audio
-            .queue
-            .get(selected)
-            .cloned()
-            .ok_or_else(|| "selected track is not in the desktop queue".to_string())?;
-        (audio.generation, client, track_id)
-    };
-    let source = download_track(state.clone(), client, track_id.clone())
-        .await
-        .and_then(decoder)?;
-    let (result, outgoing, incoming) = {
-        let mut registry = state
-            .0
-            .lock()
-            .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-        let audio = &mut registry.audio;
-        if audio.generation != generation {
-            return Err("desktop playback request was replaced".to_string());
-        }
-        if audio.device.is_none() {
-            audio.device =
-                Some(DeviceSinkBuilder::open_default_sink().map_err(|error| {
-                    format!("could not open the default audio device: {error}")
-                })?);
-        }
-        let outgoing = audio.player.take();
-        let player = Arc::new(Player::connect_new(
-            &audio.device.as_ref().expect("device exists").mixer(),
-        ));
-        player.set_volume(if outgoing.is_some() {
-            0.0
-        } else {
-            audio.volume
-        });
-        player.append(source);
-        audio.player = Some(player.clone());
-        audio.active.push_back(selected);
-        audio.loading = false;
-        log::info!("desktop player started track_id={track_id}");
-        (player_state(audio, true, true), outgoing, player)
-    };
-    if let Some(outgoing) = outgoing {
-        let fade_state = state.clone();
-        tauri::async_runtime::spawn(async move {
-            for step in 1..=CROSSFADE_STEPS {
-                tokio::time::sleep(TRACK_CROSSFADE / CROSSFADE_STEPS).await;
-                let target = {
-                    let Ok(registry) = fade_state.0.lock() else {
-                        return;
-                    };
-                    if registry.audio.generation != generation {
-                        outgoing.stop();
-                        return;
-                    }
-                    registry.audio.volume
-                };
-                let progress = step as f32 / CROSSFADE_STEPS as f32;
-                outgoing.set_volume(target * (1.0 - progress));
-                incoming.set_volume(target * progress);
-            }
-            outgoing.stop();
-            log::info!("desktop player crossfade complete");
-        });
-    }
-    schedule_audio_prefetch(state, client_handle);
-    Ok(result)
-}
-
-#[tauri::command]
-async fn desktop_play(
-    state: State<'_, DesktopState>,
-    handle: u64,
-    track_id: String,
-    queue: Vec<String>,
-) -> Result<DesktopPlayerState, String> {
-    let selected = queue
-        .iter()
-        .position(|id| id == &track_id)
-        .ok_or_else(|| "selected track is not in the desktop queue".to_string())?;
-    start_audio((*state).clone(), handle, queue, selected).await
-}
-
-#[tauri::command]
-async fn desktop_player_state(
-    state: State<'_, DesktopState>,
-    handle: u64,
-    include_queue: Option<bool>,
-) -> Result<DesktopPlayerState, String> {
-    let result = {
-        let mut registry = state
-            .0
-            .lock()
-            .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-        player_state(&mut registry.audio, include_queue.unwrap_or(false), true)
-    };
-    let _ = handle;
-    Ok(result)
-}
-
 #[tauri::command]
 async fn desktop_cached_track_ids(
     state: State<'_, DesktopState>,
     handle: u64,
 ) -> Result<Vec<String>, String> {
     let remote_id = state.client(handle)?.remote_id().to_string();
-    let mut ids = Vec::new();
-    let Ok(mut entries) = tokio::fs::read_dir(track_cache_dir(&remote_id)).await else {
-        return Ok(ids);
-    };
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.ends_with(".id") {
-            let audio_path = entry.path().with_extension("track");
-            if tokio::fs::metadata(audio_path).await.is_ok()
-                && let Ok(id) = tokio::fs::read_to_string(entry.path()).await
-            {
-                ids.push(id);
-            }
-            continue;
-        }
-        if name.ends_with(".track") {
-            continue;
-        }
-        let encoded = entry.file_name();
-        let Ok(bytes) = URL_SAFE_NO_PAD.decode(encoded.to_string_lossy().as_bytes()) else {
-            continue;
-        };
-        if let Ok(id) = String::from_utf8(bytes) {
-            ids.push(id);
-        }
-    }
-    Ok(ids)
+    track::cached_ids(&remote_id).await
 }
 
 #[tauri::command]
@@ -814,24 +329,8 @@ async fn desktop_cache_track(
     handle: u64,
     track_id: String,
 ) -> Result<Value, String> {
-    download_track((*state).clone(), state.client(handle)?, track_id).await?;
+    track::download((*state).clone(), state.client(handle)?, track_id).await?;
     Ok(serde_json::json!({ "cached": true }))
-}
-
-#[tauri::command]
-fn desktop_cache_progress(
-    state: State<'_, DesktopState>,
-    track_id: String,
-) -> Result<DesktopTransfer, String> {
-    Ok(state
-        .0
-        .lock()
-        .map_err(|_| "desktop native registry lock poisoned".to_string())?
-        .audio
-        .transfers
-        .get(&track_id)
-        .cloned()
-        .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -847,121 +346,12 @@ fn desktop_set_offline_only(state: State<'_, DesktopState>, enabled: bool) -> Re
 #[tauri::command]
 async fn desktop_cache_stats(state: State<'_, DesktopState>, handle: u64) -> Result<Value, String> {
     let remote_id = state.client(handle)?.remote_id().to_string();
-    let mut count = 0_u64;
-    let mut size = 0_u64;
-    if let Ok(mut entries) = tokio::fs::read_dir(track_cache_dir(&remote_id)).await {
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            if let Ok(metadata) = entry.metadata().await {
-                if metadata.is_file() && !entry.file_name().to_string_lossy().ends_with(".id") {
-                    count += 1;
-                    size = size.saturating_add(metadata.len());
-                }
-            }
-        }
-    }
+    let (track_count, track_size) = track::stats(&remote_id).await?;
+    let (cover_count, cover_size) = cover::stats(&remote_id).await?;
     Ok(serde_json::json!({
-        "tracks": { "count": count, "size": size },
-        "covers": { "count": 0, "size": 0 },
+        "tracks": { "count": track_count, "size": track_size },
+        "covers": { "count": cover_count, "size": cover_size },
     }))
-}
-
-#[tauri::command]
-async fn desktop_player_command(
-    state: State<'_, DesktopState>,
-    handle: u64,
-    command: String,
-    payload: Value,
-) -> Result<DesktopPlayerState, String> {
-    let switch = {
-        let mut registry = state
-            .0
-            .lock()
-            .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-        let audio = &mut registry.audio;
-        sync_audio(audio);
-        match command.as_str() {
-            "next" | "previous" => {
-                if audio.queue.is_empty() {
-                    return Err("desktop playback queue is empty".to_string());
-                }
-                let current = audio.active.front().copied().unwrap_or(0);
-                let offset = if command == "next" {
-                    1
-                } else {
-                    audio.queue.len() - 1
-                };
-                Some(((current + offset) % audio.queue.len(), audio.queue.clone()))
-            }
-            "toggle" => {
-                if let Some(player) = &audio.player {
-                    if player.is_paused() {
-                        player.play()
-                    } else {
-                        player.pause()
-                    }
-                }
-                None
-            }
-            "seek" => {
-                if let Some(player) = &audio.player {
-                    player
-                        .try_seek(Duration::from_secs_f64(
-                            payload
-                                .get("seconds")
-                                .and_then(Value::as_f64)
-                                .unwrap_or(0.0)
-                                .max(0.0),
-                        ))
-                        .map_err(|error| error.to_string())?;
-                }
-                None
-            }
-            "volume" => {
-                audio.volume = payload
-                    .get("value")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.5)
-                    .clamp(0.0, 1.0) as f32;
-                if let Some(player) = &audio.player {
-                    player.set_volume(audio.volume)
-                }
-                None
-            }
-            "repeat" => {
-                audio.repeat = payload
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                None
-            }
-            "shuffle" => {
-                audio.shuffle = payload
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                None
-            }
-            "stop" => {
-                audio.player.take();
-                audio.active.clear();
-                audio.queue.clear();
-                None
-            }
-            _ => return Err(format!("unsupported desktop player command: {command}")),
-        }
-    };
-    if let Some((selected, queue)) = switch {
-        return start_audio((*state).clone(), handle, queue, selected).await;
-    }
-    let mut registry = state
-        .0
-        .lock()
-        .map_err(|_| "desktop native registry lock poisoned".to_string())?;
-    Ok(player_state(&mut registry.audio, false, false))
 }
 
 #[tauri::command]
@@ -983,7 +373,7 @@ fn desktop_close(state: State<'_, DesktopState>, handle: u64) -> Result<(), Stri
         .map_err(|_| "desktop native registry lock poisoned".to_string())?;
     registry.clients.remove(&handle);
     if registry.audio.client_handle == handle {
-        close_audio_device(&mut registry.audio);
+        player::close(&mut registry.audio);
     }
     Ok(())
 }
@@ -1026,64 +416,6 @@ fn desktop_build_info() -> NativeBuildInfo {
             .unwrap_or("development"),
         epoch: env!("DESKTOP_EPOCH").parse().unwrap_or(0),
         epoch_commit: env!("DESKTOP_EPOCH_COMMIT"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cache_names_have_fixed_length_for_long_multibyte_track_ids() {
-        let track_id = "青空Jumping Heart (黒澤ダイヤ Solo Ver.)/".repeat(20);
-        let path = track_cache_path("remote", &track_id);
-        let id_path = track_cache_id_path("remote", &track_id);
-
-        assert_eq!(path.file_name().unwrap().to_string_lossy().len(), 70);
-        assert_eq!(id_path.file_name().unwrap().to_string_lossy().len(), 67);
-        assert_ne!(
-            track_cache_path("remote", &track_id),
-            track_cache_path("remote", "other")
-        );
-    }
-
-    #[test]
-    fn compact_player_state_omits_queue_and_drains_completed_transfers() {
-        let mut audio = DesktopAudio {
-            queue: vec!["first".into(), "second".into()],
-            transfers: HashMap::from([
-                (
-                    "first".into(),
-                    DesktopTransfer {
-                        received: 10,
-                        total: 10,
-                        active: false,
-                        cached: true,
-                    },
-                ),
-                (
-                    "second".into(),
-                    DesktopTransfer {
-                        received: 5,
-                        total: 10,
-                        active: true,
-                        cached: false,
-                    },
-                ),
-            ]),
-            ..DesktopAudio::default()
-        };
-
-        let state = player_state(&mut audio, false, true);
-        assert!(state.queue.is_none());
-        assert!(state.current_index.is_none());
-        assert_eq!(state.transfers.len(), 2);
-        assert!(!audio.transfers.contains_key("first"));
-        assert!(audio.transfers.contains_key("second"));
-
-        let state = player_state(&mut audio, true, false);
-        assert_eq!(state.queue.as_deref(), Some(audio.queue.as_slice()));
-        assert!(state.current_index.is_some());
     }
 }
 
@@ -1142,7 +474,7 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
-                close_native_audio(&app.state::<DesktopState>());
+                player::close_native(&app.state::<DesktopState>());
             }
         });
 }

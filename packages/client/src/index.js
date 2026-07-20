@@ -278,7 +278,7 @@ export class MusicClient {
   async loadCoverUrl(id, fullQuality) {
     let cache;
     let request;
-    if (!fullQuality && "caches" in globalThis) {
+    if (!this.inner.native && !fullQuality && "caches" in globalThis) {
       try {
         cache = await globalThis.caches.open(COVER_CACHE_NAME);
         request = coverCacheRequest(this.remoteId, id);
@@ -294,7 +294,7 @@ export class MusicClient {
       }
     }
 
-    if (this.offlineOnly) throw new Error("cover is not available offline");
+    if (this.offlineOnly && !this.inner.native) throw new Error("cover is not available offline");
 
     const media = await this.enqueueCoverFetch(id, fullQuality);
     let blob;

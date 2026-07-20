@@ -100,17 +100,20 @@ class DesktopInner {
 
   /** @param {string} id @param {boolean} fullQuality */
   async fetchCover(id, fullQuality) {
-    const cover = await invoke("desktop_cover_art", {
-      handle: this.handle,
-      coverArtId: id,
-      fullQuality,
-    });
-    const binary = atob(cover.bytesBase64);
-    const data = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index);
+    const data = bytes(
+      await invoke("desktop_cover_art", {
+        handle: this.handle,
+        coverArtId: id,
+        fullQuality,
+      }),
+    );
+    if (data.byteLength < 3) throw new Error("desktop cover response is incomplete");
+    const contentTypeLength = (data[0] << 8) | data[1];
+    const imageOffset = 2 + contentTypeLength;
+    if (imageOffset >= data.byteLength) throw new Error("desktop cover response is invalid");
     return {
-      contentType: cover.contentType,
-      bytes: data,
+      contentType: new TextDecoder().decode(data.subarray(2, imageOffset)),
+      bytes: data.subarray(imageOffset),
       free() {},
     };
   }
