@@ -100,7 +100,7 @@ jobs:
       - name: Set desktop asset name
         id: asset
         shell: bash
-        run: echo "prefix=iroh-fm_${RELEASE_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: echo "pattern=iroh-fm-${RELEASE_SHA::7}.[arch][ext]" >> "$GITHUB_OUTPUT"
 
       - name: Build Tauri bundles
         uses: tauri-apps/tauri-action@v1
@@ -108,7 +108,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: packages/web
-          releaseAssetNamePattern: ${{ steps.asset.outputs.prefix }}_[platform]_[arch][ext]
+          releaseAssetNamePattern: ${{ steps.asset.outputs.pattern }}
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: desktop-[platform]-[arch]-[bundle]
           args: ${{ matrix.tauri_args }}
