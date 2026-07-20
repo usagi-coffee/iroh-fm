@@ -94,7 +94,7 @@ class MainActivity : ComponentActivity() {
     private fun dispatchReadyIfNeeded() {
         if (!postMessageRelationshipValidated || !messageChannelReady || readyDispatched) return
         channelReady = true
-        val result = send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState()))
+        val result = send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState(includeQueue = true)))
         readyDispatched = result == CustomTabsService.RESULT_SUCCESS
         Log.d(TAG, "Native bridge ready dispatched: result=$result")
         if (!readyDispatched) channelReady = false
@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (channelReady) send(JSONObject().put("module", "native").put("event", "state").put("state", playerState()))
+        if (channelReady) send(JSONObject().put("module", "native").put("event", "state").put("state", playerState(includeQueue = true)))
     }
 
     override fun onDestroy() {
@@ -338,7 +338,7 @@ class MainActivity : ComponentActivity() {
         "setOfflineOnly" -> setOfflineOnly(payload.getBoolean("enabled"))
         "play" -> play(payload)
         "playerCommand" -> playerCommand(payload)
-        "playerState" -> playerState()
+        "playerState" -> playerState(payload.optBoolean("includeQueue", false))
         else -> error("unsupported native action: $action")
     }
 
@@ -444,13 +444,13 @@ class MainActivity : ComponentActivity() {
         return playerState()
     }
 
-    private fun playerState(): JSONObject {
+    private fun playerState(includeQueue: Boolean = false): JSONObject {
         val player = controller
         val trackId = player?.currentMediaItem?.mediaId
         val transfer = NativeTransferProgress.snapshot(trackId)
         val queue = JSONArray()
         val transfers = JSONObject()
-        if (player != null) {
+        if (includeQueue && player != null) {
             for (index in 0 until player.mediaItemCount) {
                 val id = player.getMediaItemAt(index).mediaId
                 queue.put(id)
@@ -471,9 +471,7 @@ class MainActivity : ComponentActivity() {
         }
         return JSONObject()
             .put("trackId", trackId ?: JSONObject.NULL)
-            .put("queue", queue)
             .put("currentIndex", player?.currentMediaItemIndex ?: 0)
-            .put("transfers", transfers)
             .put("playing", player?.isPlaying == true)
             .put("loading", player?.playbackState == Player.STATE_BUFFERING)
             .put("transferring", transfer?.active == true)
@@ -485,6 +483,12 @@ class MainActivity : ComponentActivity() {
             .put("repeat", player?.repeatMode == Player.REPEAT_MODE_ONE)
             .put("shuffle", player?.shuffleModeEnabled == true)
             .put("volume", player?.volume ?: 0.5f)
+            .also {
+                if (includeQueue) {
+                    it.put("queue", queue)
+                    it.put("transfers", transfers)
+                }
+            }
     }
 
     private fun reply(id: String, result: Any) = send(JSONObject().put("module", "native").put("id", id).put("result", result))

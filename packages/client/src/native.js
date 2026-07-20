@@ -3,6 +3,52 @@ const NATIVE_CACHE_TIMEOUT_MS = 60 * 60 * 1_000;
 const NATIVE_CACHE_PROGRESS_MS = 250;
 const NATIVE_COVER_CONCURRENCY = 3;
 const NATIVE_REQUEST_CHUNK_CHARS = 24 * 1024;
+const NATIVE_QUEUE_DURATION_SECONDS = 4 * 60 * 60;
+const NATIVE_QUEUE_LOOKBEHIND_SECONDS = 30 * 60;
+const NATIVE_QUEUE_MAX_TRACKS = 256;
+const NATIVE_QUEUE_MAX_LOOKBEHIND_TRACKS = 32;
+/** @typedef {{id: string, title: string, artist: string, album: string, duration_seconds?: number}} NativeQueueTrack */
+
+/** @param {{duration_seconds?: number}} track */
+function trackDuration(track) {
+  const duration = Number(track.duration_seconds);
+  return Number.isFinite(duration) && duration > 0 ? duration : 3 * 60;
+}
+
+/** @param {NativeQueueTrack} selected @param {NativeQueueTrack[]} queue */
+function nativeQueueWindow(selected, queue) {
+  const selectedIndex = queue.findIndex((track) => track.id === selected.id);
+  if (selectedIndex < 0 || queue.length < 2) return [selected];
+
+  const before = [];
+  let behindSeconds = 0;
+  for (
+    let offset = 1;
+    offset < queue.length &&
+    before.length < NATIVE_QUEUE_MAX_LOOKBEHIND_TRACKS &&
+    behindSeconds < NATIVE_QUEUE_LOOKBEHIND_SECONDS;
+    offset += 1
+  ) {
+    const track = queue[(selectedIndex - offset + queue.length) % queue.length];
+    before.unshift(track);
+    behindSeconds += trackDuration(track);
+  }
+
+  const window = [...before, selected];
+  let durationSeconds = behindSeconds + trackDuration(selected);
+  for (
+    let offset = 1;
+    offset < queue.length &&
+    window.length < NATIVE_QUEUE_MAX_TRACKS &&
+    durationSeconds < NATIVE_QUEUE_DURATION_SECONDS;
+    offset += 1
+  ) {
+    const track = queue[(selectedIndex + offset) % queue.length];
+    window.push(track);
+    durationSeconds += trackDuration(track);
+  }
+  return window;
+}
 
 /** @type {MessagePort | undefined} */
 let port;
@@ -193,6 +239,8 @@ export class NativeMusicClient {
     this.coverQueue = /** @type {Array<() => void>} */ ([]);
     this.offlineOnly = false;
     this.nativeQueueIds = /** @type {string[]} */ ([]);
+    /** @type {NativeQueueTrack[] | null} */
+    this.nativeQueueSource = null;
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -237,6 +285,7 @@ export class NativeMusicClient {
     await nativeRequest("setOfflineOnly", { enabled });
     this.offlineOnly = enabled;
     this.nativeQueueIds = [];
+    this.nativeQueueSource = null;
   }
 
   async cachedTrackIds() {
@@ -317,12 +366,12 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string, title: string, artist: string, album: string}>} queue */
+  /** @param {NativeQueueTrack} track @param {NativeQueueTrack[]} queue */
   async playNative(track, queue) {
-    const queueIds = queue.map(({ id }) => id);
-    const queueChanged =
-      queueIds.length !== this.nativeQueueIds.length ||
-      queueIds.some((id, index) => id !== this.nativeQueueIds[index]);
+    const reuseQueue = queue === this.nativeQueueSource && this.nativeQueueIds.includes(track.id);
+    const nativeQueue = reuseQueue ? [] : nativeQueueWindow(track, queue);
+    const queueIds = reuseQueue ? this.nativeQueueIds : nativeQueue.map(({ id }) => id);
+    const queueChanged = !reuseQueue;
     const payload = {
       handle: this.handle,
       trackId: track.id,
@@ -330,36 +379,46 @@ export class NativeMusicClient {
         ? {
             queue: this.compactQueue
               ? queueIds
-              : queue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
+              : nativeQueue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
           }
         : {}),
     };
     try {
       const state = await nativeRequest("play", payload);
-      if (queueChanged) this.nativeQueueIds = queueIds;
+      if (queueChanged) {
+        this.nativeQueueIds = queueIds;
+        this.nativeQueueSource = queue;
+      }
       return state;
     } catch (error) {
       if (queueChanged) throw error;
       // The Android service may have been recreated while this web client stayed alive.
+      const recoveryQueue = nativeQueueWindow(track, queue);
+      const recoveryQueueIds = recoveryQueue.map(({ id }) => id);
       const state = await nativeRequest("play", {
         ...payload,
         queue: this.compactQueue
-          ? queueIds
-          : queue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
+          ? recoveryQueueIds
+          : recoveryQueue.map(({ id, title, artist, album }) => ({ id, title, artist, album })),
       });
-      this.nativeQueueIds = queueIds;
+      this.nativeQueueIds = recoveryQueueIds;
+      this.nativeQueueSource = queue;
       return state;
     }
   }
 
   /** @param {string} command @param {Record<string, any>} [payload] */
   playerCommand(command, payload = {}) {
-    if (command === "stop") this.nativeQueueIds = [];
+    if (command === "stop") {
+      this.nativeQueueIds = [];
+      this.nativeQueueSource = null;
+    }
     return nativeRequest("playerCommand", { command, ...payload });
   }
 
-  playerState() {
-    return nativeRequest("playerState");
+  /** @param {{includeQueue?: boolean}} [options] */
+  playerState({ includeQueue = false } = {}) {
+    return nativeRequest("playerState", { includeQueue });
   }
 
   async close() {

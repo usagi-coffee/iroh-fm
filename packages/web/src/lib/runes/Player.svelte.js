@@ -348,7 +348,9 @@ export class Player {
     if (!this.nativePlayback(client) || this.nativeStatePending) return;
     this.nativeStatePending = true;
     try {
-      this.applyNativeState(await client.playerState());
+      this.applyNativeState(
+        await client.playerState(client.native ? { includeQueue: this.queue.length === 0 } : undefined),
+      );
     } catch {
       // The activity or message channel can be transitioning while the TWA wakes.
     } finally {
