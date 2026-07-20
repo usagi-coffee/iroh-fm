@@ -20,11 +20,6 @@ function trackMetadataVariants(track) {
   return variants;
 }
 
-/** @param {import('./types').TrackData[]} tracks */
-export function cacheTrackSearchMetadata(tracks) {
-  for (const track of tracks) trackMetadataVariants(track);
-}
-
 /** @template T @param {Record<string, unknown> | null | undefined} response @param {string} key @param {T} fallback @returns {T} */
 export function variant(response, key, fallback) {
   return response && key in response ? /** @type {T} */ (response[key]) : fallback;

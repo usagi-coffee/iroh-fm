@@ -355,8 +355,6 @@ export class Connection {
       this.app.library.artists = variant(data.artists, "Artists", []);
       this.app.library.replaceTracks(tracks, cachedIds);
       this.app.library.starred = variant(data.starred, "Starred", this.app.library.starred);
-      this.app.library.cacheStarredRouteData();
-      this.app.library.cacheSearchData();
       if (previousClient && previousClient !== nextClient)
         await previousClient.close().catch(() => {});
       return true;

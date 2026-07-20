@@ -1,9 +1,9 @@
-import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { SvelteSet } from "svelte/reactivity";
 
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { cacheTrackSearchMetadata, filterTracks, friendlyError } from "../utils.js";
+import { filterTracks, friendlyError } from "../utils.js";
 import { Track } from "./Track.svelte.js";
 
 export class Library {
@@ -15,22 +15,25 @@ export class Library {
   artists = $state([]);
   /** @type {Track[]} */
   tracks = $state([]);
-  /** @type {import('../types').TrackListItem[]} */
-  trackListItems = $state.raw([]);
   /** @type {import('../types').StarredSet} */
   starred = $state({ artists: [], albums: [], tracks: [] });
+  offlineOnly = $state(false);
   /** @type {Set<string>} */
-  starredTrackIds = $derived.by(() => new Set(this.starred.tracks.map((track) => track.id)));
+  starredTrackIds = $derived(new Set(this.starred.tracks.map((track) => track.id)));
   /** @type {Set<string>} */
-  cachedTrackIds = $derived.by(
-    () => new Set(this.tracks.filter((track) => track.cached).map((track) => track.id)),
-  );
+  starredAlbumIds = $derived(new Set(this.starred.albums.map((album) => album.id)));
+  /** @type {Track[]} */
+  cachedTracks = $derived(this.tracks.filter((track) => track.cached));
+  /** @type {Set<string>} */
+  cachedTrackIds = $derived(new Set(this.cachedTracks.map((track) => track.id)));
   /** @type {SvelteSet<string>} */
   cachingTrackIds = new SvelteSet();
   /** @type {SvelteSet<string>} */
   cachingAlbumIds = new SvelteSet();
-  /** @type {SvelteMap<string, Track>} */
-  tracksById = new SvelteMap();
+  /** @type {Map<string, Track>} */
+  tracksById = $derived(new Map(this.tracks.map((track) => [track.id, track])));
+  /** @type {Map<string, import('../types').AlbumData>} */
+  albumById = $derived(new Map(this.albums.map((album) => [album.id, album])));
   /** @type {Map<string, import('../types').AlbumData>} */
   albumByTrackId = $derived.by(() => {
     /** @type {Map<string, import('../types').AlbumData>} */
@@ -56,23 +59,76 @@ export class Library {
   /** @type {Set<string>} */
   allStarredTrackIds = $derived.by(() => {
     const selected = new Set(this.starred.tracks.map((track) => track.id));
-    const albums = new Map(this.albums.map((album) => [album.id, album]));
     for (const album of this.starred.albums) {
       for (const id of album.track_ids) selected.add(id);
     }
     for (const artist of this.starred.artists) {
       for (const albumId of artist.album_ids) {
-        for (const id of albums.get(albumId)?.track_ids ?? []) selected.add(id);
+        for (const id of this.albumById.get(albumId)?.track_ids ?? []) selected.add(id);
       }
     }
     return selected;
   });
   /** @type {Track[]} */
-  starredTracks = $state.raw([]);
+  starredTracks = $derived(this.tracks.filter((track) => this.allStarredTrackIds.has(track.id)));
+  /** @type {Track[]} */
+  cachedStarredTracks = $derived(this.starredTracks.filter((track) => track.cached));
+  /** @type {Track[]} */
+  availableTracks = $derived(this.offlineOnly ? this.cachedTracks : this.tracks);
+  /** @type {Track[]} */
+  availableStarredTracks = $derived(
+    this.offlineOnly ? this.cachedStarredTracks : this.starredTracks,
+  );
   /** @type {import('../types').TrackListItem[]} */
-  starredTrackListItems = $state.raw([]);
-  offlineOnly = $state(false);
+  trackListItems = $derived(this.createTrackListItems(this.tracks, false));
+  /** @type {import('../types').TrackListItem[]} */
+  cachedTrackListItems = $derived(this.createTrackListItems(this.cachedTracks, true));
+  /** @type {import('../types').TrackListItem[]} */
+  starredTrackListItems = $derived(this.createTrackListItems(this.starredTracks, false));
+  /** @type {import('../types').TrackListItem[]} */
+  cachedStarredTrackListItems = $derived(this.createTrackListItems(this.cachedStarredTracks, true));
+  /** @type {import('../types').TrackListItem[]} */
+  availableTrackListItems = $derived(
+    this.offlineOnly ? this.cachedTrackListItems : this.trackListItems,
+  );
+  /** @type {import('../types').TrackListItem[]} */
+  availableStarredTrackListItems = $derived(
+    this.offlineOnly ? this.cachedStarredTrackListItems : this.starredTrackListItems,
+  );
   trackFilterQuery = $state("");
+  /** @type {Track[]} */
+  filteredTracks = $derived(
+    this.trackFilterQuery.trim()
+      ? filterTracks(this.availableTracks, this.trackFilterQuery)
+      : this.availableTracks,
+  );
+  /** @type {import('../types').TrackListItem[]} */
+  filteredTrackListItems = $derived(
+    this.trackFilterQuery.trim()
+      ? this.createTrackListItems(this.filteredTracks)
+      : this.availableTrackListItems,
+  );
+  /** @type {import('../types').AlbumData[]} */
+  offlineAlbums = $derived(
+    this.albums.filter(
+      (album) =>
+        album.track_ids.length > 0 && album.track_ids.some((id) => this.cachedTrackIds.has(id)),
+    ),
+  );
+  /** @type {import('../types').AlbumData[]} */
+  visibleAlbums = $derived(this.offlineOnly ? this.offlineAlbums : this.albums);
+  /** @type {Set<string>} */
+  fullyCachedAlbumIds = $derived(
+    new Set(
+      this.albums
+        .filter(
+          (album) =>
+            album.track_ids.length > 0 &&
+            album.track_ids.every((id) => this.cachedTrackIds.has(id)),
+        )
+        .map((album) => album.id),
+    ),
+  );
   trackFilterFocusPending = $state(false);
   /** @type {string | null} */
   selectedTrackId = $state(null);
@@ -87,23 +143,15 @@ export class Library {
   /** @param {import('../types').TrackData[]} rawTracks @param {Iterable<string>} cachedIds */
   replaceTracks(rawTracks, cachedIds) {
     const cached = new Set(cachedIds);
-    const present = new Set();
+    const previousTracksById = this.tracksById;
     const next = rawTracks.map((data) => {
-      present.add(data.id);
-      let track = this.tracksById.get(data.id);
+      let track = previousTracksById.get(data.id);
       if (track) track.updateMetadata(data);
-      else {
-        track = new Track(data, cached.has(data.id));
-        this.tracksById.set(data.id, track);
-      }
+      else track = new Track(data, cached.has(data.id));
       track.setCached(cached.has(data.id));
       return track;
     });
-    for (const id of this.tracksById.keys()) {
-      if (!present.has(id)) this.tracksById.delete(id);
-    }
     this.tracks = next;
-    this.trackListItems = this.createTrackListItems(next);
   }
 
   /** @param {Iterable<string>} ids */
@@ -119,26 +167,16 @@ export class Library {
 
   /** @param {boolean} [starredOnly] @param {string} [query] */
   getFilteredTracks(starredOnly = false, query = "") {
-    const source = starredOnly ? this.starredTracks : this.tracks;
-    const available = this.offlineOnly ? source.filter((track) => track.cached) : source;
-    if (!query.trim()) return available;
-    return filterTracks(available, query);
+    const source = starredOnly ? this.availableStarredTracks : this.availableTracks;
+    if (!query.trim()) return source;
+    return filterTracks(source, query);
   }
 
   /** @param {Track[]} filtered */
   getTrackListItems(filtered) {
-    if (filtered === this.tracks) return this.trackListItems;
-    if (filtered === this.starredTracks) return this.starredTrackListItems;
+    if (filtered === this.availableTracks) return this.availableTrackListItems;
+    if (filtered === this.availableStarredTracks) return this.availableStarredTrackListItems;
     return this.createTrackListItems(filtered);
-  }
-
-  cacheStarredRouteData() {
-    this.starredTracks = this.tracks.filter((track) => this.allStarredTrackIds.has(track.id));
-    this.starredTrackListItems = this.createTrackListItems(this.starredTracks, false);
-  }
-
-  cacheSearchData() {
-    cacheTrackSearchMetadata(this.tracks);
   }
 
   /** @param {Track[]} filtered @param {boolean} [offlineOnly] */
@@ -150,9 +188,10 @@ export class Library {
       const album = this.albumByTrackId.get(track.id);
       const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
       if (albumKey !== previousAlbumKey) {
-        const albumTracks = (this.tracksByAlbum.get(albumKey) ?? [track]).filter(
-          (item) => !offlineOnly || item.cached,
-        );
+        const allAlbumTracks = this.tracksByAlbum.get(albumKey) ?? [track];
+        const albumTracks = offlineOnly
+          ? allAlbumTracks.filter((item) => item.cached)
+          : allAlbumTracks;
         items.push({
           kind: "album",
           key: `album:${albumKey}:${track.id}`,
@@ -170,16 +209,6 @@ export class Library {
       items.push({ kind: "track", key: `track:${track.id}`, track, trackIndex });
     }
     return items;
-  }
-
-  getVisibleAlbums() {
-    return this.offlineOnly
-      ? this.albums.filter(
-          (album) =>
-            album.track_ids.length > 0 &&
-            album.track_ids.some((id) => this.cachedTrackIds.has(id)),
-        )
-      : this.albums;
   }
 
   /** @param {Track | null} track */
@@ -205,10 +234,7 @@ export class Library {
   /** Album cache state is derived exclusively from its individual track files. */
   /** @param {import('../types').AlbumData} album */
   isAlbumFullyCached(album) {
-    return (
-      album.track_ids.length > 0 &&
-      album.track_ids.every((id) => this.cachedTrackIds.has(id))
-    );
+    return this.fullyCachedAlbumIds.has(album.id);
   }
 
   /** @param {import('../types').AlbumData} album */
@@ -251,7 +277,6 @@ export class Library {
       this.starred.tracks = starred
         ? [track, ...this.starred.tracks.filter((item) => item.id !== track.id)]
         : this.starred.tracks.filter((item) => item.id !== track.id);
-      this.cacheStarredRouteData();
     } catch (error) {
       if (this.app.connection.client === client)
         this.app.connection.error = friendlyError(error, "Could not update the starred track.");
@@ -359,7 +384,7 @@ export class Library {
     if (!album) return;
     const client = this.app.connection.client;
     if (!client) return;
-    const starred = !this.starred.albums.some((item) => item.id === album.id);
+    const starred = !this.starredAlbumIds.has(album.id);
     try {
       await client.request(
         this.app.starredKey
@@ -370,7 +395,6 @@ export class Library {
       this.starred.albums = starred
         ? [album, ...this.starred.albums.filter((item) => item.id !== album.id)]
         : this.starred.albums.filter((item) => item.id !== album.id);
-      this.cacheStarredRouteData();
     } catch (error) {
       if (this.app.connection.client === client)
         this.app.connection.error = friendlyError(error, "Could not update the starred album.");

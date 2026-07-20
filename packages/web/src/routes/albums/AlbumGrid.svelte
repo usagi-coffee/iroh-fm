@@ -238,12 +238,12 @@
                   <button
                     type="button"
                     onclick={(event) => starAlbum(album, event)}
-                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {App.library.starred.albums.some(
-                      (item) => item.id === album.id,
+                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {App.library.starredAlbumIds.has(
+                      album.id,
                     )
                       ? 'text-pink pointer-events-auto translate-y-0 opacity-100'
                       : 'text-subtext0 pointer-events-none translate-y-1 opacity-0'}"
-                    title={App.library.starred.albums.some((item) => item.id === album.id)
+                    title={App.library.starredAlbumIds.has(album.id)
                       ? "Unstar album"
                       : "Star album"}><HeartIcon class="text-xs" /></button
                   >

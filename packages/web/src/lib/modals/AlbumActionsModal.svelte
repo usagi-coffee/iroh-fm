@@ -23,9 +23,7 @@
       ? App.library.isAlbumFullyCached(album)
       : tracks.length > 0 && tracks.every((track) => track.cached),
   );
-  let starred = $derived(
-    Boolean(album && App.library.starred.albums.some((item) => item.id === album?.id)),
-  );
+  let starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)));
   let duration = $derived(
     tracks.reduce((total, track) => total + (track.duration_seconds ?? 0), 0),
   );
