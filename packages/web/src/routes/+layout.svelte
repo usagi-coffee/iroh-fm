@@ -163,15 +163,14 @@
         role="status"
       >
         <span class="text-3xs font-mono font-bold tracking-[.06em] uppercase">
-          Your {nativeUpgrade.platform} application is out of date. Upgrade your {nativeUpgrade.platform}
-          application to use the new web version.
+          Upgrade {nativeUpgrade.platform} app to use the newest web version.
         </span>
         <a
           href={nativeUpgrade.releaseUrl}
           target="_blank"
           rel="noreferrer"
           class="border-yellow/50 hover:bg-yellow/10 text-3xs shrink-0 border px-2 py-1 font-mono font-bold"
-          >DOWNLOAD {nativeUpgrade.platform.toUpperCase()}</a
+          >DOWNLOAD</a
         >
       </div>
     {:else if updateReady && !updateBannerDismissed}
