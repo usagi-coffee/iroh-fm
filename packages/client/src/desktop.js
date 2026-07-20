@@ -13,12 +13,6 @@ async function invoke(command, payload = {}) {
   return invoke(command, payload);
 }
 
-/** @param {string} command @param {Uint8Array} payload @param {Record<string, string>} headers */
-async function invokeRaw(command, payload, headers) {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke(command, payload, { headers });
-}
-
 /** @param {unknown} value */
 function bytes(value) {
   if (value instanceof Uint8Array) return value;
@@ -72,17 +66,11 @@ class DesktopInner {
     this.handle = connection.handle;
     this.endpointId = connection.endpointId;
     this.remoteId = connection.remoteId;
+    this.native = true;
     this.nativePlayback = true;
-    // WebKitGTK advertises MP3 MediaSource support, but incremental appends can
-    // repeatedly underrun its GStreamer pipeline. Download into a Blob first;
-    // the normal web cache and next-track prefetch still apply afterwards.
-    this.supportsProgressivePlayback = false;
     this.info = { path_type: "unknown", address: "", received_bytes: 0 };
     this.infoPending = false;
     this.closed = false;
-    /** @type {string[]} */
-    this.nativeQueueIds = [];
-    this.nativeGeneration = 0;
   }
 
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
@@ -146,30 +134,12 @@ class DesktopInner {
     };
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string}>} queue @param {Uint8Array} data */
-  async playNativeBytes(track, queue, data) {
-    const prepared = await invoke("desktop_prepare_play", {
+  /** @param {{id: string}} track @param {Array<{id: string}>} queue */
+  playNative(track, queue) {
+    return invoke("desktop_play", {
       handle: this.handle,
       trackId: track.id,
       queue: queue.map(({ id }) => id),
-    });
-    this.nativeQueueIds = queue.map(({ id }) => id);
-    this.nativeGeneration = prepared.generation;
-    return invokeRaw("desktop_play_uploaded", data, {
-      "x-iroh-handle": String(this.handle),
-      "x-iroh-generation": String(prepared.generation),
-      "x-iroh-index": String(prepared.selected),
-    });
-  }
-
-  /** @param {string} trackId @param {Uint8Array} data */
-  queueNativeBytes(trackId, data) {
-    const index = this.nativeQueueIds.indexOf(trackId);
-    if (index < 0) return Promise.resolve(false);
-    return invokeRaw("desktop_queue_uploaded", data, {
-      "x-iroh-handle": String(this.handle),
-      "x-iroh-generation": String(this.nativeGeneration),
-      "x-iroh-index": String(index),
     });
   }
 
@@ -184,20 +154,6 @@ class DesktopInner {
 
   async cachedTrackIds() {
     return new Set(await invoke("desktop_cached_track_ids", { handle: this.handle }));
-  }
-
-  /** @param {string} id */
-  async cachedTrackBlob(id) {
-    try {
-      const data = bytes(
-        await invoke("desktop_cached_track", { handle: this.handle, trackId: id }),
-      );
-      return data.byteLength > 0
-        ? new Blob([Uint8Array.from(data).buffer], { type: "application/octet-stream" })
-        : null;
-    } catch {
-      return null;
-    }
   }
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
@@ -218,14 +174,7 @@ class DesktopInner {
     try {
       const result = await invoke("desktop_cache_track", { handle: this.handle, trackId: id });
       await report();
-      if (!result.cached) return false;
-      void this.cachedTrackBlob(id)
-        .then((blob) =>
-          blob ? blob.arrayBuffer() : Promise.reject(new Error("cached track is missing")),
-        )
-        .then((data) => this.queueNativeBytes(id, new Uint8Array(data)))
-        .catch((error) => console.warn("[player] desktop queue upload failed", error));
-      return true;
+      return Boolean(result.cached);
     } finally {
       clearInterval(timer);
     }

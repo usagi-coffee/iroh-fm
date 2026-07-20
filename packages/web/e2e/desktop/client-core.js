@@ -1,11 +1,10 @@
-import { album, delay, NativeFixtureClient, silentWav, TRACK_BYTES, tracks } from "../fixtures.js";
+import { album, delay, NativeFixtureClient, TRACK_BYTES, tracks } from "../fixtures.js";
 
 import { MusicClient } from "@iroh-fm/client";
 
 class DesktopInner extends NativeFixtureClient {
-  native = false;
+  native = true;
   nativeCache = new Map();
-  queued = new Set();
   metrics = { downloads: {} };
 
   constructor() {
@@ -41,61 +40,52 @@ class DesktopInner extends NativeFixtureClient {
     return Promise.resolve(new Set(this.nativeCache.keys()));
   }
 
-  cachedTrackBlob(id) {
-    return Promise.resolve(this.nativeCache.get(id) ?? null);
-  }
-
   async prefetchTrack(id, onProgress = () => {}) {
-    const existing = this.nativeCache.get(id);
-    if (existing) {
-      onProgress(existing.size, existing.size);
-      void this.queueCached(id, existing);
+    if (this.nativeCache.has(id)) {
+      onProgress(TRACK_BYTES, TRACK_BYTES);
       return true;
     }
     this.metrics.downloads[id] = (this.metrics.downloads[id] ?? 0) + 1;
+    this.transfers[id] = { received: 0, total: TRACK_BYTES, active: true, cached: false };
     onProgress(0, TRACK_BYTES);
     await delay(40);
+    this.transfers[id] = {
+      received: TRACK_BYTES / 2,
+      total: TRACK_BYTES,
+      active: true,
+      cached: false,
+    };
     onProgress(TRACK_BYTES / 2, TRACK_BYTES);
     await delay(40);
-    const blob = silentWav();
-    this.nativeCache.set(id, blob);
+    this.nativeCache.set(id, TRACK_BYTES);
     this.cached.add(id);
-    onProgress(blob.size, blob.size);
-    void this.queueCached(id, blob);
-    return true;
-  }
-
-  async queueCached(id, blob) {
-    await blob.arrayBuffer();
-    return this.queueNativeBytes(id);
-  }
-
-  async playNativeBytes(track, queue) {
-    this.queue = queue.map(({ id }) => id);
-    this.currentIndex = this.queue.indexOf(track.id);
-    this.trackId = track.id;
-    this.position = 0;
-    this.playing = true;
-    this.queued = new Set([track.id]);
-    this.transfers[track.id] = {
+    this.transfers[id] = {
       received: TRACK_BYTES,
       total: TRACK_BYTES,
       active: false,
       cached: true,
     };
-    return this.snapshot();
+    onProgress(TRACK_BYTES, TRACK_BYTES);
+    return true;
   }
 
-  queueNativeBytes(id) {
-    if (!this.queue.includes(id)) return Promise.resolve(false);
-    this.queued.add(id);
-    return Promise.resolve(true);
+  async playNative(track, queue) {
+    this.queue = queue.map(({ id }) => id);
+    this.currentIndex = this.queue.indexOf(track.id);
+    this.trackId = track.id;
+    this.position = 0;
+    this.playing = true;
+    await this.prefetchTrack(track.id);
+    const state = this.snapshot();
+    const next = this.queue[(this.currentIndex + 1) % this.queue.length];
+    if (next && next !== track.id) void this.prefetchTrack(next);
+    return state;
   }
 
   setOfflineOnly() {}
 
   cacheStats() {
-    const size = [...this.nativeCache.values()].reduce((total, blob) => total + blob.size, 0);
+    const size = [...this.nativeCache.values()].reduce((total, bytes) => total + bytes, 0);
     return Promise.resolve({
       tracks: { count: this.nativeCache.size, size },
       covers: { count: 0, size: 0 },
