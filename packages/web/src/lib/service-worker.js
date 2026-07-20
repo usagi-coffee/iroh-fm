@@ -116,13 +116,13 @@ export async function ensure_service_worker(build) {
   startMonitor();
   const registration = await getRegistration();
   await inspect(registration);
-  if (activeBuild && activeBuild !== PAGE_BUILD) {
+  await checkForUpdate().catch((error) => logError("check:unavailable", error));
+  if (!availableBuild && activeBuild && activeBuild !== PAGE_BUILD) {
     availableBuild = PAGE_BUILD;
     log("active:behind-page", { activeBuild, pageBuild: PAGE_BUILD });
     notifyUpdates();
     void install(PAGE_BUILD).catch((error) => logError("active:upgrade-failed", error));
   }
-  await checkForUpdate().catch((error) => logError("check:unavailable", error));
   if (availableBuild && nativeNewerThanWeb(build))
     await install(availableBuild).catch((error) => logError("compatibility:check-failed", error));
   return {
@@ -156,23 +156,36 @@ async function openRegistration() {
 
 /** @param {ServiceWorkerRegistration} registration */
 async function inspect(registration) {
-  if (registration.waiting) await useCandidate(registration.waiting);
-  if (!registration.active) return;
-  const metadata = await ping(registration.active).catch((error) => {
-    logError("active:unresponsive", error, workerState(registration.active));
-    return null;
-  });
-  if (metadata) {
-    activeBuild = metadata.buildVersion;
-    log("active:metadata", metadataState(metadata, registration.active));
-    if (!availableBuild) applyWorkerMetadata(metadata);
+  if (registration.active) {
+    const metadata = await ping(registration.active).catch((error) => {
+      logError("active:unresponsive", error, workerState(registration.active));
+      return null;
+    });
+    if (metadata) {
+      activeBuild = metadata.buildVersion;
+      log("active:metadata", metadataState(metadata, registration.active));
+      applyWorkerMetadata(metadata);
+    }
   }
+  if (registration.waiting) await useCandidate(registration.waiting);
 }
 
 async function checkForUpdate() {
   const remote = await remoteVersion();
   log("check", { pageBuild: PAGE_BUILD, ...remote });
-  if (remote.version === PAGE_BUILD) return;
+  if (remote.version === PAGE_BUILD) {
+    if (availableBuild && availableBuild !== PAGE_BUILD) {
+      log("update:stale-candidate", {
+        candidateBuild: availableBuild,
+        remoteBuild: remote.version,
+      });
+      availableBuild = undefined;
+      waitingWorker = undefined;
+      notifyUpdates();
+      void install(PAGE_BUILD).catch((error) => logError("update:restore-failed", error));
+    }
+    return;
+  }
   if (availableBuild !== remote.version) {
     availableBuild = remote.version;
     log("update:available", { pageBuild: PAGE_BUILD, remoteBuild: remote.version });
@@ -257,6 +270,10 @@ function observeWorker(worker, slot) {
 /** @param {ServiceWorker} worker @param {Record<string, any>} [metadata] */
 async function useCandidate(worker, metadata) {
   const info = metadata ?? (await ping(worker));
+  if (info.buildVersion === activeBuild) {
+    log("update:duplicate", metadataState(info, worker));
+    return;
+  }
   waitingWorker = worker;
   if (info.buildVersion !== PAGE_BUILD) availableBuild = info.buildVersion;
   applyWorkerMetadata(info);
