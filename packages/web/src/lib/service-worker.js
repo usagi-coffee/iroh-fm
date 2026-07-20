@@ -83,6 +83,7 @@ function syncWorkerInfo(worker, info) {
 
 /** @param {any} buildInfo */
 export function currentNativeRequirement(buildInfo) {
+  if (dev) return null;
   return nativeRequirement(buildInfo, {
     Desktop: { minimum: __DESKTOP_EPOCH__, commit: __DESKTOP_EPOCH_COMMIT__ },
     Android: { minimum: __ANDROID_EPOCH__, commit: __ANDROID_EPOCH_COMMIT__ },
