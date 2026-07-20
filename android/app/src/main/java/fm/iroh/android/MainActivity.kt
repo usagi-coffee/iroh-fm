@@ -452,10 +452,10 @@ class MainActivity : ComponentActivity() {
         val transfer = NativeTransferProgress.snapshot(trackId)
         val queue = JSONArray()
         val transfers = JSONObject()
-        if (includeQueue && player != null) {
+        if (player != null) {
             for (index in 0 until player.mediaItemCount) {
                 val id = player.getMediaItemAt(index).mediaId
-                queue.put(id)
+                if (includeQueue) queue.put(id)
                 NativeTransferProgress.snapshot(id)?.let {
                     transfers.put(
                         id,
@@ -482,13 +482,13 @@ class MainActivity : ComponentActivity() {
             .put("duration", (player?.duration ?: 0L).coerceAtLeast(0L) / 1000.0)
             .put("transferReceived", transfer?.receivedBytes ?: 0L)
             .put("transferTotal", transfer?.totalBytes ?: 0L)
+            .put("transfers", transfers)
             .put("repeat", player?.repeatMode == Player.REPEAT_MODE_ONE)
             .put("shuffle", player?.shuffleModeEnabled == true)
             .put("volume", player?.volume ?: 0.5f)
             .also {
                 if (includeQueue) {
                     it.put("queue", queue)
-                    it.put("transfers", transfers)
                 }
             }
     }
