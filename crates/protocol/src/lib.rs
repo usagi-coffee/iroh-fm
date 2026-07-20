@@ -146,6 +146,8 @@ pub enum BackendRequest {
     },
     GetCoverArt {
         cover_art_id: CoverArtId,
+        #[serde(default)]
+        full_quality: bool,
     },
     ResolveId {
         id: String,
@@ -184,4 +186,25 @@ pub enum BackendResponse {
         tracks: Vec<Track>,
     },
     Stream(StreamDescriptor),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_requests_without_quality_flag_default_to_thumbnail() {
+        let request: BackendRequest = serde_json::from_value(serde_json::json!({
+            "GetCoverArt": { "cover_art_id": "cover" }
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            request,
+            BackendRequest::GetCoverArt {
+                full_quality: false,
+                ..
+            }
+        ));
+    }
 }

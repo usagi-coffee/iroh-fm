@@ -1,3 +1,5 @@
+use std::collections::{HashMap, VecDeque};
+use std::io::Cursor;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,11 +23,98 @@ use protocol::{
 };
 
 const STATE_DB_FILE: &str = "iroh-fm.db";
+const COVER_THUMBNAIL_MAX_DIMENSION: u32 = 400;
+const COVER_THUMBNAIL_JPEG_QUALITY: u8 = 82;
+const COVER_THUMBNAIL_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const COVER_SOURCE_MAX_DIMENSION: u32 = 16_384;
+const COVER_DECODE_MAX_BYTES: u64 = 128 * 1024 * 1024;
+
+#[derive(Clone, PartialEq, Eq)]
+struct CoverSourceVersion {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+struct CachedCover {
+    source_version: CoverSourceVersion,
+    cover: CoverArtBytes,
+}
+
+struct CoverThumbnailCache {
+    entries: HashMap<CoverArtId, CachedCover>,
+    order: VecDeque<CoverArtId>,
+    bytes: usize,
+    max_bytes: usize,
+}
+
+impl CoverThumbnailCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(
+        &mut self,
+        cover_art_id: &CoverArtId,
+        source_version: &CoverSourceVersion,
+    ) -> Option<CoverArtBytes> {
+        let matches = self
+            .entries
+            .get(cover_art_id)
+            .is_some_and(|entry| entry.source_version == *source_version);
+        if !matches {
+            self.remove(cover_art_id);
+            return None;
+        }
+        let cover = self.entries.get(cover_art_id)?.cover.clone();
+        self.touch(cover_art_id);
+        Some(cover)
+    }
+
+    fn insert(&mut self, cover: CoverArtBytes, source_version: CoverSourceVersion) {
+        let cover_art_id = cover.cover_art_id.clone();
+        self.remove(&cover_art_id);
+        self.bytes += cover.bytes.len();
+        self.entries.insert(
+            cover_art_id.clone(),
+            CachedCover {
+                source_version,
+                cover,
+            },
+        );
+        self.order.push_back(cover_art_id);
+        while self.bytes > self.max_bytes {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.bytes = self.bytes.saturating_sub(entry.cover.bytes.len());
+            }
+        }
+    }
+
+    fn remove(&mut self, cover_art_id: &CoverArtId) {
+        if let Some(entry) = self.entries.remove(cover_art_id) {
+            self.bytes = self.bytes.saturating_sub(entry.cover.bytes.len());
+        }
+        self.order.retain(|id| id != cover_art_id);
+    }
+
+    fn touch(&mut self, cover_art_id: &CoverArtId) {
+        self.order.retain(|id| id != cover_art_id);
+        self.order.push_back(cover_art_id.clone());
+    }
+}
 
 pub struct MusicServer {
     config: ServerConfig,
     library: Arc<RwLock<LibraryIndex>>,
     starred_db: std::sync::Mutex<Connection>,
+    cover_thumbnail_cache: std::sync::Mutex<CoverThumbnailCache>,
     _watcher: RecommendedWatcher,
     _watch_task: JoinHandle<()>,
 }
@@ -42,6 +131,9 @@ impl MusicServer {
             config,
             library,
             starred_db: std::sync::Mutex::new(starred_db),
+            cover_thumbnail_cache: std::sync::Mutex::new(CoverThumbnailCache::new(
+                COVER_THUMBNAIL_CACHE_MAX_BYTES,
+            )),
             _watcher: watcher,
             _watch_task: watch_task,
         })
@@ -99,9 +191,10 @@ impl MusicServer {
                 Self::get_album_tracks(&library, album_id)
             }
             BackendRequest::GetTrack { track_id } => Self::get_track(&library, track_id),
-            BackendRequest::GetCoverArt { cover_art_id } => {
-                self.get_cover_art(&library, cover_art_id)
-            }
+            BackendRequest::GetCoverArt {
+                cover_art_id,
+                full_quality,
+            } => self.get_cover_art(&library, cover_art_id, full_quality),
             BackendRequest::ResolveId { id } => Self::resolve_id(&library, id),
             BackendRequest::Search { query } => Self::search(&library, query),
             BackendRequest::OpenStream { track_id } => self.open_stream(&library, track_id),
@@ -360,8 +453,12 @@ impl MusicServer {
         &self,
         library: &LibraryIndex,
         cover_art_id: CoverArtId,
+        full_quality: bool,
     ) -> Result<BackendResponse> {
-        eprintln!("[server-cover] request cover_art_id={}", cover_art_id.0);
+        eprintln!(
+            "[server-cover] request cover_art_id={} full_quality={full_quality}",
+            cover_art_id.0
+        );
         let source = library.cover_arts.get(&cover_art_id).ok_or_else(|| {
             eprintln!(
                 "[server-cover] missing cover_art_id={} known_cover_arts={}",
@@ -371,7 +468,7 @@ impl MusicServer {
             Error::NotFound("cover art", cover_art_id.0.clone())
         })?;
 
-        match source {
+        let (content_type, bytes, source_version) = match source {
             CoverArtSource::Sidecar {
                 relative_path,
                 content_type,
@@ -383,6 +480,25 @@ impl MusicServer {
                     full_path.display(),
                     content_type
                 );
+                let metadata = std::fs::metadata(&full_path)?;
+                let source_version = CoverSourceVersion {
+                    modified: metadata.modified().ok(),
+                    len: metadata.len(),
+                };
+                if !full_quality
+                    && let Some(cover) = self
+                        .cover_thumbnail_cache
+                        .lock()
+                        .expect("cover thumbnail cache lock poisoned")
+                        .get(&cover_art_id, &source_version)
+                {
+                    eprintln!(
+                        "[server-cover] cache hit cover_art_id={} bytes={}",
+                        cover_art_id.0,
+                        cover.bytes.len()
+                    );
+                    return Ok(BackendResponse::CoverArt(cover));
+                }
                 let bytes = match std::fs::read(&full_path) {
                     Ok(bytes) => bytes,
                     Err(error) => {
@@ -395,17 +511,7 @@ impl MusicServer {
                         return Err(error.into());
                     }
                 };
-                eprintln!(
-                    "[server-cover] served cover_art_id={} bytes={} content_type={}",
-                    cover_art_id.0,
-                    bytes.len(),
-                    content_type
-                );
-                Ok(BackendResponse::CoverArt(CoverArtBytes {
-                    cover_art_id,
-                    content_type: content_type.clone(),
-                    bytes,
-                }))
+                (content_type.clone(), bytes, source_version)
             }
             CoverArtSource::Embedded { track_id } => {
                 let track = library
@@ -419,6 +525,25 @@ impl MusicServer {
                     track_id.0,
                     full_path.display()
                 );
+                let metadata = std::fs::metadata(&full_path)?;
+                let source_version = CoverSourceVersion {
+                    modified: metadata.modified().ok(),
+                    len: metadata.len(),
+                };
+                if !full_quality
+                    && let Some(cover) = self
+                        .cover_thumbnail_cache
+                        .lock()
+                        .expect("cover thumbnail cache lock poisoned")
+                        .get(&cover_art_id, &source_version)
+                {
+                    eprintln!(
+                        "[server-cover] cache hit cover_art_id={} bytes={}",
+                        cover_art_id.0,
+                        cover.bytes.len()
+                    );
+                    return Ok(BackendResponse::CoverArt(cover));
+                }
                 let tagged_file =
                     lofty::probe::Probe::open(&full_path).and_then(|probe| probe.read())?;
                 let picture = tagged_file
@@ -436,20 +561,70 @@ impl MusicServer {
                     .map(|mime: &lofty::picture::MimeType| mime.as_str().to_string())
                     .unwrap_or_else(|| "application/octet-stream".to_string());
                 let bytes = picture.data().to_vec();
+                (content_type, bytes, source_version)
+            }
+        };
+
+        if full_quality {
+            eprintln!(
+                "[server-cover] served original cover_art_id={} bytes={} content_type={}",
+                cover_art_id.0,
+                bytes.len(),
+                content_type
+            );
+            return Ok(BackendResponse::CoverArt(CoverArtBytes {
+                cover_art_id,
+                content_type,
+                bytes,
+            }));
+        }
+
+        let thumbnail = match make_cover_thumbnail(&bytes) {
+            Ok(bytes) => bytes,
+            Err(error) => {
                 eprintln!(
-                    "[server-cover] served cover_art_id={} bytes={} content_type={} source=embedded",
-                    cover_art_id.0,
-                    bytes.len(),
-                    content_type
+                    "[server-cover] thumbnail failed cover_art_id={} error={error}; serving original",
+                    cover_art_id.0
                 );
-                Ok(BackendResponse::CoverArt(CoverArtBytes {
+                return Ok(BackendResponse::CoverArt(CoverArtBytes {
                     cover_art_id,
                     content_type,
                     bytes,
-                }))
+                }));
             }
-        }
+        };
+        let cover = CoverArtBytes {
+            cover_art_id,
+            content_type: "image/jpeg".to_string(),
+            bytes: thumbnail,
+        };
+        eprintln!(
+            "[server-cover] served thumbnail cover_art_id={} bytes={} original_bytes={}",
+            cover.cover_art_id.0,
+            cover.bytes.len(),
+            bytes.len()
+        );
+        self.cover_thumbnail_cache
+            .lock()
+            .expect("cover thumbnail cache lock poisoned")
+            .insert(cover.clone(), source_version);
+        Ok(BackendResponse::CoverArt(cover))
     }
+}
+
+fn make_cover_thumbnail(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(COVER_SOURCE_MAX_DIMENSION);
+    limits.max_image_height = Some(COVER_SOURCE_MAX_DIMENSION);
+    limits.max_alloc = Some(COVER_DECODE_MAX_BYTES);
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    reader.limits(limits);
+    let image = reader.decode()?;
+    let thumbnail = image.thumbnail(COVER_THUMBNAIL_MAX_DIMENSION, COVER_THUMBNAIL_MAX_DIMENSION);
+    let mut bytes = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, COVER_THUMBNAIL_JPEG_QUALITY)
+        .encode_image(&thumbnail)?;
+    Ok(bytes)
 }
 
 fn spawn_library_watcher(
@@ -683,4 +858,73 @@ fn is_library_relevant_path(path: &std::path::Path) -> bool {
                 "mp3" | "flac" | "ogg" | "opus" | "m4a" | "wav" | "jpg" | "jpeg" | "png" | "webp" | "gif"
             )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use image::GenericImageView;
+
+    use super::*;
+
+    fn cached_cover(id: &str, size: usize) -> CoverArtBytes {
+        CoverArtBytes {
+            cover_art_id: CoverArtId(id.to_string()),
+            content_type: "image/jpeg".to_string(),
+            bytes: vec![0; size],
+        }
+    }
+
+    #[test]
+    fn thumbnail_is_bounded_jpeg() {
+        let original = image::DynamicImage::new_rgba8(800, 600);
+        let mut png = Cursor::new(Vec::new());
+        original
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+
+        let thumbnail = make_cover_thumbnail(png.get_ref()).unwrap();
+
+        assert_eq!(
+            image::guess_format(&thumbnail).unwrap(),
+            image::ImageFormat::Jpeg
+        );
+        assert_eq!(
+            image::load_from_memory(&thumbnail).unwrap().dimensions(),
+            (400, 300)
+        );
+    }
+
+    #[test]
+    fn thumbnail_cache_evicts_oldest_and_invalidates_changed_sources() {
+        let version = CoverSourceVersion {
+            modified: None,
+            len: 10,
+        };
+        let changed = CoverSourceVersion {
+            modified: None,
+            len: 11,
+        };
+        let mut cache = CoverThumbnailCache::new(10);
+        cache.insert(cached_cover("first", 6), version.clone());
+        cache.insert(cached_cover("second", 6), version.clone());
+
+        assert!(
+            cache
+                .get(&CoverArtId("first".to_string()), &version)
+                .is_none()
+        );
+        assert!(
+            cache
+                .get(&CoverArtId("second".to_string()), &version)
+                .is_some()
+        );
+        assert!(
+            cache
+                .get(&CoverArtId("second".to_string()), &changed)
+                .is_none()
+        );
+        assert_eq!(cache.bytes, 0);
+    }
 }

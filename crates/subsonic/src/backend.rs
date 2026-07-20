@@ -84,6 +84,7 @@ impl Backend for Client {
     async fn cover_art(&self, cover_art_id: &str) -> Result<BackendResponse> {
         self.request(BackendRequest::GetCoverArt {
             cover_art_id: CoverArtId(cover_art_id.to_string()),
+            full_quality: true,
         })
         .await
     }

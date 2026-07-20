@@ -115,12 +115,17 @@ impl IrohFmClient {
 
     /// Fetch artwork without expanding its byte payload across JSON/JS arrays.
     #[wasm_bindgen(js_name = fetchCover)]
-    pub async fn fetch_cover(&self, cover_art_id: String) -> Result<MediaBytes, JsError> {
+    pub async fn fetch_cover(
+        &self,
+        cover_art_id: String,
+        full_quality: bool,
+    ) -> Result<MediaBytes, JsError> {
         let (abort_handle, abort_registration) = AbortHandle::new_pair();
         self.cover_requests.borrow_mut().push(abort_handle.clone());
         let response = Abortable::new(
             self.rpc(BackendRequest::GetCoverArt {
                 cover_art_id: CoverArtId(cover_art_id),
+                full_quality,
             }),
             abort_registration,
         )

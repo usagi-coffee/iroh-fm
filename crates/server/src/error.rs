@@ -15,6 +15,8 @@ pub enum Error {
     Notify(#[from] notify::Error),
     #[error("metadata error: {0}")]
     Lofty(#[from] lofty::error::LoftyError),
+    #[error("image error: {0}")]
+    Image(#[from] image::ImageError),
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("iroh dial error: {0}")]

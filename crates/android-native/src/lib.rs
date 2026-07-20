@@ -11,7 +11,7 @@ use iroh_tickets::endpoint::EndpointTicket;
 use jni::{
     JNIEnv,
     objects::{JByteArray, JClass, JObject, JString},
-    sys::{jbyteArray, jint, jlong, jstring},
+    sys::{jboolean, jbyteArray, jint, jlong, jstring},
 };
 use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
 use serde::{Deserialize, Serialize};
@@ -195,11 +195,15 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_coverArt(
     _class: JClass,
     handle: jlong,
     cover_art_id: JString,
+    full_quality: jboolean,
 ) -> jstring {
     let result = (|| {
         let cover_art_id = CoverArtId(to_rust_string(&mut env, cover_art_id)?);
         let response = RUNTIME
-            .block_on(client_for(handle)?.request(BackendRequest::GetCoverArt { cover_art_id }))
+            .block_on(client_for(handle)?.request(BackendRequest::GetCoverArt {
+                cover_art_id,
+                full_quality: full_quality != 0,
+            }))
             .map_err(|error| error.to_string())?;
         let BackendResponse::CoverArt(cover) = response else {
             return Err("backend returned an unexpected cover response".to_string());
