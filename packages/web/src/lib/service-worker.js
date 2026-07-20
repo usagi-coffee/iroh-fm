@@ -2,6 +2,7 @@ import { dev } from "$app/environment";
 import { asset } from "$app/paths";
 
 const workerUrl = asset("/service-worker.js");
+const versionUrl = asset("/_app/version.json");
 const UPDATE_INTERVAL_MS = 60_000;
 const UPDATE_TIMEOUT_MS = 10_000;
 
@@ -101,12 +102,10 @@ function watch(registration) {
 
 async function register() {
   const existing = await navigator.serviceWorker.getRegistration();
+  const remoteVersion = dev ? null : await fetchRemoteVersion().catch(() => null);
   let registration;
   try {
-    registration = await navigator.serviceWorker.register(workerUrl, {
-      type: dev ? "module" : "classic",
-      updateViaCache: "none",
-    });
+    registration = await registerWorker(remoteVersion);
   } catch (error) {
     // Registration may need the network, while an already installed worker
     // must remain usable offline.
@@ -211,6 +210,13 @@ async function checkForUpdate() {
     return;
   }
 
+  const remoteVersion = await fetchRemoteVersion().catch(() => null);
+  const workerVersion = info.workerBuildVersion ?? info.version;
+  if (remoteVersion && remoteVersion !== workerVersion) {
+    watch(await registerWorker(remoteVersion));
+    return;
+  }
+
   try {
     await registration.update();
   } catch (error) {
@@ -219,6 +225,26 @@ async function checkForUpdate() {
     if (error instanceof DOMException && error.name === "InvalidStateError") return;
     throw error;
   }
+}
+
+/** @param {string | null} version */
+function registerWorker(version) {
+  const url = new URL(workerUrl, location.href);
+  if (version) url.searchParams.set("v", version);
+  return navigator.serviceWorker.register(url, {
+    type: dev ? "module" : "classic",
+    updateViaCache: "none",
+  });
+}
+
+async function fetchRemoteVersion() {
+  const url = new URL(versionUrl, location.href);
+  url.searchParams.set("check", String(Date.now()));
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Web version check failed with ${response.status}.`);
+  const value = String((await response.json())?.version ?? "");
+  if (!value) throw new Error("Web version check returned no version.");
+  return value;
 }
 
 /** @param {(ready: boolean) => void} listener */
@@ -363,11 +389,23 @@ export async function forceServiceWorkerUpdate() {
     return;
   }
 
-  const registration = await getRegistration();
+  let registration = await getRegistration();
+  const remoteVersion = await fetchRemoteVersion().catch(() => null);
   if (registration.active) {
     const info = await pingWorker(registration.active).catch(() => ({}));
     if (info.updateReady) {
       waitingWorker = registration.active;
+      await activateServiceWorkerUpdate();
+      return;
+    }
+    const workerVersion = info.workerBuildVersion ?? info.version;
+    if (remoteVersion && remoteVersion !== workerVersion) {
+      registration = await registerWorker(remoteVersion);
+      watch(registration);
+      const candidate = workerForVersion(registration, remoteVersion);
+      const worker = await waitForInstallation(candidate ?? null);
+      if (!worker) throw new Error("The cache-busted service worker was not installed.");
+      waitingWorker = worker;
       await activateServiceWorkerUpdate();
       return;
     }
@@ -398,6 +436,14 @@ export async function forceServiceWorkerUpdate() {
 
   // No newer worker was found. Keep and reload the complete active shell.
   location.reload();
+}
+
+/** @param {ServiceWorkerRegistration} registration @param {string} version */
+function workerForVersion(registration, version) {
+  return [registration.installing, registration.waiting, registration.active].find((worker) => {
+    if (!worker) return false;
+    return new URL(worker.scriptURL).searchParams.get("v") === version;
+  });
 }
 
 /** @param {ServiceWorker} worker */
@@ -441,14 +487,15 @@ function waitForController(worker) {
 /** @param {ServiceWorker | null} worker */
 function waitForInstallation(worker) {
   if (!worker || worker.state === "redundant") return Promise.resolve(null);
-  if (worker.state === "installed") return Promise.resolve(worker);
+  if (["installed", "activating", "activated"].includes(worker.state))
+    return Promise.resolve(worker);
 
   return withTimeout(
     new Promise((resolve) => {
       const changed = () => {
-        if (worker.state !== "installed" && worker.state !== "redundant") return;
+        if (!["installed", "activating", "activated", "redundant"].includes(worker.state)) return;
         worker.removeEventListener("statechange", changed);
-        resolve(worker.state === "installed" ? worker : null);
+        resolve(worker.state === "redundant" ? null : worker);
       };
       worker.addEventListener("statechange", changed);
     }),
