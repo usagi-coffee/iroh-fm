@@ -39,7 +39,7 @@ function nativeRequirement(buildInfo, epochs) {
     platform,
     minimum: Number(required.minimum),
     commit: String(required.commit ?? ""),
-    releaseUrl: `https://github.com/usagi-coffee/iroh-fm/releases/tag/${platform.toLowerCase()}-${required.commit}`,
+    releaseUrl: `https://github.com/usagi-coffee/iroh-fm/releases?q=${platform.toLowerCase()}-`,
   };
 }
 

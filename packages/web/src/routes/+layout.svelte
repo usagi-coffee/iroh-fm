@@ -171,7 +171,7 @@
           target="_blank"
           rel="noreferrer"
           class="border-yellow/50 hover:bg-yellow/10 text-3xs shrink-0 border px-2 py-1 font-mono font-bold"
-          >GET {nativeUpgrade.platform.toUpperCase()}</a
+          >DOWNLOAD {nativeUpgrade.platform.toUpperCase()}</a
         >
       </div>
     {:else if updateReady && !updateBannerDismissed}
