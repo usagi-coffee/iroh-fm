@@ -35,7 +35,7 @@
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   let bufferSize = $derived(rowHeight * 60);
   let focusPlayingTrackOnMount = true;
-  const COVER_MARGIN = "400%";
+  const COVER_MARGIN = "150%";
 
   function measureRowHeight() {
     const update = () => {

@@ -18,7 +18,9 @@
     rootMargin = "100%",
     fullQuality = false,
   } = $props();
-  let visible = $state(false);
+  const LOAD_DELAY_MS = 150;
+  /** @type {Promise<string> | null} */
+  let coverPromise = $state(null);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
   let imageFailed = $derived(
     Boolean(
@@ -29,9 +31,6 @@
     ),
   );
   let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
-  let coverPromise = $derived(
-    visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
-  );
 
   /** @param {HTMLElement} node */
   function findScrollRoot(node) {
@@ -44,22 +43,59 @@
     return null;
   }
 
-  /** @param {HTMLElement} node */
-  function observeVisibility(node) {
-    if (!("IntersectionObserver" in window)) {
-      visible = true;
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        visible = true;
+  /** @param {import('@iroh-fm/client').MusicClient | null} requestedClient @param {string | null} requestedId @param {boolean} requestedFullQuality @param {string} requestedRootMargin */
+  function loadVisibleCover(
+    requestedClient,
+    requestedId,
+    requestedFullQuality,
+    requestedRootMargin,
+  ) {
+    /** @param {HTMLElement} node */
+    return (node) => {
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      /** @type {AbortController | undefined} */
+      let controller;
+      /** @type {Promise<string> | null} */
+      let requestedPromise = null;
+      const hide = () => {
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+        controller?.abort();
+        controller = undefined;
+        const previousPromise = requestedPromise;
+        requestedPromise = null;
+        if (coverPromise === previousPromise) coverPromise = null;
+      };
+      const show = () => {
+        if (timer || requestedPromise || !requestedClient || !requestedId) return;
+        controller = new AbortController();
+        timer = setTimeout(() => {
+          timer = undefined;
+          requestedPromise = requestedClient.coverUrl(requestedId, {
+            fullQuality: requestedFullQuality,
+            signal: controller?.signal,
+          });
+          coverPromise = requestedPromise;
+        }, LOAD_DELAY_MS);
+      };
+      if (!("IntersectionObserver" in window)) {
+        show();
+        return hide;
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) show();
+          else hide();
+        },
+        { root: findScrollRoot(node), rootMargin: requestedRootMargin },
+      );
+      observer.observe(node);
+      return () => {
         observer.disconnect();
-      },
-      { root: findScrollRoot(node), rootMargin },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
+        hide();
+      };
+    };
   }
 </script>
 
@@ -71,7 +107,11 @@
   </div>
 {/snippet}
 
-<div {@attach observeVisibility} class={`cover ${className}`} style={`--cover-hue: ${hue}`}>
+<div
+  {@attach loadVisibleCover(client, id, fullQuality, rootMargin)}
+  class={`cover ${className}`}
+  style={`--cover-hue: ${hue}`}
+>
   <svelte:boundary>
     {#if coverPromise && !imageFailed}
       <img

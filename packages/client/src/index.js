@@ -3,12 +3,18 @@ const COVER_CACHE_NAME = "iroh-fm-cover-art-v2";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
 const TRACK_CACHE_NAME = "iroh-fm-track-audio-v1";
 const TRACK_CACHE_ORIGIN = "https://track-cache.iroh-fm.invalid";
-const MAX_CONCURRENT_COVER_FETCHES = 8;
+const MAX_CONCURRENT_COVER_FETCHES = 3;
 const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_MEDIA_BUFFER_AHEAD_SECONDS = 90;
 const RETAIN_MEDIA_BUFFER_BEHIND_SECONDS = 15;
 const MEDIA_BUFFER_RETRY_MS = 250;
+
+function coverAbortError() {
+  const error = new Error("cover request is no longer needed");
+  error.name = "AbortError";
+  return error;
+}
 
 /** @param {string} remoteId @param {string} coverId */
 function coverCacheRequest(remoteId, coverId) {
@@ -86,11 +92,13 @@ export class MusicClient {
     this.inner = inner;
     /** @type {Map<string, Promise<string>>} */
     this.coverCache = new Map();
+    /** @type {Map<string, {permanent: boolean, signals: Map<AbortSignal, () => void>}>} */
+    this.coverDemand = new Map();
     /** @type {Map<string, Promise<Blob>>} */
     this.activeTrackRequests = new Map();
     /** @type {Map<string, {received: number, total: number, listeners: Set<(received: number, total: number) => void>}>} */
     this.trackProgress = new Map();
-    /** @type {Array<{id: string, fullQuality: boolean, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
+    /** @type {Array<{key: string, id: string, fullQuality: boolean, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
     this.coverFetchQueue = [];
     this.activeCoverFetches = 0;
     this.coverFetchPaused = false;
@@ -250,12 +258,14 @@ export class MusicClient {
     return { summary, albums, artists, tracks, starred };
   }
 
-  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
-  coverUrl(id, { fullQuality = false } = {}) {
+  /** @param {string} id @param {{ fullQuality?: boolean, signal?: AbortSignal }} [options] */
+  coverUrl(id, { fullQuality = false, signal } = {}) {
     const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
+    if (signal?.aborted) return Promise.reject(coverAbortError());
+    this.retainCoverDemand(key, signal);
     let pending = this.coverCache.get(key);
     if (!pending) {
-      const created = this.loadCoverUrl(id, fullQuality);
+      const created = this.loadCoverUrl(key, id, fullQuality);
       this.coverCache.set(key, created);
       created.catch(() => {
         if (this.coverCache.get(key) === created) this.coverCache.delete(key);
@@ -265,8 +275,8 @@ export class MusicClient {
     return pending;
   }
 
-  /** @param {string} id @param {boolean} fullQuality */
-  async loadCoverUrl(id, fullQuality) {
+  /** @param {string} key @param {string} id @param {boolean} fullQuality */
+  async loadCoverUrl(key, id, fullQuality) {
     let cache;
     let request;
     if (!fullQuality && "caches" in globalThis) {
@@ -287,7 +297,7 @@ export class MusicClient {
 
     if (this.offlineOnly) throw new Error("cover is not available offline");
 
-    const media = await this.enqueueCoverFetch(id, fullQuality);
+    const media = await this.enqueueCoverFetch(key, id, fullQuality);
     let blob;
     try {
       blob = new Blob([media.bytes], { type: media.contentType });
@@ -314,12 +324,39 @@ export class MusicClient {
     return URL.createObjectURL(blob);
   }
 
-  /** @param {string} id @param {boolean} fullQuality @returns {Promise<any>} */
-  enqueueCoverFetch(id, fullQuality) {
+  /** @param {string} key @param {AbortSignal | undefined} signal */
+  retainCoverDemand(key, signal) {
+    let demand = this.coverDemand.get(key);
+    if (!demand) {
+      demand = { permanent: false, signals: new Map() };
+      this.coverDemand.set(key, demand);
+    }
+    if (!signal) {
+      demand.permanent = true;
+      return;
+    }
+    if (demand.signals.has(signal)) return;
+    const release = () => {
+      signal.removeEventListener("abort", release);
+      demand.signals.delete(signal);
+      if (demand.permanent || demand.signals.size > 0) return;
+      this.coverDemand.delete(key);
+      const cancelled = this.coverFetchQueue.filter((job) => job.key === key);
+      this.coverFetchQueue = this.coverFetchQueue.filter((job) => job.key !== key);
+      const pending = this.coverCache.get(key);
+      if (cancelled.length > 0 && pending) this.coverCache.delete(key);
+      for (const job of cancelled) job.reject(coverAbortError());
+    };
+    demand.signals.set(signal, release);
+    signal.addEventListener("abort", release, { once: true });
+  }
+
+  /** @param {string} key @param {string} id @param {boolean} fullQuality @returns {Promise<any>} */
+  enqueueCoverFetch(key, id, fullQuality) {
     if (this.closed) return Promise.reject(new Error("music client is closed"));
     if (this.offlineOnly) return Promise.reject(new Error("cover is not available offline"));
     return new Promise((resolve, reject) => {
-      this.coverFetchQueue.push({ id, fullQuality, resolve, reject });
+      this.coverFetchQueue.push({ key, id, fullQuality, resolve, reject });
       this.drainCoverFetchQueue();
     });
   }
@@ -614,6 +651,10 @@ export class MusicClient {
     for (const pending of this.coverCache.values()) {
       pending.then(URL.revokeObjectURL).catch(() => {});
     }
+    for (const demand of this.coverDemand.values()) {
+      for (const [signal, release] of demand.signals) signal.removeEventListener("abort", release);
+    }
+    this.coverDemand.clear();
     this.coverCache.clear();
     this.activeTrackRequests.clear();
     this.trackProgress.clear();

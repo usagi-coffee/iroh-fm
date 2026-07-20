@@ -3,6 +3,12 @@ const NATIVE_CACHE_TIMEOUT_MS = 60 * 60 * 1_000;
 const NATIVE_CACHE_PROGRESS_MS = 250;
 const NATIVE_COVER_CONCURRENCY = 3;
 const NATIVE_REQUEST_CHUNK_CHARS = 24 * 1024;
+
+function coverAbortError() {
+  const error = new Error("cover request is no longer needed");
+  error.name = "AbortError";
+  return error;
+}
 /** @type {MessagePort | undefined} */
 let port;
 let nativeExpected = false;
@@ -188,8 +194,10 @@ export class NativeMusicClient {
     this.infoPending = false;
     this.coverUrls = new Map();
     this.coverRequests = new Map();
+    /** @type {Map<string, {permanent: boolean, signals: Map<AbortSignal, () => void>}>} */
+    this.coverDemand = new Map();
     this.coverActive = 0;
-    this.coverQueue = /** @type {Array<() => void>} */ ([]);
+    this.coverQueue = /** @type {Array<{key: string, resolve: () => void, reject: (reason?: any) => void}>} */ ([]);
     this.offlineOnly = false;
     this.nativeQueueIds = /** @type {string[]} */ ([]);
   }
@@ -278,14 +286,16 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
-  async coverUrl(id, { fullQuality = false } = {}) {
+  /** @param {string} id @param {{ fullQuality?: boolean, signal?: AbortSignal }} [options] */
+  async coverUrl(id, { fullQuality = false, signal } = {}) {
     if (!id) return "";
     const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
     if (this.coverUrls.has(key)) return this.coverUrls.get(key);
+    if (signal?.aborted) throw coverAbortError();
+    this.retainCoverDemand(key, signal);
     if (this.offlineOnly) throw new Error("cover is not available in Android offline mode");
     if (this.coverRequests.has(key)) return this.coverRequests.get(key);
-    const request = this.withCoverSlot(async () => {
+    const request = this.withCoverSlot(key, async () => {
       const cover = await nativeRequest("coverArt", {
         handle: this.handle,
         coverArtId: id,
@@ -303,16 +313,44 @@ export class NativeMusicClient {
     return request;
   }
 
-  /** @template T @param {() => Promise<T>} task @returns {Promise<T>} */
-  async withCoverSlot(task) {
+  /** @param {string} key @param {AbortSignal | undefined} signal */
+  retainCoverDemand(key, signal) {
+    let demand = this.coverDemand.get(key);
+    if (!demand) {
+      demand = { permanent: false, signals: new Map() };
+      this.coverDemand.set(key, demand);
+    }
+    if (!signal) {
+      demand.permanent = true;
+      return;
+    }
+    if (demand.signals.has(signal)) return;
+    const release = () => {
+      signal.removeEventListener("abort", release);
+      demand.signals.delete(signal);
+      if (demand.permanent || demand.signals.size > 0) return;
+      this.coverDemand.delete(key);
+      const cancelled = this.coverQueue.filter((job) => job.key === key);
+      this.coverQueue = this.coverQueue.filter((job) => job.key !== key);
+      if (cancelled.length > 0) this.coverRequests.delete(key);
+      for (const job of cancelled) job.reject(coverAbortError());
+    };
+    demand.signals.set(signal, release);
+    signal.addEventListener("abort", release, { once: true });
+  }
+
+  /** @template T @param {string} key @param {() => Promise<T>} task @returns {Promise<T>} */
+  async withCoverSlot(key, task) {
     if (this.coverActive >= NATIVE_COVER_CONCURRENCY)
-      await new Promise((resolve) => this.coverQueue.push(() => resolve(undefined)));
+      await new Promise((resolve, reject) =>
+        this.coverQueue.push({ key, resolve: () => resolve(undefined), reject }),
+      );
     this.coverActive += 1;
     try {
       return await task();
     } finally {
       this.coverActive -= 1;
-      this.coverQueue.shift()?.();
+      this.coverQueue.shift()?.resolve();
     }
   }
 
@@ -362,6 +400,12 @@ export class NativeMusicClient {
   }
 
   async close() {
+    const closeError = new Error("music client is closed");
+    for (const job of this.coverQueue.splice(0)) job.reject(closeError);
+    for (const demand of this.coverDemand.values()) {
+      for (const [signal, release] of demand.signals) signal.removeEventListener("abort", release);
+    }
+    this.coverDemand.clear();
     for (const url of this.coverUrls.values()) URL.revokeObjectURL(url);
     this.coverUrls.clear();
     await nativeRequest("close", { handle: this.handle });
