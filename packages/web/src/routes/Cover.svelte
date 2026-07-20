@@ -19,8 +19,7 @@
     fullQuality = false,
   } = $props();
   const LOAD_DELAY_MS = 150;
-  /** @type {Promise<string> | null} */
-  let coverPromise = $state(null);
+  let visible = $state(false);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
   let imageFailed = $derived(
     Boolean(
@@ -31,6 +30,9 @@
     ),
   );
   let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
+  let coverPromise = $derived(
+    visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
+  );
 
   /** @param {HTMLElement} node */
   function findScrollRoot(node) {
@@ -43,47 +45,31 @@
     return null;
   }
 
-  /** @param {import('@iroh-fm/client').MusicClient | null} requestedClient @param {string | null} requestedId @param {boolean} requestedFullQuality @param {string} requestedRootMargin */
-  function loadVisibleCover(
-    requestedClient,
-    requestedId,
-    requestedFullQuality,
-    requestedRootMargin,
-  ) {
+  /** @param {string} requestedRootMargin */
+  function loadVisibleCover(requestedRootMargin) {
     /** @param {HTMLElement} node */
     return (node) => {
       /** @type {ReturnType<typeof setTimeout> | undefined} */
       let timer;
-      /** @type {AbortController | undefined} */
-      let controller;
-      /** @type {Promise<string> | null} */
-      let requestedPromise = null;
+      /** @type {IntersectionObserver | undefined} */
+      let observer;
       const hide = () => {
         if (timer) clearTimeout(timer);
         timer = undefined;
-        controller?.abort();
-        controller = undefined;
-        const previousPromise = requestedPromise;
-        requestedPromise = null;
-        if (coverPromise === previousPromise) coverPromise = null;
       };
       const show = () => {
-        if (timer || requestedPromise || !requestedClient || !requestedId) return;
-        controller = new AbortController();
+        if (timer) return;
         timer = setTimeout(() => {
           timer = undefined;
-          requestedPromise = requestedClient.coverUrl(requestedId, {
-            fullQuality: requestedFullQuality,
-            signal: controller?.signal,
-          });
-          coverPromise = requestedPromise;
+          visible = true;
+          observer?.disconnect();
         }, LOAD_DELAY_MS);
       };
       if (!("IntersectionObserver" in window)) {
         show();
         return hide;
       }
-      const observer = new IntersectionObserver(
+      observer = new IntersectionObserver(
         (entries) => {
           if (entries.some((entry) => entry.isIntersecting)) show();
           else hide();
@@ -108,7 +94,7 @@
 {/snippet}
 
 <div
-  {@attach loadVisibleCover(client, id, fullQuality, rootMargin)}
+  {@attach loadVisibleCover(rootMargin)}
   class={`cover ${className}`}
   style={`--cover-hue: ${hue}`}
 >
