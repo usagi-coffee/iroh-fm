@@ -431,9 +431,8 @@ export class MusicClient {
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
-      return existing.finally(unsubscribe).then(async (blob) => {
-        if (typeof this.inner.queueNativeBytes === "function")
-          await this.inner.queueNativeBytes(id, new Uint8Array(await blob.arrayBuffer()));
+      return existing.finally(unsubscribe).then((blob) => {
+        this.queueNativeTrack(id, blob);
         return this.isTrackCached(id);
       });
     }
@@ -456,11 +455,19 @@ export class MusicClient {
         if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
       })
       .catch(() => {});
-    return pending.finally(unsubscribe).then(async (blob) => {
-      if (typeof this.inner.queueNativeBytes === "function")
-        await this.inner.queueNativeBytes(id, new Uint8Array(await blob.arrayBuffer()));
+    return pending.finally(unsubscribe).then((blob) => {
+      this.queueNativeTrack(id, blob);
       return this.isTrackCached(id);
     });
+  }
+
+  /** Native playback queueing is independent from the persistent-cache result. @param {string} id @param {Blob} blob */
+  queueNativeTrack(id, blob) {
+    if (typeof this.inner.queueNativeBytes !== "function") return;
+    void blob
+      .arrayBuffer()
+      .then((data) => this.inner.queueNativeBytes(id, new Uint8Array(data)))
+      .catch((error) => console.warn("[player] native queue upload failed", error));
   }
 
   /** @param {string} id @param {(received: number, total: number) => void} listener */
