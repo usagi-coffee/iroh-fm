@@ -4,7 +4,6 @@ const WEB_BUILD = __BUILD_VERSION__;
 const CACHE_NAME = `iroh-fm-shell-${WEB_BUILD}`;
 const LOG_PREFIX = `[sw ${WEB_BUILD.slice(0, 12)}]`;
 const METADATA = {
-  protocolVersion: 2,
   version,
   buildVersion: WEB_BUILD,
   nativeEpochs: {
@@ -85,8 +84,7 @@ self.addEventListener("message", (event) => {
     return;
   }
 
-  // Keep the legacy message name for clients upgrading from the old protocol.
-  if (event.data?.type !== "activate-update" && event.data?.type !== "skip-waiting") return;
+  if (event.data?.type !== "activate-update") return;
   event.waitUntil(
     self
       .skipWaiting()
