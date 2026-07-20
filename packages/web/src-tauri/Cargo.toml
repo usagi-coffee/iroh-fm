@@ -14,6 +14,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 base64 = "0.22"
+blake3 = "1"
 client = { path = "../../../crates/client" }
 iroh.workspace = true
 iroh-tickets.workspace = true

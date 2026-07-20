@@ -185,6 +185,17 @@ fn track_cache_dir(remote_id: &str) -> PathBuf {
 }
 
 fn track_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
+    track_cache_dir(remote_id).join(format!(
+        "{}.track",
+        blake3::hash(track_id.as_bytes()).to_hex()
+    ))
+}
+
+fn track_cache_id_path(remote_id: &str, track_id: &str) -> PathBuf {
+    track_cache_dir(remote_id).join(format!("{}.id", blake3::hash(track_id.as_bytes()).to_hex()))
+}
+
+fn legacy_track_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
     track_cache_dir(remote_id).join(URL_SAFE_NO_PAD.encode(track_id))
 }
 
@@ -195,7 +206,13 @@ async fn download_track(
 ) -> Result<Vec<u8>, String> {
     let remote_id = client.remote_id().to_string();
     let path = track_cache_path(&remote_id, &track_id);
-    if let Ok(bytes) = tokio::fs::read(&path).await {
+    let cached = match tokio::fs::read(&path).await {
+        Ok(bytes) => Some(bytes),
+        Err(_) => tokio::fs::read(legacy_track_cache_path(&remote_id, &track_id))
+            .await
+            .ok(),
+    };
+    if let Some(bytes) = cached {
         if let Ok(mut registry) = state.0.lock() {
             registry.audio.transfers.insert(
                 track_id,
@@ -264,6 +281,12 @@ async fn download_track(
     tokio::fs::write(&path, &bytes)
         .await
         .map_err(|error| error.to_string())?;
+    tokio::fs::write(
+        track_cache_id_path(&remote_id, &track_id),
+        track_id.as_bytes(),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     if let Ok(mut registry) = state.0.lock() {
         registry.audio.transfers.insert(
             track_id,
@@ -760,6 +783,20 @@ async fn desktop_cached_track_ids(
         .await
         .map_err(|error| error.to_string())?
     {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".id") {
+            let audio_path = entry.path().with_extension("track");
+            if tokio::fs::metadata(audio_path).await.is_ok()
+                && let Ok(id) = tokio::fs::read_to_string(entry.path()).await
+            {
+                ids.push(id);
+            }
+            continue;
+        }
+        if name.ends_with(".track") {
+            continue;
+        }
         let encoded = entry.file_name();
         let Ok(bytes) = URL_SAFE_NO_PAD.decode(encoded.to_string_lossy().as_bytes()) else {
             continue;
@@ -819,7 +856,7 @@ async fn desktop_cache_stats(state: State<'_, DesktopState>, handle: u64) -> Res
             .map_err(|error| error.to_string())?
         {
             if let Ok(metadata) = entry.metadata().await {
-                if metadata.is_file() {
+                if metadata.is_file() && !entry.file_name().to_string_lossy().ends_with(".id") {
                     count += 1;
                     size = size.saturating_add(metadata.len());
                 }
@@ -995,6 +1032,20 @@ fn desktop_build_info() -> NativeBuildInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_names_have_fixed_length_for_long_multibyte_track_ids() {
+        let track_id = "青空Jumping Heart (黒澤ダイヤ Solo Ver.)/".repeat(20);
+        let path = track_cache_path("remote", &track_id);
+        let id_path = track_cache_id_path("remote", &track_id);
+
+        assert_eq!(path.file_name().unwrap().to_string_lossy().len(), 70);
+        assert_eq!(id_path.file_name().unwrap().to_string_lossy().len(), 67);
+        assert_ne!(
+            track_cache_path("remote", &track_id),
+            track_cache_path("remote", "other")
+        );
+    }
 
     #[test]
     fn compact_player_state_omits_queue_and_drains_completed_transfers() {
