@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('desktop-{0}', github.event.workflow_run.head_branch) || format('desktop-skip-{0}', github.run_id) }}
+  group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'protocol:') || startsWith(github.event.workflow_run.head_commit.message, 'client:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('desktop-{0}', github.event.workflow_run.head_branch) || format('desktop-skip-{0}', github.run_id) }}
   cancel-in-progress: true
 
 env:
@@ -20,7 +20,7 @@ env:
 jobs:
   build:
     name: ${{ matrix.cache_key }}
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'desktop:') || startsWith(github.event.workflow_run.head_commit.message, 'protocol:') || startsWith(github.event.workflow_run.head_commit.message, 'client:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
     strategy:
       fail-fast: false
       matrix:

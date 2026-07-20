@@ -103,11 +103,11 @@ jobs:
         run: bun run --cwd packages/web check:prepared
 
       - name: Build desktop web assets
-        if: github.event_name == 'push' && (startsWith(github.event.head_commit.message, 'desktop:') || startsWith(github.event.head_commit.message, 'ci:'))
+        if: github.event_name == 'push' && (startsWith(github.event.head_commit.message, 'desktop:') || startsWith(github.event.head_commit.message, 'protocol:') || startsWith(github.event.head_commit.message, 'client:') || startsWith(github.event.head_commit.message, 'ci:'))
         run: BASE_PATH= bun run --cwd packages/web build:prepared
 
       - name: Upload desktop web assets
-        if: github.event_name == 'push' && (startsWith(github.event.head_commit.message, 'desktop:') || startsWith(github.event.head_commit.message, 'ci:'))
+        if: github.event_name == 'push' && (startsWith(github.event.head_commit.message, 'desktop:') || startsWith(github.event.head_commit.message, 'protocol:') || startsWith(github.event.head_commit.message, 'client:') || startsWith(github.event.head_commit.message, 'ci:'))
         uses: actions/upload-artifact@v7
         with:
           name: desktop-web-${{ github.sha }}

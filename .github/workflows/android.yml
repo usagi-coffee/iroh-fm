@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('android-{0}', github.event.workflow_run.head_branch) || format('android-skip-{0}', github.run_id) }}
+  group: ${{ github.event.workflow_run.event == 'push' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'protocol:') || startsWith(github.event.workflow_run.head_commit.message, 'client:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:')) && format('android-{0}', github.event.workflow_run.head_branch) || format('android-skip-{0}', github.run_id) }}
   cancel-in-progress: true
 
 env:
@@ -20,7 +20,7 @@ env:
 
 jobs:
   build:
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success' && (startsWith(github.event.workflow_run.head_commit.message, 'android:') || startsWith(github.event.workflow_run.head_commit.message, 'protocol:') || startsWith(github.event.workflow_run.head_commit.message, 'client:') || startsWith(github.event.workflow_run.head_commit.message, 'ci:'))
     runs-on: ubuntu-latest
 
     steps:

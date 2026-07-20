@@ -48,7 +48,7 @@ Current seek behavior reopens a stream and consumes bytes up to Media3's request
 
 ## GitHub Actions and release signing
 
-The Android workflow builds only signed release APKs. It builds for numbered Android tags (`v1`, `v2`, `v3`, ...) and for pushes to `master` whose commit subject starts exactly with `android:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
+The Android workflow builds only signed release APKs. It runs after successful Web workflows for pushes to `master` whose commit subject starts exactly with `android:`, `protocol:`, `client:`, or `ci:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
 
 Create the long-lived release keystore locally. Do not create it in GitHub Actions and do not commit it:
 
@@ -84,6 +84,9 @@ Trigger a signed release build from `master` with a matching commit subject:
 
 ```sh
 git commit -m "android: describe the Android change"
+# or, for changes shared by every client:
+git commit -m "protocol: describe the protocol change"
+git commit -m "client: describe the shared client change"
 git push
 ```
 
