@@ -23,7 +23,8 @@ function localCommit() {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  resolve: e2eAliases(mode),
   define: {
     __BUILD_COMMIT__: JSON.stringify(commitHash),
     __BUILD_VERSION__: JSON.stringify(buildVersion),
@@ -67,4 +68,17 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
-});
+}));
+
+/** @param {string} mode */
+function e2eAliases(mode) {
+  const target = /^e2e-(web|desktop|android)$/.exec(mode)?.[1];
+  if (!target) return undefined;
+  return {
+    alias: {
+      "@iroh-fm/client/core": fileURLToPath(
+        new URL(`./e2e/${target}/client-core.js`, import.meta.url),
+      ),
+    },
+  };
+}

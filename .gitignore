@@ -5,4 +5,5 @@
 /android/build
 /android/app/build
 /android/app/src/main/jniLibs
+/packages/web/test-results
 .opencode

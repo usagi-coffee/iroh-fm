@@ -6,6 +6,9 @@
   "scripts": {
     "build:wasm": "bun run --cwd ../client build:wasm",
     "dev": "bun run build:wasm && vite dev",
+    "dev:e2e:web": "vite dev --mode e2e-web --host 127.0.0.1 --port 4173 --strictPort",
+    "dev:e2e:desktop": "vite dev --mode e2e-desktop --host 127.0.0.1 --port 4174 --strictPort",
+    "dev:e2e:android": "vite dev --mode e2e-android --host 127.0.0.1 --port 4175 --strictPort",
     "build": "bun run build:wasm && bun run build:prepared",
     "build:prepared": "vite build",
     "preview": "vite preview",
@@ -13,6 +16,8 @@
     "check": "bun run build:wasm && bun run check:prepared",
     "check:prepared": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "desktop": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
@@ -27,6 +32,7 @@
   },
   "devDependencies": {
     "@iconify-json/ri": "^1.2.10",
+    "@playwright/test": "1.57.0",
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.63.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",

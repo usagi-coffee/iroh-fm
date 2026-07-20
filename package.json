@@ -9,6 +9,7 @@
     "dev": "bun run --cwd packages/web dev",
     "build": "bun run --cwd packages/web build",
     "check": "bun run --cwd packages/web check",
+    "test:e2e": "bun run --cwd packages/web test:e2e",
     "format": "oxfmt .;cargo fmt",
     "lint": "oxlint .; cargo clippy"
   },

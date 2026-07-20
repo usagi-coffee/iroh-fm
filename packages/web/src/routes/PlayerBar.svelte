@@ -42,6 +42,7 @@
         type="button"
         onclick={() => App.player.skip(-1)}
         disabled={!track}
+        aria-label="Previous track"
         class="hover:text-text grid size-8 place-items-center disabled:opacity-25"
         ><PreviousIcon class="text-base" /></button
       >
@@ -73,6 +74,7 @@
         type="button"
         onclick={() => App.player.skip(1)}
         disabled={!track}
+        aria-label="Next track"
         class="hover:text-text grid size-8 place-items-center disabled:opacity-25"
         ><NextIcon class="text-base" /></button
       >

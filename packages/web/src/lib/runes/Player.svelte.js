@@ -1,4 +1,4 @@
-import { tick } from "svelte";
+import { tick, untrack } from "svelte";
 
 import { friendlyError } from "../utils.js";
 
@@ -121,7 +121,7 @@ export class Player {
         progressPending = true;
         void client
           .playerState()
-          .then((/** @type {any} */ state) => this.applyNativeState(state))
+          .then((/** @type {any} */ state) => this.applyNativeState(state, false, client))
           .catch(() => {})
           .finally(() => (progressPending = false));
       }, 200);
@@ -136,7 +136,7 @@ export class Player {
         );
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
-          this.applyNativeState(state);
+          this.applyNativeState(state, false, client);
           if (client.nativePlayback && !client.native)
             this.prefetchNext(track, sourceQueue, generation);
         }
@@ -240,9 +240,10 @@ export class Player {
   }
 
   async toggle() {
-    if (this.nativePlayback()) {
+    const client = this.app.connection.client;
+    if (this.nativePlayback(client)) {
       if (!this.currentTrack) return;
-      this.applyNativeState(await this.app.connection.client.playerCommand("toggle"));
+      this.applyNativeState(await client.playerCommand("toggle"), false, client);
       return;
     }
     if (!this.audio || this.audioLoading || !this.currentTrack) return;
@@ -267,9 +268,12 @@ export class Player {
 
   /** @param {number} direction */
   async skip(direction) {
-    if (this.nativePlayback()) {
+    const client = this.app.connection.client;
+    if (this.nativePlayback(client)) {
       this.applyNativeState(
-        await this.app.connection.client.playerCommand(direction < 0 ? "previous" : "next"),
+        await client.playerCommand(direction < 0 ? "previous" : "next"),
+        false,
+        client,
       );
       return;
     }
@@ -288,13 +292,14 @@ export class Player {
 
   /** @param {string | number} value */
   seek(value) {
-    if (this.nativePlayback()) {
+    const client = this.app.connection.client;
+    if (this.nativePlayback(client)) {
       const generation = ++this.nativeSeekGeneration;
       this.nativeSeekPending = true;
-      void this.app.connection.client
+      void client
         .playerCommand("seek", { seconds: Number(value) })
         .then((/** @type {any} */ state) => {
-          if (generation === this.nativeSeekGeneration) this.applyNativeState(state, true);
+          if (generation === this.nativeSeekGeneration) this.applyNativeState(state, true, client);
         })
         .catch((/** @type {unknown} */ error) => {
           if (generation === this.nativeSeekGeneration)
@@ -315,7 +320,8 @@ export class Player {
   /** @param {number} seconds */
   seekBy(seconds) {
     if (!this.currentTrack) return;
-    const duration = this.duration || this.currentTrack.duration_seconds || Number.POSITIVE_INFINITY;
+    const duration =
+      this.duration || this.currentTrack.duration_seconds || Number.POSITIVE_INFINITY;
     const position = Math.max(0, Math.min(duration, this.currentTime + seconds));
     this.currentTime = position;
     this.seek(position);
@@ -349,7 +355,11 @@ export class Player {
     this.nativeStatePending = true;
     try {
       this.applyNativeState(
-        await client.playerState(client.native ? { includeQueue: this.queue.length === 0 } : undefined),
+        await client.playerState(
+          client.native ? { includeQueue: untrack(() => this.queue.length === 0) } : undefined,
+        ),
+        false,
+        client,
       );
     } catch {
       // The activity or message channel can be transitioning while the TWA wakes.
@@ -358,15 +368,11 @@ export class Player {
     }
   }
 
-  /** @param {any} state @param {boolean} [applySeekPosition] */
-  applyNativeState(state, applySeekPosition = false) {
-    if (!state || !this.nativePlayback()) return;
+  /** @param {any} state @param {boolean} [applySeekPosition] @param {any} [client] */
+  applyNativeState(state, applySeekPosition = false, client = this.app.connection.client) {
+    if (!state || !this.nativePlayback(client)) return;
     this.applyNativeTransfers(state);
-    if (
-      this.nativePlayPendingTrackId &&
-      state.trackId !== this.nativePlayPendingTrackId
-    )
-      return;
+    if (this.nativePlayPendingTrackId && state.trackId !== this.nativePlayPendingTrackId) return;
     const track = state.trackId ? this.app.library.tracksById.get(state.trackId) : null;
     const nativeQueue = Array.isArray(state.queue)
       ? state.queue
