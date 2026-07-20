@@ -168,7 +168,7 @@
         role="status"
       >
         <span class="text-3xs font-mono font-bold tracking-[.06em] uppercase">
-          Upgrade {nativeUpgrade.platform} app to use the newest web version.
+          Upgrade {nativeUpgrade.platform} app to use the newest web version
         </span>
         {#if nativeUpgrade.platform === "Android"}
           <div class="flex shrink-0 flex-col gap-1">
