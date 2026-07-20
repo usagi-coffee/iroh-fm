@@ -439,11 +439,13 @@ async fn desktop_cover_art(
     state: State<'_, DesktopState>,
     handle: u64,
     cover_art_id: String,
+    full_quality: bool,
 ) -> Result<Value, String> {
     let response = state
         .client(handle)?
         .request(BackendRequest::GetCoverArt {
             cover_art_id: CoverArtId(cover_art_id),
+            full_quality,
         })
         .await
         .map_err(|error| error.to_string())?;
