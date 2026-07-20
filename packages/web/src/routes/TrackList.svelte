@@ -72,7 +72,12 @@
       )
         return;
 
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      if (event.key === "Escape") {
+        if (!App.player.currentTrack) return;
+        event.preventDefault();
+        event.stopPropagation();
+        App.library.requestTrackFocus(App.player.currentTrack);
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         if (!App.player.currentTrack) return;
         event.preventDefault();
         event.stopPropagation();
