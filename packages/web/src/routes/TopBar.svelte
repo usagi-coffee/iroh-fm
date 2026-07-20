@@ -8,19 +8,31 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { connectionAddressLabel, formatBytes, friendlyError } from "$lib/utils.js";
 
+  import RelayIcon from "virtual:icons/ri/base-station-line";
+  import MaximizeIcon from "virtual:icons/ri/checkbox-blank-line";
   import CloseIcon from "virtual:icons/ri/close-line";
   import DatabaseIcon from "virtual:icons/ri/database-2-line";
+  import DirectIcon from "virtual:icons/ri/link";
   import DisconnectIcon from "virtual:icons/ri/logout-box-r-line";
-  import MaximizeIcon from "virtual:icons/ri/checkbox-blank-line";
-  import MinimizeIcon from "virtual:icons/ri/subtract-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
   import SettingsIcon from "virtual:icons/ri/settings-3-line";
+  import MinimizeIcon from "virtual:icons/ri/subtract-line";
+  import ConnectingIcon from "virtual:icons/ri/wifi-line";
   import OfflineIcon from "virtual:icons/ri/wifi-off-line";
 
   /** @typedef {{ updateReady: boolean, onupdate: () => void }} Props */
   /** @type {Props} */
   let { updateReady, onupdate } = $props();
   let path = $derived(page.url.pathname.replace(/\/$/, ""));
+  let connectionToggleTitle = $derived(
+    App.library.offlineOnly
+      ? "Offline-only mode enabled — use network"
+      : App.connection.info.path_type === "relay"
+        ? "Connected via relay — use cached music only"
+        : App.connection.info.path_type === "direct"
+          ? "Connected directly — use cached music only"
+          : "Connecting — use cached music only",
+  );
   const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   /** @param {'minimize' | 'toggleMaximize' | 'close'} command */
@@ -127,8 +139,19 @@
         .library.offlineOnly
         ? 'bg-surface0 text-mauve'
         : 'text-overlay1 hover:text-mauve'}"
-      title={App.library.offlineOnly ? "Offline-only mode enabled" : "Use cached music only"}
-      aria-pressed={App.library.offlineOnly}><OfflineIcon class="text-sm" /></button
+      title={connectionToggleTitle}
+      aria-label={connectionToggleTitle}
+      aria-pressed={App.library.offlineOnly}
+      >{#if App.library.offlineOnly}<OfflineIcon class="text-sm" />{:else}<span
+          class="tablet-xl:hidden {App.connection.info.address
+            ? 'text-green'
+            : 'text-yellow animate-pulse'}"
+          >{#if App.connection.info.path_type === "relay"}<RelayIcon
+              class="text-sm"
+            />{:else if App.connection.info.path_type === "direct"}<DirectIcon
+              class="text-sm"
+            />{:else}<ConnectingIcon class="text-sm" />{/if}</span
+        ><OfflineIcon class="tablet-xl:block hidden text-sm" />{/if}</button
     >
     <a
       href={resolve("/settings")}
