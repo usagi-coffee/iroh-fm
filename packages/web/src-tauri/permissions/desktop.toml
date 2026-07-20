@@ -16,6 +16,7 @@ commands.allow = [
   "desktop_player_state",
   "desktop_player_command",
   "desktop_cached_track_ids",
+  "desktop_cached_track",
   "desktop_cache_track",
   "desktop_cache_progress",
   "desktop_set_offline_only",

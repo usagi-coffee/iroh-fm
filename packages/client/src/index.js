@@ -160,6 +160,7 @@ export class MusicClient {
   }
 
   async cacheStats() {
+    if (typeof this.inner.cacheStats === "function") return this.inner.cacheStats();
     return MusicClient.cacheStats();
   }
 
@@ -183,9 +184,19 @@ export class MusicClient {
   async playNative(track, queue, onProgress = () => {}) {
     if (typeof this.inner.playNativeBytes !== "function")
       return this.inner.playNative(track, queue);
-    const cached = await this.cachedTrack(track.id);
-    const blob = cached?.blob ?? (await this.downloadTrackBlob(track.id, onProgress));
-    if (!cached?.persistent) await this.persistTrackBlob(track.id, blob);
+    let cached = await this.cachedTrack(track.id);
+    let blob;
+    if (typeof this.inner.cachedTrackBlob === "function") {
+      if (!cached) {
+        const stored = await this.inner.prefetchTrack(track.id, onProgress);
+        if (stored) cached = await this.cachedTrack(track.id);
+      }
+      if (!cached) throw new Error("The desktop cache could not store this track.");
+      blob = cached.blob;
+    } else {
+      blob = cached?.blob ?? (await this.downloadTrackBlob(track.id, onProgress));
+      if (!cached?.persistent) await this.persistTrackBlob(track.id, blob);
+    }
     onProgress(blob.size, blob.size);
     const state = await this.inner.playNativeBytes(
       track,
@@ -193,7 +204,7 @@ export class MusicClient {
       new Uint8Array(await blob.arrayBuffer()),
     );
     state.transfers = {
-      ...(state.transfers ?? {}),
+      ...state.transfers,
       [track.id]: { received: blob.size, total: blob.size, active: false, cached: true },
     };
     return state;
@@ -212,9 +223,12 @@ export class MusicClient {
   setOfflineOnly(offlineOnly) {
     this.offlineOnly = Boolean(offlineOnly);
     if (!this.offlineOnly) this.drainCoverFetchQueue();
+    if (typeof this.inner.setOfflineOnly === "function")
+      return this.inner.setOfflineOnly(this.offlineOnly);
   }
 
   async cachedTrackIds() {
+    if (typeof this.inner.cachedTrackIds === "function") return this.inner.cachedTrackIds();
     const ids = new Set();
     if (!("caches" in globalThis)) return ids;
     try {
@@ -428,6 +442,8 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   prefetchTrack(id, onProgress = () => {}) {
+    if (typeof this.inner.prefetchTrack === "function")
+      return this.inner.prefetchTrack(id, onProgress);
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
@@ -496,6 +512,10 @@ export class MusicClient {
 
   /** @param {string} id */
   async cachedTrack(id) {
+    if (typeof this.inner.cachedTrackBlob === "function") {
+      const blob = await this.inner.cachedTrackBlob(id);
+      return blob ? { blob, persistent: true } : null;
+    }
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
       try {

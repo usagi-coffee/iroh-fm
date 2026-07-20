@@ -903,6 +903,22 @@ async fn desktop_cached_track_ids(
 }
 
 #[tauri::command]
+async fn desktop_cached_track(
+    state: State<'_, DesktopState>,
+    handle: u64,
+    track_id: String,
+) -> Result<Response, String> {
+    let remote_id = state.client(handle)?.remote_id().to_string();
+    let bytes = tokio::fs::read(track_cache_path(&remote_id, &track_id))
+        .await
+        .map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Err("desktop cached track is empty".to_string());
+    }
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 async fn desktop_cache_track(
     state: State<'_, DesktopState>,
     handle: u64,
@@ -1156,6 +1172,7 @@ pub fn run() {
             desktop_player_state,
             desktop_player_command,
             desktop_cached_track_ids,
+            desktop_cached_track,
             desktop_cache_track,
             desktop_cache_progress,
             desktop_set_offline_only,
