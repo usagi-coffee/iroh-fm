@@ -70,6 +70,17 @@ export function currentNativeRequirement(buildInfo) {
   });
 }
 
+/** @param {any} buildInfo */
+function nativeNewerThanWeb(buildInfo) {
+  const webEpoch =
+    buildInfo?.platform === "Desktop"
+      ? __DESKTOP_EPOCH__
+      : buildInfo?.platform === "Android"
+        ? __ANDROID_EPOCH__
+        : null;
+  return webEpoch !== null && Number(buildInfo?.epoch) > webEpoch;
+}
+
 async function register() {
   const existing = await navigator.serviceWorker.getRegistration();
   const remoteVersion = dev ? null : await fetchRemoteVersion().catch(() => null);
@@ -130,10 +141,17 @@ function getRegistration() {
 
 /** @param {any} [buildInfo] */
 export async function ensure_service_worker(buildInfo) {
-  if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  if (dev || typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return { updateReady: false, nativeUpgrade: null, nativeNewerThanWeb: false };
+  }
   nativeBuildInfo = buildInfo ?? null;
   if (!dev) startUpdateMonitor();
   await getRegistration();
+  return {
+    updateReady: updateReady(),
+    nativeUpgrade,
+    nativeNewerThanWeb: nativeNewerThanWeb(buildInfo),
+  };
 }
 
 function startUpdateMonitor() {

@@ -33,6 +33,7 @@
   let nativeUpgrade = $state(null);
   /** @type {ReturnType<typeof currentNativeRequirement>} */
   let initialNativeRequirement = $state(null);
+  let initialWebUpdateRequired = $state(false);
   let connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
   let onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
   const nativeBuild = ClientCore.buildInfo();
@@ -41,8 +42,12 @@
     return initialNativeRequirement;
   });
   const registeredWorker = nativeBuild.then((buildInfo) => ensure_service_worker(buildInfo));
-  const sw = Promise.all([registeredWorker, nativeCompatibility]).then(([, requirement]) => {
+  const sw = Promise.all([registeredWorker, nativeCompatibility]).then(([worker, requirement]) => {
     if (requirement) throw new Error("The native application is out of date.");
+    if (worker.updateReady && worker.nativeNewerThanWeb && !worker.nativeUpgrade) {
+      initialWebUpdateRequired = true;
+      throw new Error("The cached web application is out of date.");
+    }
   });
   const wasm = sw.then(() => ClientCore.prepare());
   const cache = wasm.then(() => ClientCore.prepareCaches());
@@ -171,8 +176,7 @@
               href={nativeUpgrade.downloadUrl}
               target="_blank"
               rel="noreferrer"
-              class="bg-yellow text-crust text-3xs px-2 py-1 font-mono font-bold"
-              >DOWNLOAD</a
+              class="bg-yellow text-crust text-3xs px-2 py-1 font-mono font-bold">DOWNLOAD</a
             >
             <a
               href={nativeUpgrade.releaseUrl}
@@ -204,7 +208,8 @@
           type="button"
           onclick={activateServiceWorkerUpdate}
           class="text-3xs hover:bg-mauve/15 flex min-w-0 flex-1 items-center justify-center gap-2 font-mono font-bold tracking-[.08em]"
-          title="Install application update"><RefreshIcon class="text-sm" />WEB UPDATE AVAILABLE</button
+          title="Install application update"
+          ><RefreshIcon class="text-sm" />WEB UPDATE AVAILABLE</button
         >
         <button
           type="button"
@@ -234,6 +239,22 @@
           rel="noreferrer"
           class="bg-yellow text-3xs text-crust mt-4 inline-block px-4 py-2 font-mono font-bold"
           >GET {requirement.platform.toUpperCase()}</a
+        >
+      </div>
+    </div>
+  {/snippet}
+
+  {#snippet webUpdateBlocked()}
+    <div class="bg-base text-text grid h-dvh place-items-center p-6">
+      <div class="border-mauve/40 bg-crust w-full max-w-md border p-5 text-center">
+        <h1 class="text-mauve text-sm font-semibold">Web application update required</h1>
+        <p class="text-overlay1 mt-2 text-xs leading-5">
+          The updated application is ready. Install it before starting the player.
+        </p>
+        <button
+          type="button"
+          onclick={activateServiceWorkerUpdate}
+          class="bg-mauve text-3xs text-crust mt-4 px-4 py-2 font-mono font-bold">WEB UPDATE</button
         >
       </div>
     </div>
@@ -386,6 +407,8 @@
     {#snippet failed(error)}
       {#if initialNativeRequirement}
         {@render nativeBlocked(initialNativeRequirement)}
+      {:else if initialWebUpdateRequired}
+        {@render webUpdateBlocked()}
       {:else}
         {@render startupFailed(error)}
       {/if}
