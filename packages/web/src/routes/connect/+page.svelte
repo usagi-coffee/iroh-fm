@@ -49,6 +49,24 @@
   let showSecret = $state(false);
   let ticketLinkCopied = $state(false);
   let endpointCopied = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let ticketCopiedTimer;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let endpointCopiedTimer;
+
+  /** @param {'ticket' | 'endpoint'} kind */
+  function showCopied(kind) {
+    const timer = kind === "ticket" ? ticketCopiedTimer : endpointCopiedTimer;
+    if (timer) clearTimeout(timer);
+    if (kind === "ticket") ticketLinkCopied = true;
+    else endpointCopied = true;
+    const nextTimer = setTimeout(() => {
+      if (kind === "ticket") ticketLinkCopied = false;
+      else endpointCopied = false;
+    }, 1600);
+    if (kind === "ticket") ticketCopiedTimer = nextTimer;
+    else endpointCopiedTimer = nextTimer;
+  }
 
   /** @param {'ticket' | 'advanced'} tab */
   function selectLoginTab(tab) {
@@ -59,14 +77,12 @@
 
   async function copyTicketLink() {
     if (!(await App.connection.copyTicketLink())) return;
-    ticketLinkCopied = true;
-    setTimeout(() => (ticketLinkCopied = false), 1600);
+    showCopied("ticket");
   }
 
   async function copyEndpointId() {
     if (!(await App.connection.copyEndpointId())) return;
-    endpointCopied = true;
-    setTimeout(() => (endpointCopied = false), 1600);
+    showCopied("endpoint");
   }
 
   async function scanTicket() {
