@@ -355,7 +355,7 @@
               >
                 {#if App.player.currentTrack?.id === item.track.id && App.player.playing}
                   <PauseIcon class="text-2xs" />
-                {:else if item.track.downloading}
+                {:else if item.track.downloading && !item.track.cached && !item.track.memoryCached}
                   <span class="bg-surface1 h-1 w-4 overflow-hidden"
                     ><span
                       class="bg-mauve block h-full transition-[width] duration-150"

@@ -140,7 +140,7 @@ export class Track {
 
   /** @param {boolean} cached */
   setMemoryCached(cached) {
-    if (this.memoryCached === cached) return;
+    if (this.memoryCached === cached && !(cached && this.downloading)) return;
     this.memoryCached = cached;
     if (cached && !this.cached) {
       this.downloadGeneration += 1;

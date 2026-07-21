@@ -569,7 +569,7 @@ class MainActivity : ComponentActivity() {
                         JSONObject()
                             .put("received", snapshot?.receivedBytes ?: 0L)
                             .put("total", snapshot?.totalBytes ?: 0L)
-                            .put("active", snapshot?.active == true)
+                            .put("active", snapshot?.active == true && !cached && !memoryCached)
                             .put("cached", cached)
                             .put("memoryCached", memoryCached),
                     )
@@ -584,7 +584,7 @@ class MainActivity : ComponentActivity() {
                 JSONObject()
                     .put("received", snapshot?.receivedBytes ?: 0L)
                     .put("total", snapshot?.totalBytes ?: 0L)
-                    .put("active", snapshot?.active == true)
+                    .put("active", false)
                     .put("cached", NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id))
                     .put("memoryCached", NativeAudioCache.isMemoryCached(NativeCore.activeRemoteId, id)),
             )
