@@ -45,9 +45,15 @@ Typical Android-owned paths: `android/**`, `crates/android-native/**`, Android-s
 
 ## `desktop:` prefix
 
-Use only as an explicit Desktop release commit. Web also prepares the Desktop asset bundle, then Desktop builds and publishes its installers. This advances the Desktop epoch.
+Use for any commit that changes Desktop-native code and is intended to reach installed Desktop clients. In particular, any change under `packages/web/src-tauri/**` must use the `desktop:` prefix, even when the same commit also changes shared Svelte UI. Web also prepares the Desktop asset bundle, then Desktop builds and publishes its installers. This advances the Desktop epoch.
 
-Typical Desktop-owned paths: `packages/web/src-tauri/**`, Desktop-specific code in `packages/client/src/desktop.js`, and `packages/web/e2e/desktop/**`. Use `desktop:` only when that commit is intentionally publishing Desktop; otherwise use the appropriate implementation prefix.
+Typical Desktop-owned paths: `packages/web/src-tauri/**`, Desktop-specific code in `packages/client/src/desktop.js`, and `packages/web/e2e/desktop/**`.
+
+## `agent:` prefix
+
+Use for changes to Codex agent instructions, skills, or other agent configuration. Keep these changes in a separate `agent:` commit from product code so a product release prefix remains the head commit when native release workflows depend on it.
+
+Typical agent-owned paths: `.agents/**`, `.codex/**`, `AGENTS.md`, and agent skill or plugin instruction files.
 
 ## `ci:` prefix
 
