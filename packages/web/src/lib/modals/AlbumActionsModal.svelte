@@ -24,10 +24,15 @@
       : tracks.length > 0 && tracks.every((track) => track.cached),
   );
   let starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)));
-  let duration = $derived(
-    tracks.reduce((total, track) => total + (track.duration_seconds ?? 0), 0),
-  );
-  let size = $derived(tracks.reduce((total, track) => total + (track.file_size ?? 0), 0));
+  let stats = $derived.by(() => {
+    let duration = 0;
+    let size = 0;
+    for (const track of tracks) {
+      duration += track.duration_seconds ?? 0;
+      size += track.file_size ?? 0;
+    }
+    return { duration, size };
+  });
 
   async function toggleStar() {
     dismiss();
@@ -69,7 +74,9 @@
       </p>
       <p class="text-3xs text-overlay0 mt-2 font-mono leading-5">
         {tracks.length}
-        {tracks.length === 1 ? "track" : "tracks"} · {formatTime(duration)}<br />{formatBytes(size)}
+        {tracks.length === 1 ? "track" : "tracks"} · {formatTime(stats.duration)}<br />{formatBytes(
+          stats.size,
+        )}
       </p>
     </div>
   </div>
