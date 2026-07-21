@@ -56,6 +56,16 @@ export class Library {
     }
     return albums;
   });
+  /** @type {Map<string, Track[]>} */
+  cachedTracksByAlbum = $derived.by(() => {
+    /** @type {Map<string, Track[]>} */
+    const albums = new Map();
+    for (const [albumKey, tracks] of this.tracksByAlbum) {
+      const cached = tracks.filter((track) => track.cached);
+      if (cached.length) albums.set(albumKey, cached);
+    }
+    return albums;
+  });
   /** @type {Set<string>} */
   allStarredTrackIds = $derived.by(() => {
     const selected = new Set(this.starred.tracks.map((track) => track.id));
@@ -190,7 +200,7 @@ export class Library {
       if (albumKey !== previousAlbumKey) {
         const allAlbumTracks = this.tracksByAlbum.get(albumKey) ?? [track];
         const albumTracks = offlineOnly
-          ? allAlbumTracks.filter((item) => item.cached)
+          ? (this.cachedTracksByAlbum.get(albumKey) ?? [])
           : allAlbumTracks;
         items.push({
           kind: "album",
@@ -337,7 +347,7 @@ export class Library {
   /** @param {import('../types').AlbumData} album */
   tracksForAlbum(album) {
     const tracks = this.tracksByAlbum.get(album.id) ?? [];
-    return this.offlineOnly ? tracks.filter((track) => track.cached) : tracks;
+    return this.offlineOnly ? (this.cachedTracksByAlbum.get(album.id) ?? []) : tracks;
   }
 
   /** @param {Track[]} tracks @param {string} cacheKey */
