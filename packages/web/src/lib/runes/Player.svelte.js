@@ -466,14 +466,6 @@ export class Player {
           this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
-        if (
-          id === this.currentTrack?.id &&
-          this.nativePlayback() &&
-          !this.app.connection.client?.native
-        ) {
-          queuedTrack.downloading = false;
-          continue;
-        }
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);
