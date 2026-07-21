@@ -247,11 +247,17 @@ object NativeAudioCache {
     }
 
     /** Downloads a complete track into the RAM LRU without writing it to disk. */
-    fun prefetchTrack(clientHandle: Long, remoteId: String, trackId: String): Boolean {
+    fun prefetchTrack(
+        clientHandle: Long,
+        remoteId: String,
+        trackId: String,
+        shouldContinue: () -> Boolean = { true },
+    ): Boolean {
         memoryTrack(remoteId, trackId)?.let {
             NativeTransferProgress.update(trackId, it.size.toLong(), it.size.toLong(), reset = true)
             return true
         }
+        if (!shouldContinue()) return false
         var streamHandle = 0L
         var transferStarted = false
         try {
@@ -265,6 +271,7 @@ object NativeAudioCache {
             val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
             var position = 0L
             while (position < total) {
+                if (!shouldContinue()) return false
                 val wanted = minOf(buffer.size.toLong(), total - position).toInt()
                 val read = NativeCore.readStream(streamHandle, buffer, 0, wanted)
                 if (read == C.RESULT_END_OF_INPUT) break
