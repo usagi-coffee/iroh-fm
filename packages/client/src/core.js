@@ -15,6 +15,10 @@ import {
 import { NativeMusicClient, detectNative, isNative, nativeRequest } from "./native.js";
 
 export class ClientCore {
+  static closeApp() {
+    return isNative() ? nativeRequest("closeApp") : Promise.resolve();
+  }
+
   static async prepare() {
     if (!isDesktop() && !(await detectNative())) await MusicClient.prepare();
   }

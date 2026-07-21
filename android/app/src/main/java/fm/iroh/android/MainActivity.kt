@@ -290,6 +290,7 @@ class MainActivity : ComponentActivity() {
             "endpointId",
             "parseTicket",
             "close",
+            "closeApp",
             "prefetchTrack",
             "cacheTrack",
             "cachedTrackIds",
@@ -393,6 +394,11 @@ class MainActivity : ComponentActivity() {
             val handle = payload.getLong("handle")
             if (NativeCore.activeClientHandle == handle) closeActiveClient("web request")
             else NativeCore.closeClient(handle)
+            JSONObject()
+        }
+        "closeApp" -> {
+            closeActiveClient("web update")
+            finishAndRemoveTask()
             JSONObject()
         }
         "cachedTrackIds" -> JSONArray(
