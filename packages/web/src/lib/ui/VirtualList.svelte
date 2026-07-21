@@ -279,13 +279,11 @@
         node.style.visibility = "visible";
       } else {
         scrollToIndex(initialIndex, { align: initialAlign });
-        if (!measureItems) node.style.visibility = "visible";
-        else
-          revealFrame = requestAnimationFrame(() => {
-            if (viewport !== node) return;
-            scrollToIndex(initialIndex, { align: initialAlign });
-            node.style.visibility = "visible";
-          });
+        revealFrame = requestAnimationFrame(() => {
+          if (viewport !== node) return;
+          scrollToIndex(initialIndex, { align: initialAlign });
+          node.style.visibility = "visible";
+        });
       }
 
       return () => {

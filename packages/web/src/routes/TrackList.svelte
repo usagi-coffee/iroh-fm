@@ -196,17 +196,28 @@
     App.library.selectedTrackId = trackId;
     let attempts = 30;
     let cancelled = false;
+    let positioned = false;
     /** @type {number | undefined} */
     let frame;
     const scroll = () => {
       if (cancelled || attempts-- <= 0) return;
+      if (!trackList) {
+        frame = requestAnimationFrame(scroll);
+        return;
+      }
+      trackList.scrollToIndex(index, { align: "center" });
+      if (!positioned) {
+        positioned = true;
+        frame = requestAnimationFrame(scroll);
+        return;
+      }
       const target = host.querySelector(`[data-track-id="${CSS.escape(trackId)}"]`);
       if (target instanceof HTMLElement) {
         App.library.pendingTrackFocusId = null;
         if (page.state.focusTrackId) replaceState(page.url, {});
         return;
       }
-      trackList?.scrollToIndex(index, { align: "center" });
+      positioned = false;
       frame = requestAnimationFrame(scroll);
     };
     frame = requestAnimationFrame(scroll);

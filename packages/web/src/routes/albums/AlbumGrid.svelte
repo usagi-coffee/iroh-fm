@@ -214,14 +214,13 @@
       items={rows}
       getKey={albumRowKey}
       estimateSize={estimatedRowHeight}
-      measureItems="uniform"
       overscan={bufferSize}
-      paddingStart={rootFontSize * ALBUM_GAP_REM}
       initialIndex={initialPlayingRowIndex >= 0 ? initialPlayingRowIndex : null}
     >
       {#snippet children(row, rowIndex)}
         <div
           class="grid gap-3 px-3 pb-5"
+          class:pt-3={rowIndex === 0}
           style={`grid-template-columns:repeat(${columns},minmax(0,1fr))`}
         >
           {#each row as album (album.id)}
