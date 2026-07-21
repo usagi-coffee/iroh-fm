@@ -9,63 +9,45 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.ContentMetadata
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
+import java.util.LinkedHashMap
 
 /** Audio storage shared by the TWA bridge and the foreground playback service. */
 object NativeAudioCache {
     data class Stats(val count: Int, val size: Long)
 
     private val initializationLock = Any()
-    private lateinit var rollingCache: SimpleCache
     private lateinit var offlineCache: SimpleCache
-    private lateinit var rollingFactory: CacheDataSource.Factory
-    private lateinit var rollingPlaybackFactory: CacheDataSource.Factory
     private lateinit var offlineDownloadFactory: CacheDataSource.Factory
     private lateinit var playbackFactory: CacheDataSource.Factory
+    private val memoryLock = Any()
+    private val memoryTracks = LinkedHashMap<String, ByteArray>(0, 0.75f, true)
+    private var memoryBytes = 0L
+    private var memoryCacheBytes = DEFAULT_MEMORY_CACHE_BYTES
 
     fun initialize(context: Context) = synchronized(initializationLock) {
-        if (::rollingCache.isInitialized) return
+        if (::offlineCache.isInitialized) return
         val applicationContext = context.applicationContext
         val database = StandaloneDatabaseProvider(applicationContext)
-        rollingCache = SimpleCache(
-            File(applicationContext.cacheDir, "iroh-audio"),
-            LeastRecentlyUsedCacheEvictor(ROLLING_CACHE_BYTES),
-            database,
-        )
         offlineCache = SimpleCache(
             File(applicationContext.noBackupFilesDir, "iroh-offline-audio"),
             NoOpCacheEvictor(),
             database,
         )
-        rollingFactory = CacheDataSource.Factory()
-            .setCache(rollingCache)
-            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        // The foreground cache writer owns rolling-cache writes. Media3 only reads cached spans.
-        rollingPlaybackFactory = CacheDataSource.Factory()
-            .setCache(rollingCache)
-            .setCacheWriteDataSinkFactory(null)
-            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         offlineDownloadFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
-            // Promote any already-buffered rolling bytes before requesting missing data over iroh.
-            .setUpstreamDataSourceFactory(rollingFactory)
+            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        // Playback checks permanent offline files first, then the rolling stream cache and iroh.
         playbackFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
             .setCacheWriteDataSinkFactory(null)
-            .setUpstreamDataSourceFactory(rollingPlaybackFactory)
+            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
     fun playbackDataSourceFactory(): DataSource.Factory = playbackFactory
-
-    fun rollingDataSource(): CacheDataSource = rollingFactory.createDataSourceForDownloading()
 
     fun cacheKey(remoteId: String, trackId: String): String =
         "$CACHE_KEY_PREFIX$remoteId:$trackId"
@@ -73,18 +55,47 @@ object NativeAudioCache {
     fun isOfflineCached(remoteId: String, trackId: String): Boolean =
         isComplete(offlineCache, cacheKey(remoteId, trackId))
 
-    fun isPlaybackCached(remoteId: String, trackId: String): Boolean {
-        val key = cacheKey(remoteId, trackId)
-        return isComplete(offlineCache, key) || isComplete(rollingCache, key)
+    fun isPlaybackCached(remoteId: String, trackId: String): Boolean =
+        isOfflineCached(remoteId, trackId)
+
+    fun memoryTrack(remoteId: String, trackId: String): ByteArray? = synchronized(memoryLock) {
+        memoryTracks[cacheKey(remoteId, trackId)]
+    }
+
+    fun isMemoryCached(remoteId: String, trackId: String): Boolean = synchronized(memoryLock) {
+        memoryTracks.containsKey(cacheKey(remoteId, trackId))
+    }
+
+    fun rememberMemoryTrack(remoteId: String, trackId: String, bytes: ByteArray) {
+        if (bytes.isEmpty() || bytes.size.toLong() > memoryCacheBytes) return
+        synchronized(memoryLock) {
+            val key = cacheKey(remoteId, trackId)
+            memoryBytes -= memoryTracks.remove(key)?.size?.toLong() ?: 0L
+            while (memoryBytes + bytes.size > memoryCacheBytes) {
+                val oldest = memoryTracks.entries.iterator()
+                if (!oldest.hasNext()) break
+                memoryBytes -= oldest.next().value.size.toLong()
+                oldest.remove()
+            }
+            memoryTracks[key] = bytes
+            memoryBytes += bytes.size
+        }
+    }
+
+    fun resizeMemoryCache(bytes: Long) = synchronized(memoryLock) {
+        memoryCacheBytes = bytes.coerceIn(MIN_MEMORY_CACHE_BYTES, MAX_MEMORY_CACHE_BYTES)
+        while (memoryBytes > memoryCacheBytes) {
+            val oldest = memoryTracks.entries.iterator()
+            if (!oldest.hasNext()) break
+            memoryBytes -= oldest.next().value.size.toLong()
+            oldest.remove()
+        }
     }
 
     fun cachedTrackIds(remoteId: String): Set<String> {
         val prefix = "$CACHE_KEY_PREFIX$remoteId:"
-        return sequenceOf(offlineCache, rollingCache)
-            .flatMap { cache ->
-                cache.keys.asSequence()
-                    .filter { it.startsWith(prefix) && isComplete(cache, it) }
-            }
+        return offlineCache.keys.asSequence()
+            .filter { it.startsWith(prefix) && isComplete(offlineCache, it) }
             .map { it.removePrefix(prefix) }
             .toSet()
     }
@@ -127,6 +138,8 @@ object NativeAudioCache {
 
     private const val CACHE_KEY_PREFIX = "iroh-fm:"
     private const val TAG = "iroh.fm.cache"
-    private const val ROLLING_CACHE_BYTES = 1024L * 1024L * 1024L
     private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
+    private const val DEFAULT_MEMORY_CACHE_BYTES = 256L * 1024L * 1024L
+    private const val MIN_MEMORY_CACHE_BYTES = 32L * 1024L * 1024L
+    private const val MAX_MEMORY_CACHE_BYTES = 2L * 1024L * 1024L * 1024L
 }

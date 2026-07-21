@@ -211,6 +211,7 @@ class MainActivity : ComponentActivity() {
             "cacheTrack",
             "cachedTrackIds",
             "cacheStats",
+            "setMemoryCacheSize",
         )
         val task = Runnable {
             val startedAt = SystemClock.elapsedRealtime()
@@ -336,6 +337,10 @@ class MainActivity : ComponentActivity() {
             JSONObject()
                 .put("tracks", JSONObject().put("count", it.count).put("size", it.size))
                 .put("covers", JSONObject().put("count", 0).put("size", 0))
+        }
+        "setMemoryCacheSize" -> {
+            NativeAudioCache.resizeMemoryCache(payload.getLong("bytes"))
+            JSONObject()
         }
         "setOfflineOnly" -> setOfflineOnly(payload.getBoolean("enabled"))
         "play" -> play(payload)
@@ -465,7 +470,12 @@ class MainActivity : ComponentActivity() {
                             .put("active", it.active)
                             .put(
                                 "cached",
-                                NativeAudioCache.isPlaybackCached(NativeCore.activeRemoteId, id),
+                                NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id),
+                            )
+                            .put(
+                                "memoryCached",
+                                !NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id) &&
+                                    NativeAudioCache.isMemoryCached(NativeCore.activeRemoteId, id),
                             ),
                     )
                 }

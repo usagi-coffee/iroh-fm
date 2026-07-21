@@ -298,8 +298,14 @@ export class NativeMusicClient {
     return nativeRequest("cacheStats");
   }
 
+  /** @param {number} bytes */
+  setMemoryCacheSize(bytes) {
+    return nativeRequest("setMemoryCacheSize", { bytes });
+  }
+
+  /** Explicitly download a track into the persistent Android cache. */
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
-  async prefetchTrack(id, onProgress = () => {}) {
+  async cacheTrack(id, onProgress = () => {}) {
     if (this.offlineOnly) throw new Error("track is not available offline");
     let polling = false;
     const reportProgress = async () => {
@@ -327,6 +333,11 @@ export class NativeMusicClient {
     } finally {
       clearInterval(timer);
     }
+  }
+
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  prefetchTrack(id, onProgress = () => {}) {
+    return this.cacheTrack(id, onProgress);
   }
 
   /** @param {string} id @param {{ fullQuality?: boolean }} [options] */

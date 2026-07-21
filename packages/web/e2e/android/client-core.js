@@ -47,12 +47,13 @@ class AndroidMusicClient extends NativeFixtureClient {
     };
     this.notify();
     await delay(50);
-    this.cached.add(id);
+    this.memoryCached.add(id);
     this.transfers[id] = {
       received: TRACK_BYTES,
       total: TRACK_BYTES,
       active: false,
-      cached: true,
+      cached: false,
+      memoryCached: true,
     };
     this.notify();
   }

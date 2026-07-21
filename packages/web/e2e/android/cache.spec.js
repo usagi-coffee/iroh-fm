@@ -21,13 +21,13 @@ test("shows asynchronous native connection stats while starting", async ({ page 
 test("marks Android played and prefetched tracks from transfer state", async ({ page }) => {
   await page.getByRole("button", { name: "Play First Light" }).click();
   const nextTrack = page.getByRole("row").filter({ hasText: "Nebula Drift" });
-  await expect(nextTrack.locator('[title="Cached"]')).toBeVisible();
-  await expect(nextTrack.locator('[title="Cached"]')).toHaveClass(/text-green/);
+  await expect(nextTrack.locator('[title="In memory cache"]')).toBeVisible();
+  await expect(nextTrack.locator('[title="In memory cache"]')).toHaveClass(/text-peach/);
 
   await page.getByRole("button", { name: "Play Nebula Drift" }).click();
   const playedTrack = page.getByRole("row").filter({ hasText: "First Light" });
-  await expect(playedTrack.locator('[title="Cached"]')).toBeVisible();
-  await expect(playedTrack.locator('[title="Cached"]')).toHaveClass(/text-green/);
+  await expect(playedTrack.locator('[title="In memory cache"]')).toBeVisible();
+  await expect(playedTrack.locator('[title="In memory cache"]')).toHaveClass(/text-peach/);
 });
 
 test("discards stale native playback states after resume", async ({ page }) => {
