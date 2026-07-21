@@ -1,3 +1,61 @@
+<script module>
+  /** @typedef {{ observer: IntersectionObserver, listeners: Map<Element, (visible: boolean) => void> }} ObserverEntry */
+  /** @type {Map<string, ObserverEntry>} */
+  const viewportObservers = new Map();
+  /** @type {WeakMap<Element, Map<string, ObserverEntry>>} */
+  const rootedObservers = new WeakMap();
+
+  /** @param {HTMLElement} node */
+  function findScrollRoot(node) {
+    let parent = node.parentElement;
+    while (parent) {
+      const style = getComputedStyle(parent);
+      if (/auto|scroll|overlay/.test(style.overflowY)) return parent;
+      parent = parent.parentElement;
+    }
+    return null;
+  }
+
+  /** @param {HTMLElement} node @param {string} rootMargin @param {(visible: boolean) => void} listener */
+  function observeVisibility(node, rootMargin, listener) {
+    const root = findScrollRoot(node);
+    let registry;
+    if (root) {
+      registry = rootedObservers.get(root);
+      if (!registry) {
+        registry = new Map();
+        rootedObservers.set(root, registry);
+      }
+    } else registry = viewportObservers;
+
+    let entry = registry.get(rootMargin);
+    if (!entry) {
+      /** @type {Map<Element, (visible: boolean) => void>} */
+      const listeners = new Map();
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const observed of entries)
+            listeners.get(observed.target)?.(observed.isIntersecting);
+        },
+        { root, rootMargin },
+      );
+      entry = { observer, listeners };
+      registry.set(rootMargin, entry);
+    }
+
+    entry.listeners.set(node, listener);
+    entry.observer.observe(node);
+    return () => {
+      entry.listeners.delete(node);
+      entry.observer.unobserve(node);
+      if (!entry.listeners.size) {
+        entry.observer.disconnect();
+        registry.delete(rootMargin);
+      }
+    };
+  }
+</script>
+
 <script>
   /**
    * @typedef {Object} Props
@@ -42,25 +100,13 @@
     visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
   );
 
-  /** @param {HTMLElement} node */
-  function findScrollRoot(node) {
-    let parent = node.parentElement;
-    while (parent) {
-      const style = getComputedStyle(parent);
-      if (/auto|scroll|overlay/.test(style.overflowY)) return parent;
-      parent = parent.parentElement;
-    }
-    return null;
-  }
-
   /** @param {string} requestedRootMargin */
   function loadVisibleCover(requestedRootMargin) {
     /** @param {HTMLElement} node */
     return (node) => {
       /** @type {ReturnType<typeof setTimeout> | undefined} */
       let timer;
-      /** @type {IntersectionObserver | undefined} */
-      let observer;
+      let stopObserving = () => {};
       const hide = () => {
         if (timer) clearTimeout(timer);
         timer = undefined;
@@ -70,23 +116,19 @@
         timer = setTimeout(() => {
           timer = undefined;
           visible = true;
-          observer?.disconnect();
+          stopObserving();
         }, LOAD_DELAY_MS);
       };
       if (!("IntersectionObserver" in window)) {
         show();
         return hide;
       }
-      observer = new IntersectionObserver(
-        (entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) show();
-          else hide();
-        },
-        { root: findScrollRoot(node), rootMargin: requestedRootMargin },
-      );
-      observer.observe(node);
+      stopObserving = observeVisibility(node, requestedRootMargin, (intersecting) => {
+        if (intersecting) show();
+        else hide();
+      });
       return () => {
-        observer.disconnect();
+        stopObserving();
         hide();
       };
     };
