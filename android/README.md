@@ -48,7 +48,7 @@ Current seek behavior reopens a stream and consumes bytes up to Media3's request
 
 ## GitHub Actions and release signing
 
-The Android workflow builds only signed release APKs. It runs after successful Web workflows for pushes to `master` whose commit subject starts exactly with `android:`, `protocol:`, `client:`, or `ci:`. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
+The Android workflow builds and publishes signed APKs only for successful Web workflows on `master` whose commit subject starts exactly with `android:`. Protocol, server, client, Web, and CI commits do not trigger Android. Pull requests and other branch commits never receive the release keystore or its passwords. An eligible build fails rather than falling back to an unsigned APK when any signing secret is missing.
 
 Create the long-lived release keystore locally. Do not create it in GitHub Actions and do not commit it:
 
@@ -80,35 +80,15 @@ The password command prompts for its value without placing it in the command lin
 - `ANDROID_KEYSTORE_PASSWORD`: the keystore password
 - `ANDROID_KEY_ALIAS`: `iroh-fm`, unless another alias was chosen
 
-Trigger a signed release build from `master` with a matching commit subject:
+Build and publish a signed Android release from `master`:
 
 ```sh
 git commit -m "android: describe the Android change"
-# or, for changes shared by every client:
-git commit -m "protocol: describe the protocol change"
-git commit -m "client: describe the shared client change"
 git push
 ```
 
-Create a GitHub release with the signed APK attached by pushing the next numbered
-Android release tag:
+An `android:` commit publishes the signed APK under the commit-specific `android-<sha>` tag and an epoch-based release title. Rerunning it updates that same release. Every eligible build also retains its APK as a workflow artifact for 30 days. CI and local builds use the Unix build timestamp as a monotonically increasing `versionCode`.
 
-```sh
-git tag v1
-git push origin v1
-```
-
-Android releases use sequential tags (`v1`, `v2`, `v3`, ...), with the leading
-`v` removed for the APK `versionName`; GitHub names the corresponding release
-`Android v1`, `Android v2`, and so on. An `android:` branch build uses
-`ci-<run-number>` and an unconfigured local build uses `local`; neither shares the
-Rust and web SemVer. Both CI and local release builds use the Unix build timestamp
-as a monotonically increasing `versionCode`, so either source can update an APK
-produced by the other.
-
-Tag builds are also retained as workflow artifacts. If a tag workflow is rerun,
-the existing release is kept and its APK asset is replaced with the newly built,
-signature-verified file. `android:` commit builds remain workflow artifacts only
-and never create a GitHub release.
+Publishing native releases always requires explicit platform commits. After a shared `protocol:` change, push an `android:` commit to publish Android and push a separate `desktop:` commit to publish Desktop. The workflows inspect only the head commit of each push, so do not batch both release commits into one push. Workflow concurrency is queued rather than cancelled, ensuring a later push cannot cancel an explicit release build.
 
 The workflow verifies that the release certificate matches the SHA-256 fingerprint published for this app, then prints that fingerprint in the workflow summary.

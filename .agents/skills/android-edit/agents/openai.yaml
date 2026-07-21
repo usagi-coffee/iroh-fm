@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Edit"
+  short_description: "Edit and verify the Android app"
+  default_prompt: "Use $android-edit to implement and verify a change in the iroh-fm Android application."

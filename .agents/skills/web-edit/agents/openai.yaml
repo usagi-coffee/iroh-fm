@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web Edit"
+  short_description: "Edit and verify the web player"
+  default_prompt: "Use $web-edit to implement and verify a change in the iroh-fm web player."

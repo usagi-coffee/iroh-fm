@@ -1,0 +1,4 @@
+interface:
+  display_name: "Server Edit"
+  short_description: "Edit and verify the music server"
+  default_prompt: "Use $server-edit to implement and verify a change in the iroh-fm server."

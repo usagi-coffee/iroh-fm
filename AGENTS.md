@@ -1,46 +1,37 @@
-## High-Level Architecture
+# iroh-fm
 
-### Iroh Music Server
+iroh-fm is a music server and a set of clients. The server keeps a music library, and clients connect to it over [iroh](https://iroh.computer/) to browse the library and play tracks. The same library operations are used by the browser, Desktop, Android, and Subsonic-compatible clients.
 
-Responsibilities:
+## How the pieces fit together
 
-- Scan a configured root music directory.
-- Build a normalized in-memory or persisted index of artists, albums, tracks, cover art, and file metadata.
-- Expose protocol-agnostic backend operations over `iroh` for:
-  - library summary
-  - artist listing
-  - album listing
-  - track lookup
-  - cover art fetch
-  - stream open by track id
-- Serve file bytes efficiently for audio streams and artwork.
+`crates/server` is the part that knows the music collection. It scans the configured music directory, identifies artists, albums, and tracks, stores their metadata, checks access, and reads cover art or audio bytes when a client asks for them.
 
-Non-responsibilities:
+`crates/protocol` describes the conversation between a client and the server. It contains the request and response types, IDs, and serialized library data. It does not scan files or display anything; it is the shared vocabulary that both sides compile against.
 
-- No Subsonic route handling
-- No Subsonic auth semantics
-- No Subsonic response serialization
+`crates/client` is the native Rust implementation of that conversation. It connects to a server, sends protocol requests, and exposes the results to native applications. Desktop, Android, and the Subsonic service use this client.
 
-Primary crate involved:
+The browser cannot use the native client directly. `crates/web-wasm` is a browser/WASM implementation of the iroh connection and protocol calls, compiled for use from JavaScript. It handles browser-specific transport details such as connecting with a shared ticket and opening browser audio streams.
 
-- `server`
+`packages/client` is the JavaScript-facing client library. Its `ClientCore` presents one API to the UI and chooses the implementation for the current host: browser WASM, Desktop, or Android. The generated files under `packages/client/src/wasm` come from `crates/web-wasm`.
 
-### Subsonic Compatibility Service
+`packages/web` is the Svelte music player that is shared between Web, Desktop and Android application. It contains the screens, library browsing, connection state, queue, and player controls. It talks to `packages/client` rather than directly to iroh. The web build is a pure client-side rendered static site hosted on Github Pages, so the browser downloads the app and then connects to the user’s server.
 
-Responsibilities:
+`packages/web/src-tauri` is the desktop wrapper of the web application inside a Tauri application. It supplies the native bridge, filesystem/application integration, and Rodio audio playback; its Rust side uses `crates/client` instead of the browser WASM transport.
 
-- Expose HTTP endpoints compatible with selected Subsonic API routes.
-- Validate Subsonic auth parameters enough for clients to proceed.
-- Translate incoming Subsonic requests into backend calls against `server`.
-- Shape responses to Subsonic schemas.
-- Proxy or bridge audio streams from `iroh` to HTTP clients.
+`android` is the android wrapper of the web application inside a Trusted Web Activity. It contains the Gradle/Kotlin application and its Media3 playback service. `crates/android-native` contains the Rust/JNI bridge to the native client, while the Android implementation in `packages/client` passes messages between the web UI and that bridge.
 
-Design rule:
+`crates/subsonic` is an adapter for existing Subsonic music apps. This crate translates subsonic requests into calls through `crates/client` and converts the results back into Subsonic-shaped HTTP responses. It is an adapter for that external API, not another music-library implementation.
 
-- `subsonic` is an adapter layer, not the source of truth for library semantics.
-- Any future protocol such as another media API should be added as a sibling facade crate, not by extending `server` with client-protocol logic.
+## Typical request flow
 
-Primary crates involved:
+A browser click usually follows this path:
 
-- `subsonic`
-- `server` as the backend contract owner, or a later `protocol` crate if that contract needs isolation
+`packages/web` UI → `packages/client` → `crates/web-wasm` → iroh → `crates/server`
+
+The Desktop and Android paths replace the browser transport with their native bridges and `crates/client`:
+
+`packages/web` UI → `packages/client` → native bridge → `crates/client` → iroh → `crates/server`
+
+The Subsonic path starts with an external HTTP client instead of the Svelte UI:
+
+Subsonic app → `crates/subsonic` → `crates/client` → iroh → `crates/server`

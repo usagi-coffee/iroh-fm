@@ -1,0 +1,4 @@
+interface:
+  display_name: "Protocol Edit"
+  short_description: "Change the shared wire contract safely"
+  default_prompt: "Use $protocol-edit to change the shared iroh-fm protocol and update every consumer safely."

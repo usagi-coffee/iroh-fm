@@ -1,0 +1,4 @@
+interface:
+  display_name: "Desktop Edit"
+  short_description: "Edit and verify the desktop shell"
+  default_prompt: "Use $desktop-edit to implement and verify a change in the iroh-fm desktop application."

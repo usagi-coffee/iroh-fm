@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contributing"
+  short_description: "Choose commit prefixes and understand CI effects"
+  default_prompt: "Use $contributing to choose the right commit prefix and explain its CI and release implications."
