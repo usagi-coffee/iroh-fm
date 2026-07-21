@@ -196,9 +196,13 @@
         retry();
         return;
       }
-      const target = [...host.querySelectorAll("[data-track-id]")].find(
-        (element) => element instanceof HTMLElement && element.dataset.trackId === trackId,
-      );
+      let target = null;
+      for (const element of host.querySelectorAll("[data-track-id]")) {
+        if (element instanceof HTMLElement && element.dataset.trackId === trackId) {
+          target = element;
+          break;
+        }
+      }
       if (target instanceof HTMLElement) {
         const viewportRect = viewport.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
