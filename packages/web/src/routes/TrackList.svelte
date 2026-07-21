@@ -343,13 +343,15 @@
             >
           </button>
         {:else}
+          {let current = $derived(App.player.currentTrack?.id === item.track.id)}
+          {let selected = $derived(App.library.selectedTrackId === item.track.id)}
           <div
             data-list-index={itemIndex}
             data-track-id={item.track.id}
             {@attach longPress(() => openTrackActions(item.track))}
             role="row"
             tabindex="0"
-            aria-selected={App.library.selectedTrackId === item.track.id}
+            aria-selected={selected}
             onclick={() => (App.library.selectedTrackId = item.track.id)}
             ondblclick={() => playTrackFromList(item.track)}
             oncontextmenu={(event) => openTrackActions(item.track, event)}
@@ -360,10 +362,9 @@
                 App.library.selectedTrackId = item.track.id;
               }
             }}
-            class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
-              .player.currentTrack?.id === item.track.id
+            class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {current
               ? 'bg-mauve/15'
-              : App.library.selectedTrackId === item.track.id
+              : selected
                 ? 'bg-surface0'
                 : 'hover:bg-surface0/60'}"
           >
@@ -383,7 +384,7 @@
                     style={`width:${item.track.progress * 100}%`}
                   ></span></span
                 >
-              {:else if App.player.currentTrack?.id === item.track.id && App.player.playing}
+              {:else if current && App.player.playing}
                 <PauseIcon class="text-2xs" />
               {:else if item.track.cached}
                 <span class="text-green" title="Cached"
