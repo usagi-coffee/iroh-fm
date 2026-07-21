@@ -40,12 +40,19 @@ export function longPress(open, delay = 500) {
       event.preventDefault();
       event.stopImmediatePropagation();
     };
+    /** @param {MouseEvent} event */
+    const suppressContextMenu = (event) => {
+      if (!origin) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
 
     element.addEventListener("pointerdown", start);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", clear);
     element.addEventListener("pointercancel", clear);
     element.addEventListener("click", suppressClick, true);
+    element.addEventListener("contextmenu", suppressContextMenu, true);
     return () => {
       clear();
       element.removeEventListener("pointerdown", start);
@@ -53,6 +60,7 @@ export function longPress(open, delay = 500) {
       element.removeEventListener("pointerup", clear);
       element.removeEventListener("pointercancel", clear);
       element.removeEventListener("click", suppressClick, true);
+      element.removeEventListener("contextmenu", suppressContextMenu, true);
     };
   };
 }
