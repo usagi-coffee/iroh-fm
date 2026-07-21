@@ -39,11 +39,16 @@
   let viewportSize = $state(0);
   let renderWindowOffset = $state(0);
   let pinnedToEnd = false;
+  const MEASUREMENT_EPSILON = 0.5;
   const measuredSizes = new SvelteMap();
   /** @type {{ estimate: number, size: number } | null} */
   let uniformMeasurement = $state(null);
   /** @type {ResizeObserver | undefined} */
   let itemObserver;
+  /** @type {Map<Element, number>} */
+  const pendingMeasurements = new Map();
+  /** @type {number | undefined} */
+  let measurementFrame;
   /** @type {WeakMap<Element, { key: string | number, index: number }>} */
   const observedItems = new WeakMap();
 
@@ -81,7 +86,8 @@
   function updateUniformMeasurement(estimate, size) {
     if (
       size <= 0 ||
-      (uniformMeasurement?.estimate === estimate && uniformMeasurement.size === size)
+      (uniformMeasurement?.estimate === estimate &&
+        Math.abs(uniformMeasurement.size - size) < MEASUREMENT_EPSILON)
     )
       return;
     const node = viewport;
@@ -100,42 +106,49 @@
       });
   }
 
+  function flushMeasurements() {
+    measurementFrame = undefined;
+    const measurements = [...pendingMeasurements];
+    pendingMeasurements.clear();
+    const observedViewport = viewport;
+    const preserveEnd = Boolean(observedViewport && (pinnedToEnd || isAtEnd(observedViewport)));
+    const anchorIndex =
+      observedViewport && items.length ? indexAtOffset(observedViewport.scrollTop) : 0;
+    let scrollCorrection = 0;
+    let layoutChanged = false;
+    /** @type {{ estimate: number, size: number } | null} */
+    let nextUniformMeasurement = null;
+    for (const [element, size] of measurements) {
+      const measurement = observedItems.get(element);
+      if (!measurement || measurement.index >= items.length) continue;
+      const estimate = estimatedSize(items[measurement.index], measurement.index);
+      if (measureItems === "uniform") {
+        if (size > 0) nextUniformMeasurement = { estimate, size };
+        continue;
+      }
+      const previousMeasurement = measuredSizes.get(measurement.key);
+      const sameEstimate = previousMeasurement?.estimate === estimate;
+      const previous = sameEstimate ? previousMeasurement.size : estimate;
+      if (size <= 0 || (sameEstimate && Math.abs(size - previous) < MEASUREMENT_EPSILON)) continue;
+      measuredSizes.set(measurement.key, { estimate, size });
+      layoutChanged = true;
+      if (measurement.index < anchorIndex) scrollCorrection += size - previous;
+    }
+    if (nextUniformMeasurement)
+      updateUniformMeasurement(nextUniformMeasurement.estimate, nextUniformMeasurement.size);
+    if (observedViewport && layoutChanged)
+      queueMicrotask(() => {
+        if (viewport !== observedViewport) return;
+        if (preserveEnd) observedViewport.scrollTop = maximumScrollOffset(observedViewport);
+        else if (scrollCorrection) observedViewport.scrollTop += scrollCorrection;
+        updateViewportPosition(observedViewport);
+      });
+  }
+
   function ensureItemObserver() {
     itemObserver ??= new ResizeObserver((entries) => {
-      const observedViewport = viewport;
-      const preserveEnd = Boolean(observedViewport && (pinnedToEnd || isAtEnd(observedViewport)));
-      const anchorIndex =
-        observedViewport && items.length ? indexAtOffset(observedViewport.scrollTop) : 0;
-      let scrollCorrection = 0;
-      let layoutChanged = false;
-      /** @type {{ estimate: number, size: number } | null} */
-      let nextUniformMeasurement = null;
-      for (const entry of entries) {
-        const measurement = observedItems.get(entry.target);
-        if (!measurement || measurement.index >= items.length) continue;
-        const size = observedHeight(entry);
-        const estimate = estimatedSize(items[measurement.index], measurement.index);
-        if (measureItems === "uniform") {
-          if (size > 0) nextUniformMeasurement = { estimate, size };
-          continue;
-        }
-        const previousMeasurement = measuredSizes.get(measurement.key);
-        const previous =
-          previousMeasurement?.estimate === estimate ? previousMeasurement.size : estimate;
-        if (size <= 0 || size === previous) continue;
-        measuredSizes.set(measurement.key, { estimate, size });
-        layoutChanged = true;
-        if (measurement.index < anchorIndex) scrollCorrection += size - previous;
-      }
-      if (nextUniformMeasurement)
-        updateUniformMeasurement(nextUniformMeasurement.estimate, nextUniformMeasurement.size);
-      if (observedViewport && layoutChanged)
-        queueMicrotask(() => {
-          if (viewport !== observedViewport) return;
-          if (preserveEnd) observedViewport.scrollTop = maximumScrollOffset(observedViewport);
-          else if (scrollCorrection) observedViewport.scrollTop += scrollCorrection;
-          updateViewportPosition(observedViewport);
-        });
+      for (const entry of entries) pendingMeasurements.set(entry.target, observedHeight(entry));
+      measurementFrame ??= requestAnimationFrame(flushMeasurements);
     });
     return itemObserver;
   }
@@ -291,6 +304,9 @@
         if (revealFrame !== undefined) cancelAnimationFrame(revealFrame);
         itemObserver?.disconnect();
         itemObserver = undefined;
+        pendingMeasurements.clear();
+        if (measurementFrame !== undefined) cancelAnimationFrame(measurementFrame);
+        measurementFrame = undefined;
         if (viewport === node) viewport = undefined;
         api = undefined;
       };
@@ -306,6 +322,16 @@
         observedItems.set(node, { key, index });
         if (measureItems === "uniform" && uniformMeasurement?.estimate !== estimate)
           updateUniformMeasurement(estimate, node.getBoundingClientRect().height);
+        else if (measureItems === true) {
+          const size = node.getBoundingClientRect().height;
+          const previous = measuredSizes.get(key);
+          if (
+            size > 0 &&
+            (previous?.estimate !== estimate ||
+              Math.abs(previous.size - size) >= MEASUREMENT_EPSILON)
+          )
+            measuredSizes.set(key, { estimate, size });
+        }
         ensureItemObserver().observe(node);
         return () => {
           observedItems.delete(node);

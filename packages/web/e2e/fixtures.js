@@ -2,6 +2,8 @@ export const TRACK_BYTES = 320_044;
 export const TRACK_SECONDS = 20;
 const COVER_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' fill='%23cba6f7'/%3E%3C/svg%3E";
+const COVER_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='#cba6f7'/></svg>";
 
 export const tracks = [
   track("track-1", "First Light", "Aurora Unit", 1),
@@ -96,6 +98,14 @@ function track(id, title, artist, trackNumber) {
 
 export function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export function coverMedia() {
+  return {
+    contentType: "image/svg+xml",
+    bytes: new TextEncoder().encode(COVER_SVG),
+    free() {},
+  };
 }
 
 export function silentWav() {

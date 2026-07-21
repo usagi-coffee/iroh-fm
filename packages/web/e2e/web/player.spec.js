@@ -70,7 +70,13 @@ test("shows resolved album covers immediately after remounting", async ({ page }
   expect(firstRender).toEqual({ image: true, fallback: false });
 });
 
-test("keeps album scrolling stable and centers a selected album track", async ({ page }) => {
+test("keeps album scrolling stable and centers a selected album track", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "web",
+    "The large-library fixture belongs to the Web client.",
+  );
   await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "120"));
   await page.reload();
   await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();

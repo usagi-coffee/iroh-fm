@@ -1,4 +1,4 @@
-import { album, delay, NativeFixtureClient, TRACK_BYTES, tracks } from "../fixtures.js";
+import { album, coverMedia, delay, NativeFixtureClient, TRACK_BYTES, tracks } from "../fixtures.js";
 
 import { MusicClient } from "@iroh-fm/client";
 
@@ -34,6 +34,10 @@ class DesktopInner extends NativeFixtureClient {
 
   connectionInfo() {
     return JSON.stringify(super.connectionInfo());
+  }
+
+  fetchCover() {
+    return Promise.resolve(coverMedia());
   }
 
   cachedTrackIds() {
