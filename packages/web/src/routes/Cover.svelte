@@ -45,7 +45,10 @@
 
     entry.listeners.set(node, listener);
     entry.observer.observe(node);
+    let active = true;
     return () => {
+      if (!active) return;
+      active = false;
       entry.listeners.delete(node);
       entry.observer.unobserve(node);
       if (!entry.listeners.size) {

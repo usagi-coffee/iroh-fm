@@ -516,7 +516,7 @@
         class="border-surface1 text-3xs text-subtext0 hover:bg-surface0 border px-4 py-2 font-mono"
         >CANCEL</a
       ><button
-      type="submit"
+        type="submit"
         disabled={!canSave}
         class="bg-mauve text-3xs text-crust hover:bg-pink px-4 py-2 font-mono font-bold disabled:opacity-40"
         >SAVE & RECONNECT</button
