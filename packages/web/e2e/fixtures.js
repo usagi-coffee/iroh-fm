@@ -1,5 +1,7 @@
 export const TRACK_BYTES = 320_044;
 export const TRACK_SECONDS = 20;
+const COVER_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' fill='%23cba6f7'/%3E%3C/svg%3E";
 
 export const tracks = [
   track("track-1", "First Light", "Aurora Unit", 1),
@@ -25,7 +27,7 @@ export const album = {
   disc_count: 1,
   duration_seconds: TRACK_SECONDS * tracks.length,
   size_bytes: TRACK_BYTES * tracks.length,
-  cover_art_id: null,
+  cover_art_id: "cover-1",
 };
 
 function track(id, title, artist, trackNumber) {
@@ -133,8 +135,9 @@ export class FixtureClient {
     return Promise.resolve({});
   }
 
-  coverUrl() {
-    return Promise.resolve("");
+  async coverUrl() {
+    await delay(40);
+    return COVER_URL;
   }
 
   close() {

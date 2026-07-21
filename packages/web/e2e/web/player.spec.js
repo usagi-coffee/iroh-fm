@@ -54,3 +54,15 @@ test("filters tracks by title", async ({ page }) => {
   await expect(page.getByRole("row")).toContainText("Nebula Drift");
   await expect(page.getByText("First Light", { exact: true })).toHaveCount(0);
 });
+
+test("shows resolved album covers immediately after remounting", async ({ page }) => {
+  await expect(page.locator('.cover img[alt="Test Signals cover"]').first()).toBeVisible();
+
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  const firstRender = await page.locator(".cover").first().evaluate((cover) => ({
+    image: Boolean(cover.querySelector("img")),
+    fallback: Boolean(cover.querySelector(".cover-fallback")),
+  }));
+
+  expect(firstRender).toEqual({ image: true, fallback: false });
+});

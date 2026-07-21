@@ -4,6 +4,40 @@
   const viewportObservers = new Map();
   /** @type {WeakMap<Element, Map<string, ObserverEntry>>} */
   const rootedObservers = new WeakMap();
+  /** @type {WeakMap<object, Map<string, string>>} */
+  const resolvedCoverUrls = new WeakMap();
+
+  /** @param {string} id @param {boolean} fullQuality */
+  function coverKey(id, fullQuality) {
+    return `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
+  }
+
+  /** @param {object | null} client @param {string | null} id @param {boolean} fullQuality */
+  function resolvedCoverUrl(client, id, fullQuality) {
+    return client && id ? (resolvedCoverUrls.get(client)?.get(coverKey(id, fullQuality)) ?? null) : null;
+  }
+
+  /** @param {import('@iroh-fm/client').MusicClient} client @param {string} id @param {boolean} fullQuality */
+  function loadCoverUrl(client, id, fullQuality) {
+    const resolved = resolvedCoverUrl(client, id, fullQuality);
+    if (resolved) return resolved;
+    return client.coverUrl(id, { fullQuality }).then((url) => {
+      if (url) {
+        let urls = resolvedCoverUrls.get(client);
+        if (!urls) {
+          urls = new Map();
+          resolvedCoverUrls.set(client, urls);
+        }
+        urls.set(coverKey(id, fullQuality), url);
+      }
+      return url;
+    });
+  }
+
+  /** @param {object | null} client @param {string | null} id @param {boolean} fullQuality */
+  function forgetCoverUrl(client, id, fullQuality) {
+    if (client && id) resolvedCoverUrls.get(client)?.delete(coverKey(id, fullQuality));
+  }
 
   /** @param {HTMLElement} node */
   function findScrollRoot(node) {
@@ -99,9 +133,17 @@
     ),
   );
   const hue = $derived(titleHue(title));
-  const coverPromise = $derived(
-    visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
-  );
+  const coverSource = $derived.by(() => {
+    if (!client || !id) return null;
+    const resolved = resolvedCoverUrl(client, id, fullQuality);
+    if (resolved) return resolved;
+    return visible ? loadCoverUrl(client, id, fullQuality) : null;
+  });
+
+  function imageError() {
+    forgetCoverUrl(client, id, fullQuality);
+    failedRequest = { client, id, fullQuality };
+  }
 
   /** @param {string} requestedRootMargin */
   function loadVisibleCover(requestedRootMargin) {
@@ -146,30 +188,34 @@
   </div>
 {/snippet}
 
+{#snippet image(/** @type {string} */ url)}
+  <img src={url} alt={`${title} cover`} onerror={imageError} />
+{/snippet}
+
 <div
   {@attach loadVisibleCover(rootMargin)}
   class={`cover ${className}`}
   style={`--cover-hue: ${hue}`}
 >
-  <svelte:boundary>
-    {#if coverPromise && !imageFailed}
-      <img
-        src={await coverPromise}
-        alt={`${title} cover`}
-        onerror={() => (failedRequest = { client, id, fullQuality })}
-      />
-    {:else}
-      {@render fallback()}
-    {/if}
+  {#if typeof coverSource === "string" && !imageFailed}
+    {@render image(coverSource)}
+  {:else}
+    <svelte:boundary>
+      {#if coverSource && !imageFailed}
+        {@render image(await coverSource)}
+      {:else}
+        {@render fallback()}
+      {/if}
 
-    {#snippet pending()}
-      {@render fallback()}
-    {/snippet}
+      {#snippet pending()}
+        {@render fallback()}
+      {/snippet}
 
-    {#snippet failed()}
-      {@render fallback()}
-    {/snippet}
-  </svelte:boundary>
+      {#snippet failed()}
+        {@render fallback()}
+      {/snippet}
+    </svelte:boundary>
+  {/if}
 </div>
 
 <style>
