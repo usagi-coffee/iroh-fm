@@ -31,6 +31,8 @@ export class Player {
   nativeStatePending = false;
   nativeSeekGeneration = 0;
   nativeSeekPending = false;
+  /** The latest native playback instance observed from the desktop player. */
+  nativePlaybackGeneration = 0;
   /** @type {string | null} */
   nativePlayPendingTrackId = null;
 
@@ -385,6 +387,13 @@ export class Player {
   /** @param {any} state @param {boolean} [applySeekPosition] @param {any} [client] */
   applyNativeState(state, applySeekPosition = false, client = this.app.connection.client) {
     if (!state || !this.nativePlayback(client)) return;
+    const nativeGeneration = Number(state.generation);
+    if (
+      Number.isSafeInteger(nativeGeneration) &&
+      nativeGeneration < this.nativePlaybackGeneration
+    )
+      return;
+    if (Number.isSafeInteger(nativeGeneration)) this.nativePlaybackGeneration = nativeGeneration;
     const timestamp = Number(state.timestamp);
     if (
       Number.isFinite(timestamp) &&

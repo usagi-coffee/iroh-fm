@@ -61,6 +61,7 @@ impl Default for DesktopAudio {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DesktopPlayerState {
+    generation: u64,
     track_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     queue: Option<Vec<String>>,
@@ -133,6 +134,7 @@ fn snapshot(
         audio.transfers.retain(|_, transfer| transfer.active);
     }
     DesktopPlayerState {
+        generation: audio.generation,
         track_id: audio
             .active
             .front()
