@@ -12,7 +12,7 @@
   import { ClientCore } from "@iroh-fm/client/core";
 
   const MIN_MEMORY_CACHE_MIB = 32;
-  const MAX_MEMORY_CACHE_MIB = 2048;
+  const MAX_MEMORY_CACHE_MIB = 256;
 
   let settings = $state({
     ticket: App.connection.ticket,

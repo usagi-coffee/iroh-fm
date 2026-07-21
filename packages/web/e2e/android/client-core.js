@@ -56,6 +56,21 @@ class AndroidMusicClient extends NativeFixtureClient {
       cached: false,
       memoryCached: true,
     };
+    if (localStorage.getItem("e2e-native-memory-eviction") && this.memoryCached.size > 2) {
+      this.notify();
+      await delay(250);
+      const evictedId = this.memoryCached.values().next().value;
+      this.memoryCached.delete(evictedId);
+      this.transfers[evictedId] = {
+        received: 0,
+        total: TRACK_BYTES,
+        active: false,
+        cached: false,
+        memoryCached: false,
+      };
+      this.notify();
+      return;
+    }
     this.notify();
   }
 

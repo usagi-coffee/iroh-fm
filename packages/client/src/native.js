@@ -57,7 +57,7 @@ let nativeExpected = false;
 let detection;
 let sequence = 0;
 let requestChunksSupported = false;
-/** @type {Map<string, {resolve: (value: any) => void, reject: (reason?: any) => void, timer: ReturnType<typeof setTimeout>}>} */
+/** @type {Map<string, {action: string, resolve: (value: any) => void, reject: (reason?: any) => void, timer: ReturnType<typeof setTimeout>}>} */
 const pending = new Map();
 /** @type {Map<string, {parts: string[], received: number, total: number, timer: ReturnType<typeof setTimeout>}>} */
 const incomingTransfers = new Map();
@@ -150,9 +150,14 @@ function receiveMessage(message) {
     return;
   }
   const request = pending.get(message.id);
-  if (!request) return;
+  if (!request) {
+    if (message.id) console.warn(`[native bridge] response has no pending request: id=${message.id}`);
+    return;
+  }
   clearTimeout(request.timer);
   pending.delete(message.id);
+  if (request.action === "play")
+    console.info(`[native bridge] response received: action=play id=${message.id}`);
   if (message.error) request.reject(new Error(message.error));
   else request.resolve(message.result);
 }
@@ -179,21 +184,30 @@ export function isNative() {
 /** @param {string} action @param {Record<string, any>} [payload] @param {number} [timeout] */
 export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS) {
   const target = port;
-  if (!target) return Promise.reject(new Error("Android native bridge is unavailable"));
+  if (!target) {
+    console.error(`[native bridge] request rejected before send: action=${action} port=missing`);
+    return Promise.reject(new Error("Android native bridge is unavailable"));
+  }
   const id = String(++sequence);
+  if (action === "play") console.info(`[native bridge] request created: action=play id=${id}`);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
+      console.error(`[native bridge] request timed out: action=${action} id=${id}`);
       reject(new Error(`Native ${action} request timed out`));
     }, timeout);
-    pending.set(id, { resolve, reject, timer });
+    pending.set(id, { action, resolve, reject, timer });
     try {
       const raw = JSON.stringify({ module: "native", id, action, payload });
       if (!requestChunksSupported || raw.length <= NATIVE_REQUEST_CHUNK_CHARS) {
         target.postMessage(raw);
+        if (action === "play")
+          console.info(`[native bridge] request posted: action=play id=${id} chars=${raw.length}`);
         return;
       }
       const total = Math.ceil(raw.length / NATIVE_REQUEST_CHUNK_CHARS);
+      if (action === "play")
+        console.info(`[native bridge] posting chunked request: action=play id=${id} chunks=${total}`);
       for (let index = 0; index < total; index += 1) {
         target.postMessage(
           JSON.stringify({
@@ -212,6 +226,7 @@ export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS)
     } catch (error) {
       clearTimeout(timer);
       pending.delete(id);
+      console.error(`[native bridge] postMessage threw: action=${action} id=${id}`, error);
       reject(error);
     }
   });

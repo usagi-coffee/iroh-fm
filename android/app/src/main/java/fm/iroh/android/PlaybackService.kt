@@ -16,6 +16,7 @@ class PlaybackService : MediaSessionService() {
     private val prefetchLock = Any()
     private var prefetchGeneration = 0L
     private var prefetchPlan: String? = null
+    private var activePrefetchStream = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -36,52 +37,125 @@ class PlaybackService : MediaSessionService() {
         player.setWakeMode(C.WAKE_MODE_NETWORK)
         player.repeatMode = Player.REPEAT_MODE_ALL
         player.addListener(object : Player.Listener {
-            override fun onEvents(player: Player, events: Player.Events) {
-                scheduleNextPrefetch(player)
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                scheduleQueuePrefetch(player)
             }
         })
         session = MediaSession.Builder(this, player).build()
     }
 
-    private fun scheduleNextPrefetch(player: Player) {
+    private fun scheduleQueuePrefetch(player: Player) {
         val currentId = player.currentMediaItem?.mediaId
-        val nextIndex = player.nextMediaItemIndex
+        val currentIndex = player.currentMediaItemIndex
+        val nextIndex = if (currentIndex != C.INDEX_UNSET && player.mediaItemCount > 1) {
+            (currentIndex + 1) % player.mediaItemCount
+        } else {
+            C.INDEX_UNSET
+        }
         val nextId = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex).mediaId
+        val trackIds = listOfNotNull(currentId, nextId).distinct()
         val clientHandle = NativeCore.activeClientHandle
         val remoteId = NativeCore.activeRemoteId
         if (
             currentId == null ||
-            nextId == null ||
-            nextId == currentId ||
             clientHandle == 0L ||
             remoteId.isBlank() ||
             NativeCore.offlineOnly
         ) {
-            synchronized(prefetchLock) {
+            Log.d(
+                TAG,
+                "RAM LRU queue prefetch unavailable: currentId=$currentId nextId=$nextId " +
+                    "clientConnected=${clientHandle != 0L} remoteKnown=${remoteId.isNotBlank()} " +
+                    "offlineOnly=${NativeCore.offlineOnly}",
+            )
+            val streamToCancel = synchronized(prefetchLock) {
                 prefetchGeneration++
                 prefetchPlan = null
+                activePrefetchStream.also { activePrefetchStream = 0L }
+            }
+            if (streamToCancel != 0L) {
+                Log.d(TAG, "Cancelling active RAM LRU prefetch stream: handle=$streamToCancel")
+                NativeCore.closeStream(streamToCancel)
             }
             return
         }
 
-        val plan = "$clientHandle:$remoteId:$currentId:$nextId"
+        val plan = "$clientHandle:$remoteId:${trackIds.joinToString(":")}"
+        var streamToCancel = 0L
         val generation = synchronized(prefetchLock) {
-            if (prefetchPlan == plan) return
+            if (prefetchPlan == plan) {
+                Log.d(TAG, "RAM LRU queue prefetch plan unchanged: tracks=$trackIds")
+                return
+            }
+            streamToCancel = activePrefetchStream
+            activePrefetchStream = 0L
             prefetchPlan = plan
             ++prefetchGeneration
         }
+        Log.d(
+            TAG,
+            "RAM LRU queue prefetch scheduled: generation=$generation tracks=$trackIds",
+        )
+        if (streamToCancel != 0L) {
+            Log.d(TAG, "Cancelling superseded RAM LRU prefetch stream: handle=$streamToCancel")
+            NativeCore.closeStream(streamToCancel)
+        }
         prefetchExecutor.execute {
-            if (!isPrefetchCurrent(generation, clientHandle, remoteId)) return@execute
-            if (
-                NativeAudioCache.isOfflineCached(remoteId, nextId) ||
-                NativeAudioCache.isMemoryCached(remoteId, nextId)
-            ) return@execute
-            runCatching {
-                NativeAudioCache.prefetchTrack(clientHandle, remoteId, nextId) {
-                    isPrefetchCurrent(generation, clientHandle, remoteId)
+            if (!isPrefetchCurrent(generation, clientHandle, remoteId)) {
+                Log.d(TAG, "RAM LRU queue prefetch skipped; stale plan: generation=$generation")
+                return@execute
+            }
+            for ((index, trackId) in trackIds.withIndex()) {
+                if (!isPrefetchCurrent(generation, clientHandle, remoteId)) {
+                    Log.d(
+                        TAG,
+                        "RAM LRU queue prefetch stopped; stale plan: generation=$generation trackId=$trackId",
+                    )
+                    break
                 }
-            }.onFailure {
-                Log.w(TAG, "Next-track RAM prefetch failed: mediaId=$nextId", it)
+                val role = if (index == 0) "selected" else "next"
+                if (NativeAudioCache.isOfflineCached(remoteId, trackId)) {
+                    Log.d(TAG, "RAM LRU prefetch skipped; $role track is cached on disk: trackId=$trackId")
+                    continue
+                }
+                if (NativeAudioCache.isMemoryCached(remoteId, trackId)) {
+                    Log.d(TAG, "RAM LRU prefetch skipped; $role track is already in RAM: trackId=$trackId")
+                    continue
+                }
+                var openedStream = 0L
+                runCatching {
+                    NativeAudioCache.prefetchTrack(
+                        clientHandle,
+                        remoteId,
+                        trackId,
+                        shouldContinue = {
+                            isPrefetchCurrent(generation, clientHandle, remoteId)
+                        },
+                        onStreamOpened = { streamHandle ->
+                            openedStream = streamHandle
+                            val stale = synchronized(prefetchLock) {
+                                if (generation == prefetchGeneration) {
+                                    activePrefetchStream = streamHandle
+                                    false
+                                } else {
+                                    true
+                                }
+                            }
+                            if (stale) NativeCore.closeStream(streamHandle)
+                        },
+                    ).also { cached ->
+                        Log.d(
+                            TAG,
+                            "RAM LRU prefetch result: generation=$generation role=$role " +
+                                "trackId=$trackId cached=$cached",
+                        )
+                    }
+                }.onFailure {
+                    Log.w(TAG, "RAM LRU $role-track prefetch failed: mediaId=$trackId", it)
+                }
+                synchronized(prefetchLock) {
+                    if (activePrefetchStream == openedStream) activePrefetchStream = 0L
+                }
             }
         }
     }
@@ -108,10 +182,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         Log.d(TAG, "Playback service destroyed")
-        synchronized(prefetchLock) {
+        val streamToCancel = synchronized(prefetchLock) {
             prefetchGeneration++
             prefetchPlan = null
+            activePrefetchStream.also { activePrefetchStream = 0L }
         }
+        if (streamToCancel != 0L) NativeCore.closeStream(streamToCancel)
         prefetchExecutor.shutdownNow()
         session?.run {
             player.release()

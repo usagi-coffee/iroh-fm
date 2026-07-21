@@ -30,6 +30,15 @@ test("marks Android played and prefetched tracks from transfer state", async ({ 
   await expect(playedTrack.locator('[title="In memory cache"]')).toHaveClass(/text-peach/);
 });
 
+test("clears the memory-cache marker after a native LRU eviction", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("e2e-native-memory-eviction", "1"));
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  const firstTrack = page.getByRole("row").filter({ hasText: "First Light" });
+  await page.getByRole("button", { name: "Play Nebula Drift" }).click();
+  await expect(firstTrack.locator('[title="In memory cache"]')).toBeVisible();
+  await expect(firstTrack.locator('[title="In memory cache"]')).toHaveCount(0);
+});
+
 test("discards stale native playback states after resume", async ({ page }) => {
   await page.evaluate(() => localStorage.setItem("e2e-stale-native-state", "1"));
   await page.getByRole("button", { name: "Play First Light" }).click();

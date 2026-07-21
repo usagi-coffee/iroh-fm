@@ -150,6 +150,7 @@
 
   /** @param {import('$lib/runes/Track.svelte.js').Track} track */
   function playTrackFromList(track) {
+    console.info(`[player] track-list play invoked: trackId=${track.id}`);
     let queue = tracks;
     if (query.trim()) {
       queue = App.library.getFilteredTracks();
@@ -352,15 +353,15 @@
                 class="text-3xs text-overlay0 hover:text-mauve grid size-6 place-items-center font-mono"
                 aria-label={`Play ${item.track.title}`}
               >
-                {#if item.track.downloading}
+                {#if App.player.currentTrack?.id === item.track.id && App.player.playing}
+                  <PauseIcon class="text-2xs" />
+                {:else if item.track.downloading}
                   <span class="bg-surface1 h-1 w-4 overflow-hidden"
                     ><span
                       class="bg-mauve block h-full transition-[width] duration-150"
                       style={`width:${item.track.progress * 100}%`}
                     ></span></span
                   >
-                {:else if App.player.currentTrack?.id === item.track.id && App.player.playing}
-                  <PauseIcon class="text-2xs" />
                 {:else if item.track.cached}
                   <span class="text-green" title="Cached"
                     >{item.track.track_number || item.trackIndex + 1}</span

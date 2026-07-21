@@ -100,8 +100,14 @@ export class Player {
   /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} [sourceQueue] */
   async play(track, sourceQueue = this.app.library.tracks) {
     const client = this.app.connection.client;
-    if (!client) return;
+    if (!client) {
+      console.warn(`[player] play ignored without a client: trackId=${track.id}`);
+      return;
+    }
     const generation = ++this.generation;
+    console.info(
+      `[player] play started: trackId=${track.id} generation=${generation} native=${this.nativePlayback(client)}`,
+    );
     const previousTrack = this.currentTrack;
     const previousDownloadGeneration = this.audioDownloadGeneration;
     this.audio?.pause();
@@ -141,6 +147,7 @@ export class Player {
           .finally(() => (progressPending = false));
       }, 200);
       try {
+        console.info(`[player] calling native play: trackId=${track.id} generation=${generation}`);
         const state = await client.playNative(
           track,
           sourceQueue,
@@ -149,6 +156,7 @@ export class Player {
               track.updateProgress(received, total, downloadGeneration);
           },
         );
+        console.info(`[player] native play resolved: trackId=${track.id} generation=${generation}`);
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
           this.applyNativeState(state, false, client);
@@ -156,6 +164,7 @@ export class Player {
             this.prefetchNext(track, sourceQueue, generation);
         }
       } catch (error) {
+        console.error(`[player] native play failed: trackId=${track.id} generation=${generation}`, error);
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
           if (downloadGeneration !== null) track.stopDownload(downloadGeneration);
@@ -447,6 +456,7 @@ export class Player {
           this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
+        if ("memoryCached" in transfer) queuedTrack.setMemoryCached(false);
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);

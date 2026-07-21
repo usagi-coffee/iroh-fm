@@ -22,6 +22,7 @@ import org.json.JSONObject
 import org.json.JSONArray
 import org.json.JSONTokener
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : ComponentActivity() {
     private data class IncomingRequestTransfer(
@@ -47,12 +48,49 @@ class MainActivity : ComponentActivity() {
     private val sendLock = Any()
     private var transferSequence = 0L
     private val incomingRequestTransfers = mutableMapOf<String, IncomingRequestTransfer>()
-    private val playerStateTicker = object : Runnable {
-        override fun run() {
-            if (!channelReady) return
-            send(JSONObject().put("module", "native").put("event", "state").put("state", playerState()))
-            mainHandler.postDelayed(this, PLAYER_STATE_UPDATE_INTERVAL_MS)
+    private val transferStatePending = AtomicBoolean(false)
+    private val memoryCacheStatePending = AtomicBoolean(false)
+    private val pendingMemoryCacheTrackIds = mutableSetOf<String>()
+    private val transferStateListener: () -> Unit = {
+        if (transferStatePending.compareAndSet(false, true)) {
+            mainHandler.post {
+                transferStatePending.set(false)
+                if (channelReady)
+                    send(JSONObject().put("module", "native").put("event", "state").put("state", playerState()))
+            }
         }
+    }
+    private val memoryCacheListener: (String, String) -> Unit = { remoteId, trackId ->
+        if (remoteId == NativeCore.activeRemoteId) {
+            synchronized(pendingMemoryCacheTrackIds) {
+                pendingMemoryCacheTrackIds += trackId
+            }
+            if (memoryCacheStatePending.compareAndSet(false, true)) {
+                mainHandler.post(::dispatchMemoryCacheState)
+            }
+        }
+    }
+
+    private fun dispatchMemoryCacheState() {
+        val changedTrackIds = synchronized(pendingMemoryCacheTrackIds) {
+            val changed = pendingMemoryCacheTrackIds.toSet()
+            pendingMemoryCacheTrackIds.clear()
+            changed
+        }
+        if (channelReady && changedTrackIds.isNotEmpty()) {
+            send(
+                JSONObject()
+                    .put("module", "native")
+                    .put("event", "state")
+                    .put("state", playerState(memoryCacheTrackIds = changedTrackIds)),
+            )
+        }
+        memoryCacheStatePending.set(false)
+        val morePending = synchronized(pendingMemoryCacheTrackIds) {
+            pendingMemoryCacheTrackIds.isNotEmpty()
+        }
+        if (morePending && memoryCacheStatePending.compareAndSet(false, true))
+            mainHandler.post(::dispatchMemoryCacheState)
     }
 
     private val callback = object : CustomTabsCallback() {
@@ -77,7 +115,6 @@ class MainActivity : ComponentActivity() {
 
         override fun onNavigationEvent(event: Int, extras: Bundle?) {
             if (event != NAVIGATION_FINISHED) return
-            mainHandler.removeCallbacks(playerStateTicker)
             readyDispatched = false
             channelReady = false
             messageChannelReady = false
@@ -95,28 +132,33 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onPostMessage(message: String, extras: Bundle?) {
+            Log.d(
+                TAG,
+                "Custom Tabs postMessage callback: chars=${message.length} channelReady=$channelReady",
+            )
             handleMessage(message)
         }
     }
 
     private fun dispatchReadyIfNeeded() {
-        if (!postMessageRelationshipValidated || !messageChannelReady || readyDispatched) return
+        if (
+            !postMessageRelationshipValidated ||
+            !messageChannelReady ||
+            readyDispatched
+        ) return
         channelReady = true
         val result = send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState(includeQueue = true)))
         readyDispatched = result == CustomTabsService.RESULT_SUCCESS
         Log.d(TAG, "Native bridge ready dispatched: result=$result")
-        if (!readyDispatched) {
-            channelReady = false
-        } else {
-            mainHandler.removeCallbacks(playerStateTicker)
-            mainHandler.postDelayed(playerStateTicker, PLAYER_STATE_UPDATE_INTERVAL_MS)
-        }
+        if (!readyDispatched) channelReady = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NativeCore.unwrap(NativeCore.initialize(applicationContext))
         NativeAudioCache.initialize(applicationContext)
+        NativeAudioCache.addMemoryCacheListener(memoryCacheListener)
+        NativeTransferProgress.addListener(transferStateListener)
         Log.d(TAG, "Native Android context initialized")
         launchUri = Uri.parse(BuildConfig.LAUNCH_URL)
             .buildUpon()
@@ -129,13 +171,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (channelReady) send(JSONObject().put("module", "native").put("event", "state").put("state", playerState(includeQueue = true)))
+        Log.d(TAG, "Bridge activity resumed: channelReady=$channelReady")
+        if (channelReady)
+            send(JSONObject().put("module", "native").put("event", "state").put("state", playerState(includeQueue = true)))
     }
 
     override fun onDestroy() {
-        mainHandler.removeCallbacks(playerStateTicker)
-        controllerFuture?.let(MediaController::releaseFuture)
-        worker.shutdown()
+        Log.d(
+            TAG,
+            "Launcher activity destroyed; retaining bridge for active TWA: " +
+                "channelReady=$channelReady messageChannelReady=$messageChannelReady",
+        )
+        // The launcher Activity normally dies while its Trusted Web Activity remains open.
+        // The Custom Tabs session still owns this callback and continues delivering RPCs,
+        // so bridge resources must live until Android terminates the application process.
         super.onDestroy()
     }
 
@@ -190,7 +239,11 @@ class MainActivity : ComponentActivity() {
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(this, token).buildAsync().also { future ->
             future.addListener({
-                controller = future.get().also { player ->
+                val connected = runCatching(future::get).getOrElse {
+                    Log.w(TAG, "Playback controller failed to connect", it)
+                    return@addListener
+                }
+                controller = connected.also { player ->
                     player.addListener(object : Player.Listener {
                         override fun onEvents(player: Player, events: Player.Events) {
                             send(JSONObject().put("module", "native").put("event", "state").put("state", playerState()))
@@ -202,8 +255,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleMessage(raw: String) {
-        val message = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        if (message.optString("module") != "native") return
+        val message = runCatching { JSONObject(raw) }.getOrElse {
+            Log.w(TAG, "Dropping malformed Custom Tabs postMessage: chars=${raw.length}", it)
+            return
+        }
+        if (message.optString("module") != "native") {
+            Log.d(TAG, "Ignoring non-native Custom Tabs postMessage")
+            return
+        }
         if (message.optString("event") == "requestChunk") {
             receiveRequestChunk(message)
             return
@@ -252,7 +311,11 @@ class MainActivity : ComponentActivity() {
                     )
                 }
         }
-        if (background) worker.execute(task) else runOnUiThread(task)
+        if (background) {
+            worker.execute(task)
+        } else {
+            mainHandler.post(task)
+        }
     }
 
     private fun receiveRequestChunk(message: JSONObject) {
@@ -482,7 +545,10 @@ class MainActivity : ComponentActivity() {
         return playerState()
     }
 
-    private fun playerState(includeQueue: Boolean = false): JSONObject {
+    private fun playerState(
+        includeQueue: Boolean = false,
+        memoryCacheTrackIds: Set<String> = emptySet(),
+    ): JSONObject {
         val player = controller
         val trackId = player?.currentMediaItem?.mediaId
         val transfer = NativeTransferProgress.snapshot(trackId)
@@ -497,7 +563,7 @@ class MainActivity : ComponentActivity() {
                 val cached =
                     (includeQueue || snapshot != null || memoryCached) &&
                         NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id)
-                if (snapshot != null || cached || memoryCached) {
+                if (includeQueue || snapshot != null || cached || memoryCached || id in memoryCacheTrackIds) {
                     transfers.put(
                         id,
                         JSONObject()
@@ -509,6 +575,19 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+        for (id in memoryCacheTrackIds) {
+            if (transfers.has(id)) continue
+            val snapshot = NativeTransferProgress.snapshot(id)
+            transfers.put(
+                id,
+                JSONObject()
+                    .put("received", snapshot?.receivedBytes ?: 0L)
+                    .put("total", snapshot?.totalBytes ?: 0L)
+                    .put("active", snapshot?.active == true)
+                    .put("cached", NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id))
+                    .put("memoryCached", NativeAudioCache.isMemoryCached(NativeCore.activeRemoteId, id)),
+            )
         }
         return JSONObject()
             .put("timestamp", System.currentTimeMillis())
@@ -536,12 +615,26 @@ class MainActivity : ComponentActivity() {
     private fun reply(id: String, result: Any) = send(JSONObject().put("module", "native").put("id", id).put("result", result))
     private fun replyError(id: String, error: String) = send(JSONObject().put("module", "native").put("id", id).put("error", error))
     private fun send(message: JSONObject): Int? {
+        val description = when {
+            message.has("id") -> "reply id=${message.optString("id")}"
+            message.has("event") -> "event=${message.optString("event")}"
+            else -> "message"
+        }
         val raw = message.toString()
         synchronized(sendLock) {
-            if (!channelReady) return null
-            val activeSession = session ?: return null
+            if (!channelReady) {
+                Log.w(TAG, "Cannot send native $description: postMessage channel is not ready")
+                return null
+            }
+            val activeSession = session ?: run {
+                Log.w(TAG, "Cannot send native $description: Custom Tabs session is missing")
+                return null
+            }
             if (raw.length <= POST_MESSAGE_CHUNK_CHARS) {
-                return activeSession.postMessage(raw, null)
+                val result = activeSession.postMessage(raw, null)
+                if (result != CustomTabsService.RESULT_SUCCESS)
+                    Log.w(TAG, "Native $description postMessage failed: result=$result")
+                return result
             }
 
             val transferId = "${SystemClock.elapsedRealtimeNanos()}-${++transferSequence}"
@@ -570,7 +663,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "iroh.fm"
-        private const val PLAYER_STATE_UPDATE_INTERVAL_MS = 250L
         private val CHROMIUM_CUSTOM_TABS_PACKAGES = listOf(
             "com.android.chrome",
             "app.vanadium.browser",

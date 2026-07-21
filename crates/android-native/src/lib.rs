@@ -16,6 +16,7 @@ use jni::{
 use protocol::{BackendRequest, BackendResponse, CoverArtId, TrackId};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
+use tokio_util::sync::CancellationToken;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio runtime"));
 static STATE: LazyLock<Mutex<NativeState>> = LazyLock::new(|| Mutex::new(NativeState::default()));
@@ -27,7 +28,12 @@ static ANDROID_APPLICATION_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef>
 struct NativeState {
     next_handle: i64,
     clients: HashMap<i64, Client>,
-    streams: HashMap<i64, Arc<tokio::sync::Mutex<iroh::endpoint::RecvStream>>>,
+    streams: HashMap<i64, Arc<NativeStream>>,
+}
+
+struct NativeStream {
+    recv: tokio::sync::Mutex<iroh::endpoint::RecvStream>,
+    cancellation: CancellationToken,
 }
 
 #[derive(Deserialize)]
@@ -246,9 +252,13 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_openStream(
             .map_err(|error| error.to_string())?;
         let mut state = STATE.lock().map_err(|_| "native state lock poisoned")?;
         let handle = next_handle(&mut state);
-        state
-            .streams
-            .insert(handle, Arc::new(tokio::sync::Mutex::new(stream)));
+        state.streams.insert(
+            handle,
+            Arc::new(NativeStream {
+                recv: tokio::sync::Mutex::new(stream),
+                cancellation: CancellationToken::new(),
+            }),
+        );
         serde_json::to_string(&OpenedStream {
             handle,
             content_type: descriptor.content_type,
@@ -279,7 +289,12 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_readStream(
         return -2;
     };
     let mut buffer = vec![0_u8; length as usize];
-    let read = match RUNTIME.block_on(async { stream.lock().await.read(&mut buffer).await }) {
+    let read = match RUNTIME.block_on(async {
+        tokio::select! {
+            _ = stream.cancellation.cancelled() => Ok(None),
+            result = async { stream.recv.lock().await.read(&mut buffer).await } => result,
+        }
+    }) {
         Ok(None | Some(0)) => return -1,
         Ok(Some(read)) => read,
         Err(_) => return -2,
@@ -303,8 +318,12 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_closeStream(
     _class: JClass,
     handle: jlong,
 ) {
-    if let Ok(mut state) = STATE.lock() {
-        state.streams.remove(&handle);
+    let stream = STATE
+        .lock()
+        .ok()
+        .and_then(|mut state| state.streams.remove(&handle));
+    if let Some(stream) = stream {
+        stream.cancellation.cancel();
     }
 }
 

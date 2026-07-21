@@ -17,10 +17,14 @@ class IrohDataSource(
     private var remaining = C.LENGTH_UNSET.toLong()
     private var uri: Uri? = null
     private var trackId: String? = null
+    private var remoteId = ""
     private var absolutePosition = 0L
     private var fileSize = 0L
     private var memoryTrack: NativeAudioCache.MemoryTrack? = null
+    private var memoryTrackPinned = false
     private var memoryPosition = 0
+    private var memoryWriterStarted = false
+    private var memoryPromotionReported = false
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
@@ -29,8 +33,10 @@ class IrohDataSource(
         check(client != 0L) { "iroh client is not connected" }
         uri = dataSpec.uri
         trackId = dataSpec.uri.lastPathSegment ?: error("missing track id")
-        if (useMemoryCache) NativeAudioCache.memoryTrack(NativeCore.activeRemoteId, trackId!!)?.let { cached ->
+        remoteId = NativeCore.activeRemoteId
+        if (useMemoryCache) NativeAudioCache.acquireMemoryTrack(remoteId, trackId!!)?.let { cached ->
             memoryTrack = cached
+            memoryTrackPinned = true
             memoryPosition = dataSpec.position.coerceIn(0L, cached.size.toLong()).toInt()
             fileSize = cached.size.toLong()
             remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
@@ -43,7 +49,13 @@ class IrohDataSource(
         val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(client, trackId!!)))
         streamHandle = opened.getLong("handle")
         fileSize = opened.getLong("fileSize")
-        Log.d(TAG, "Native iroh stream opened: trackId=$trackId bytes=$fileSize position=${dataSpec.position}")
+        memoryWriterStarted =
+            populateMemoryCache && NativeAudioCache.beginMemoryTrack(remoteId, trackId!!, fileSize)
+        Log.d(
+            TAG,
+            "Native iroh stream opened: trackId=$trackId bytes=$fileSize position=${dataSpec.position} " +
+                "populateMemoryCache=$populateMemoryCache memoryWriterStarted=$memoryWriterStarted",
+        )
         var skipped = 0L
         val scratch = ByteArray(64 * 1024)
         while (skipped < dataSpec.position) {
@@ -51,9 +63,9 @@ class IrohDataSource(
             val read = NativeCore.readStream(streamHandle, scratch, 0, wanted)
             if (read == C.RESULT_END_OF_INPUT) break
             if (read < 0) throw IOException("iroh stream failed while seeking")
-            if (populateMemoryCache) {
-                NativeAudioCache.recordMemoryBytes(
-                    NativeCore.activeRemoteId,
+            if (memoryWriterStarted) {
+                val promoted = NativeAudioCache.recordMemoryBytes(
+                    remoteId,
                     trackId!!,
                     skipped,
                     scratch,
@@ -61,17 +73,11 @@ class IrohDataSource(
                     read,
                     fileSize,
                 )
+                reportMemoryPromotion(promoted)
             }
             skipped += read
         }
         absolutePosition = skipped
-        NativeTransferProgress.update(
-            trackId = trackId!!,
-            receivedBytes = absolutePosition,
-            totalBytes = fileSize,
-            reset = dataSpec.position == 0L,
-        )
-        NativeTransferProgress.begin(trackId!!)
         remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else fileSize - skipped
         transferStarted(dataSpec)
         return remaining
@@ -93,9 +99,9 @@ class IrohDataSource(
         if (remaining != C.LENGTH_UNSET.toLong()) remaining -= read
         val readPosition = absolutePosition
         absolutePosition += read
-        if (populateMemoryCache) {
-            NativeAudioCache.recordMemoryBytes(
-                NativeCore.activeRemoteId,
+        if (memoryWriterStarted) {
+            val promoted = NativeAudioCache.recordMemoryBytes(
+                remoteId,
                 trackId!!,
                 readPosition,
                 buffer,
@@ -103,9 +109,7 @@ class IrohDataSource(
                 read,
                 fileSize,
             )
-        }
-        trackId?.let {
-            NativeTransferProgress.update(it, absolutePosition, fileSize)
+            reportMemoryPromotion(promoted)
         }
         bytesTransferred(read)
         return read
@@ -114,20 +118,31 @@ class IrohDataSource(
     override fun getUri(): Uri? = uri
 
     override fun close() {
-        val closingTrackId = trackId
+        if (memoryTrackPinned && trackId != null)
+            NativeAudioCache.releaseMemoryTrack(remoteId, trackId!!)
         if (streamHandle != 0L) {
             Log.d(TAG, "Native iroh stream closed: uri=$uri")
             NativeCore.closeStream(streamHandle)
             streamHandle = 0
             transferEnded()
         }
-        if (closingTrackId != null) NativeTransferProgress.end(closingTrackId)
+        if (memoryWriterStarted && trackId != null) NativeAudioCache.endMemoryTrack(remoteId, trackId!!)
         uri = null
         trackId = null
+        remoteId = ""
         absolutePosition = 0L
         fileSize = 0L
         memoryTrack = null
+        memoryTrackPinned = false
         memoryPosition = 0
+        memoryWriterStarted = false
+        memoryPromotionReported = false
+    }
+
+    private fun reportMemoryPromotion(promoted: Boolean) {
+        if (!promoted || memoryPromotionReported) return
+        memoryPromotionReported = true
+        NativeTransferProgress.update(trackId!!, fileSize, fileSize, reset = true)
     }
 
     class Factory(
