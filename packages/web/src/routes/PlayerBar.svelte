@@ -14,6 +14,14 @@
 
   let track = $derived(App.player.currentTrack);
   let duration = $derived(App.player.duration || track?.duration_seconds || 0);
+
+  /** @param {HTMLAudioElement} audio */
+  function syncAudioDuration(audio) {
+    const nextDuration = Number.isFinite(audio.duration)
+      ? audio.duration
+      : track?.duration_seconds || 0;
+    if (App.player.duration !== nextDuration) App.player.duration = nextDuration;
+  }
 </script>
 
 <footer class="border-surface1 bg-crust relative h-18 shrink-0 border-t">
@@ -139,20 +147,20 @@
 <audio
   {@attach App.player.attachAudio}
   src={App.player.audioSrc || undefined}
-  onplay={() => (App.player.playing = true)}
-  onpause={() => (App.player.playing = false)}
+  onplay={() => {
+    if (!App.player.playing) App.player.playing = true;
+  }}
+  onpause={() => {
+    if (App.player.playing) App.player.playing = false;
+  }}
   ontimeupdate={(event) => {
     const audio = event.currentTarget;
     App.player.currentTime = audio.currentTime;
-    App.player.duration = Number.isFinite(audio.duration)
-      ? audio.duration
-      : track?.duration_seconds || 0;
+    syncAudioDuration(audio);
   }}
   onloadedmetadata={(event) => {
     const audio = event.currentTarget;
-    App.player.duration = Number.isFinite(audio.duration)
-      ? audio.duration
-      : track?.duration_seconds || 0;
+    syncAudioDuration(audio);
     audio.volume = App.player.volume;
   }}
   onended={() => App.player.onEnded()}
