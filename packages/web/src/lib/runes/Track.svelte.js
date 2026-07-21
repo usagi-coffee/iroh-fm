@@ -56,40 +56,35 @@ export class Track {
 
   /** @param {import('../types').TrackData} data */
   updateMetadata(data) {
-    // Library refreshes can return the same metadata repeatedly. Avoid touching
-    // rune state for unchanged values: a large refresh otherwise invalidates
-    // every visible row, cover, and player consumer.
-    const next = {
-      id: data.id,
-      title: data.title,
-      artist: data.artist,
-      album: data.album,
-      album_artist: data.album_artist,
-      track_number: data.track_number,
-      disc_number: data.disc_number,
-      duration_seconds: data.duration_seconds,
-      bitrate: data.bitrate,
-      sample_rate: data.sample_rate,
-      channels: data.channels,
-      codec: data.codec,
-      genres: data.genres,
-      date: data.date,
-      musicbrainz_track_id: data.musicbrainz_track_id,
-      musicbrainz_recording_id: data.musicbrainz_recording_id,
-      musicbrainz_album_id: data.musicbrainz_album_id,
-      musicbrainz_release_group_id: data.musicbrainz_release_group_id,
-      cover_art_id: data.cover_art_id,
-      has_embedded_cover: data.has_embedded_cover ?? false,
-      suffix: data.suffix,
-      relative_path: data.relative_path ?? "",
-      file_size: data.file_size,
-      modified_at: data.modified_at,
-      content_type: data.content_type,
-    };
-    const state = /** @type {Record<string, unknown>} */ (this);
-    for (const [key, value] of Object.entries(next)) {
-      if (!Object.is(state[key], value)) state[key] = value;
-    }
+    this.id = data.id;
+    this.title = data.title;
+    this.artist = data.artist;
+    this.album = data.album;
+    this.album_artist = data.album_artist;
+    this.track_number = data.track_number;
+    this.disc_number = data.disc_number;
+    this.duration_seconds = data.duration_seconds;
+    this.bitrate = data.bitrate;
+    this.sample_rate = data.sample_rate;
+    this.channels = data.channels;
+    this.codec = data.codec;
+    if (
+      this.genres.length !== data.genres.length ||
+      this.genres.some((genre, index) => genre !== data.genres[index])
+    )
+      this.genres = data.genres;
+    this.date = data.date;
+    this.musicbrainz_track_id = data.musicbrainz_track_id;
+    this.musicbrainz_recording_id = data.musicbrainz_recording_id;
+    this.musicbrainz_album_id = data.musicbrainz_album_id;
+    this.musicbrainz_release_group_id = data.musicbrainz_release_group_id;
+    this.cover_art_id = data.cover_art_id;
+    this.has_embedded_cover = data.has_embedded_cover ?? false;
+    this.suffix = data.suffix;
+    this.relative_path = data.relative_path ?? "";
+    this.file_size = data.file_size;
+    this.modified_at = data.modified_at;
+    this.content_type = data.content_type;
   }
 
   startDownload() {
