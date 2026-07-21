@@ -26,7 +26,11 @@ export class ClientCore {
   /** @param {{ticket?: string, endpoint?: string, relays?: string[], secret?: string}} options */
   static connect(options) {
     if (isDesktop()) return connectDesktop(options);
-    return isNative() ? NativeMusicClient.connect(options) : MusicClient.connect(options);
+    if (!isNative()) return MusicClient.connect(options);
+    return NativeMusicClient.connect(options).then((client) => {
+      void client.setMemoryCacheSize(MusicClient.memoryCacheSize());
+      return client;
+    });
   }
 
   /** @param {string} ticket */
@@ -50,6 +54,15 @@ export class ClientCore {
 
   static cacheStats() {
     return isNative() ? nativeRequest("cacheStats") : MusicClient.cacheStats();
+  }
+
+  static memoryCacheSize() {
+    return MusicClient.memoryCacheSize();
+  }
+
+  /** @param {number} megabytes */
+  static setMemoryCacheSize(megabytes) {
+    return MusicClient.setMemoryCacheSize(megabytes);
   }
 }
 

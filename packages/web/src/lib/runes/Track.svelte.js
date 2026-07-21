@@ -42,6 +42,7 @@ export class Track {
   modified_at = $state(null);
   content_type = $state("");
   cached = $state(false);
+  memoryCached = $state(false);
   downloading = $state(false);
   progress = $state(0);
   received = $state(0);
@@ -135,5 +136,22 @@ export class Track {
     this.progress = 1;
     this.total = Number(this.file_size) || this.total;
     this.received = this.total;
+  }
+
+  /** @param {boolean} cached */
+  setMemoryCached(cached) {
+    if (this.memoryCached === cached) return;
+    this.memoryCached = cached;
+    if (cached && !this.cached) {
+      this.downloadGeneration += 1;
+      this.downloading = false;
+      this.progress = 1;
+      this.total = Number(this.file_size) || this.total;
+      this.received = this.total;
+    } else if (!cached && !this.cached && !this.downloading) {
+      this.progress = 0;
+      this.received = 0;
+      this.total = Number(this.file_size) || 0;
+    }
   }
 }

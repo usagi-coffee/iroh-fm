@@ -13,7 +13,6 @@
   import VirtualList from "$lib/ui/VirtualList.svelte";
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
-  import DownloadIcon from "virtual:icons/ri/download-line";
   import HeartIcon from "virtual:icons/ri/heart-line";
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
@@ -362,6 +361,10 @@
                   <span class="text-green" title="Cached"
                     >{item.track.track_number || item.trackIndex + 1}</span
                   >
+                {:else if item.track.memoryCached}
+                  <span class="text-peach" title="In memory cache"
+                    >{item.track.track_number || item.trackIndex + 1}</span
+                  >
                 {:else}
                   <span class="group-hover:hidden"
                     >{item.track.track_number || item.trackIndex + 1}</span
@@ -405,16 +408,6 @@
     track,
   },
 )}
-  {const downloadDisabled = $derived(App.library.offlineOnly || track.cached || track.downloading)}
-  {const downloadLabel = $derived(
-    track.cached
-      ? "Cached"
-      : track.downloading
-        ? "Downloading…"
-        : App.library.offlineOnly
-          ? "Unavailable offline"
-          : "Download",
-  )}
   <div class="border-surface0 grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 border-b p-3">
     <Cover
       client={App.connection.client}
@@ -447,15 +440,5 @@
     ><HeartIcon class="text-sm" />{App.library.starredTrackIds.has(track.id)
       ? "Unstar"
       : "Star"}</button
-  >
-  <button
-    type="button"
-    onclick={() => {
-      dismiss();
-      void App.library.cacheTrack(track);
-    }}
-    disabled={downloadDisabled}
-    class="text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0 flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
-    ><DownloadIcon class="text-sm" />{downloadLabel}</button
   >
 {/snippet}

@@ -12,8 +12,8 @@ class WebMusicClient extends FixtureClient {
     const url = URL.createObjectURL(blob);
     const done = delay(80).then(() => {
       if (disposed) return false;
-      this.cached.add(id);
-      return true;
+      this.memoryCached.add(id);
+      return "memory";
     });
     return {
       url,

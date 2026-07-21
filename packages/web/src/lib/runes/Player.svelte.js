@@ -83,9 +83,12 @@ export class Player {
       .prefetchTrack(next.id, (/** @type {number} */ received, /** @type {number} */ total) =>
         next.updateProgress(received, total, downloadGeneration),
       )
-      .then((/** @type {boolean} */ cached) => {
-        if (this.app.connection.client === client && cached) this.app.library.markCached(next);
-        else if (this.app.connection.client === client) next.setCached(false);
+      .then((/** @type {{cached: boolean, persistent: boolean}} */ result) => {
+        if (this.app.connection.client === client && result?.persistent)
+          this.app.library.markCached(next);
+        else if (this.app.connection.client === client && result?.cached)
+          this.app.library.markMemoryCached(next);
+        else if (this.app.connection.client === client) next.setMemoryCached(false);
         else next.stopDownload(downloadGeneration);
       })
       .catch((/** @type {unknown} */ error) => {
@@ -183,13 +186,15 @@ export class Player {
       await source.start(audio);
       if (generation !== this.generation) return;
       void source.done.then(
-        (/** @type {boolean} */ cached) => {
+        (/** @type {string | false} */ cacheKind) => {
           if (this.app.connection.client !== client) return;
-          if (cached && this.app.library.tracksById.get(track.id) === track)
+          if (cacheKind === "disk" && this.app.library.tracksById.get(track.id) === track)
             this.app.library.markCached(track);
+          else if (cacheKind === "memory" && this.app.library.tracksById.get(track.id) === track)
+            this.app.library.markMemoryCached(track);
           if (source.disposed || generation !== this.generation) return;
-          if (cached) this.prefetchNext(track, sourceQueue, generation);
-          else track.setCached(false);
+          if (cacheKind) this.prefetchNext(track, sourceQueue, generation);
+          else track.setMemoryCached(false);
           this.audioDownloadGeneration = null;
         },
         (/** @type {unknown} */ error) => {
@@ -388,10 +393,7 @@ export class Player {
   applyNativeState(state, applySeekPosition = false, client = this.app.connection.client) {
     if (!state || !this.nativePlayback(client)) return;
     const nativeGeneration = Number(state.generation);
-    if (
-      Number.isSafeInteger(nativeGeneration) &&
-      nativeGeneration < this.nativePlaybackGeneration
-    )
+    if (Number.isSafeInteger(nativeGeneration) && nativeGeneration < this.nativePlaybackGeneration)
       return;
     if (Number.isSafeInteger(nativeGeneration)) this.nativePlaybackGeneration = nativeGeneration;
     const timestamp = Number(state.timestamp);
@@ -438,6 +440,10 @@ export class Player {
         if (queuedTrack.cached) continue;
         if (transfer.cached) {
           this.app.library.markCached(queuedTrack);
+          continue;
+        }
+        if (transfer.memoryCached) {
+          this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
         const received = Math.max(0, Number(transfer.received) || 0);

@@ -6,6 +6,11 @@ const TRACK_CACHE_ORIGIN = "https://track-cache.iroh-fm.invalid";
 const MAX_CONCURRENT_COVER_FETCHES = 3;
 const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
+const MEMORY_CACHE_SIZE_KEY = "iroh-fm-memory-cache-size";
+const DEFAULT_MEMORY_CACHE_BYTES = 256 * 1024 * 1024;
+const MIN_MEMORY_CACHE_BYTES = 32 * 1024 * 1024;
+const MAX_MEMORY_CACHE_BYTES = 2 * 1024 * 1024 * 1024;
+const MEMORY_TRACK_CACHE_MAX_BYTES = 256 * 1024 * 1024;
 const MAX_MEDIA_BUFFER_AHEAD_SECONDS = 90;
 const RETAIN_MEDIA_BUFFER_BEHIND_SECONDS = 15;
 const MEDIA_BUFFER_RETRY_MS = 250;
@@ -41,6 +46,66 @@ async function cacheUsage(name) {
   } catch {
     return { count: 0, size: 0 };
   }
+}
+
+export class TrackMemoryCache {
+  /** @param {number} maxBytes */
+  constructor(maxBytes = MEMORY_TRACK_CACHE_MAX_BYTES) {
+    this.maxBytes = maxBytes;
+    /** @type {Map<string, Blob>} */
+    this.entries = new Map();
+    this.bytes = 0;
+  }
+
+  /** @param {string} id */
+  get(id) {
+    const blob = this.entries.get(id);
+    if (!blob) return null;
+    this.entries.delete(id);
+    this.entries.set(id, blob);
+    return blob;
+  }
+
+  /** @param {string} id @param {Blob} blob */
+  set(id, blob) {
+    if (blob.size <= 0 || blob.size > this.maxBytes) return false;
+    const previous = this.entries.get(id);
+    if (previous) this.bytes -= previous.size;
+    this.entries.delete(id);
+    while (this.bytes + blob.size > this.maxBytes) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      const evicted = this.entries.get(oldest);
+      this.entries.delete(oldest);
+      if (evicted) this.bytes -= evicted.size;
+    }
+    this.entries.set(id, blob);
+    this.bytes += blob.size;
+    return true;
+  }
+
+  clear() {
+    this.entries.clear();
+    this.bytes = 0;
+  }
+
+  /** @param {number} maxBytes */
+  resize(maxBytes) {
+    this.maxBytes = maxBytes;
+    while (this.bytes > this.maxBytes) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      const evicted = this.entries.get(oldest);
+      this.entries.delete(oldest);
+      if (evicted) this.bytes -= evicted.size;
+    }
+  }
+}
+
+/** @param {number} bytes */
+function normalizeMemoryCacheBytes(bytes) {
+  if (!Number.isFinite(bytes)) return DEFAULT_MEMORY_CACHE_BYTES;
+  return Math.min(MAX_MEMORY_CACHE_BYTES, Math.max(MIN_MEMORY_CACHE_BYTES, Math.round(bytes)));
 }
 
 /** @param {Promise<any>} pending */
@@ -88,6 +153,9 @@ export class MusicClient {
     this.coverCache = new Map();
     /** @type {Map<string, Promise<Blob>>} */
     this.activeTrackRequests = new Map();
+    this.memoryTrackCache = new TrackMemoryCache(MusicClient.memoryCacheSize());
+    if (typeof this.inner.setMemoryCacheSize === "function")
+      void this.inner.setMemoryCacheSize(this.memoryTrackCache.maxBytes);
     /** @type {Map<string, {received: number, total: number, listeners: Set<(received: number, total: number) => void>}>} */
     this.trackProgress = new Map();
     /** @type {Array<{id: string, fullQuality: boolean, resolve: (value: any) => void, reject: (reason?: any) => void}>} */
@@ -102,6 +170,21 @@ export class MusicClient {
 
   static async prepare() {
     await loadWasm();
+  }
+
+  static memoryCacheSize() {
+    if (typeof localStorage === "undefined") return DEFAULT_MEMORY_CACHE_BYTES;
+    const configured = localStorage.getItem(MEMORY_CACHE_SIZE_KEY);
+    if (configured === null) return DEFAULT_MEMORY_CACHE_BYTES;
+    return normalizeMemoryCacheBytes(Number(configured) * 1024 * 1024);
+  }
+
+  /** @param {number} megabytes */
+  static setMemoryCacheSize(megabytes) {
+    const bytes = normalizeMemoryCacheBytes(Number(megabytes) * 1024 * 1024);
+    if (typeof localStorage !== "undefined")
+      localStorage.setItem(MEMORY_CACHE_SIZE_KEY, String(Math.round(bytes / 1024 / 1024)));
+    return bytes;
   }
 
   static async prepareCaches() {
@@ -190,7 +273,7 @@ export class MusicClient {
       return this.inner.playNative(track, queue);
     const cached = await this.cachedTrack(track.id);
     const blob = cached?.blob ?? (await this.downloadTrackBlob(track.id, onProgress));
-    if (!cached?.persistent) await this.persistTrackBlob(track.id, blob);
+    if (!cached) await this.rememberTrackBlob(track.id, blob);
     onProgress(blob.size, blob.size);
     const state = await this.inner.playNativeBytes(
       track,
@@ -199,7 +282,13 @@ export class MusicClient {
     );
     state.transfers = {
       ...state.transfers,
-      [track.id]: { received: blob.size, total: blob.size, active: false, cached: true },
+      [track.id]: {
+        received: blob.size,
+        total: blob.size,
+        active: false,
+        cached: false,
+        memoryCached: true,
+      },
     };
     return state;
   }
@@ -239,6 +328,49 @@ export class MusicClient {
       // Cache Storage can be unavailable in private browsing contexts.
     }
     return ids;
+  }
+
+  /** Explicitly download a track into persistent storage. */
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async cacheTrack(id, onProgress = () => {}) {
+    if (typeof this.inner.cacheTrack === "function")
+      return Boolean(await this.inner.cacheTrack(id, onProgress));
+    if (await this.isTrackCached(id)) return true;
+
+    const cached = await this.cachedTrack(id);
+    let blob = cached?.blob;
+    if (!blob) {
+      const existing = this.activeTrackRequests.get(id);
+      if (existing) blob = await existing;
+      else {
+        const pending = this.downloadTrackBlob(id, (received, total) => {
+          onProgress(received, total);
+          this.notifyTrackProgress(id, received, total);
+        });
+        this.activeTrackRequests.set(id, pending);
+        pending
+          .finally(() => {
+            if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+          })
+          .catch(() => {});
+        try {
+          blob = await pending;
+        } finally {
+          if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
+        }
+        await this.rememberTrackBlob(id, blob);
+      }
+    }
+    return blob ? this.persistTrackBlob(id, blob) : false;
+  }
+
+  /** @param {number} bytes */
+  setMemoryCacheSize(bytes) {
+    const size = normalizeMemoryCacheBytes(bytes);
+    this.memoryTrackCache.resize(size);
+    if (typeof this.inner.setMemoryCacheSize === "function")
+      return this.inner.setMemoryCacheSize(size);
+    return Promise.resolve();
   }
 
   /** @param {unknown} request */
@@ -367,9 +499,7 @@ export class MusicClient {
     if (cached) {
       unsubscribe();
       onProgress(cached.blob.size, cached.blob.size);
-      const cacheReady = cached.persistent
-        ? Promise.resolve(true)
-        : this.rememberTrackBlob(id, cached.blob);
+      const cacheReady = Promise.resolve(cached.persistent ? "disk" : "memory");
       return new BlobTrackSource(cached.blob, () => {}, cacheReady);
     }
     unsubscribe();
@@ -437,27 +567,25 @@ export class MusicClient {
 
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   prefetchTrack(id, onProgress = () => {}) {
-    if (typeof this.inner.prefetchTrack === "function")
-      return this.inner.prefetchTrack(id, onProgress);
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
+    const known = this.cachedTrack(id);
     const existing = this.activeTrackRequests.get(id);
-    if (existing) {
-      return existing.finally(unsubscribe).then((blob) => {
+    if (existing)
+      return existing.finally(unsubscribe).then(async (blob) => {
         this.queueNativeTrack(id, blob);
-        return this.isTrackCached(id);
+        return { cached: true, persistent: await this.isTrackCached(id) };
       });
-    }
 
-    const pending = this.readPersistentTrackBlob(id).then(async (cached) => {
+    const pending = known.then(async (cached) => {
       if (cached) {
-        this.notifyTrackProgress(id, cached.size, cached.size);
-        return cached;
+        this.notifyTrackProgress(id, cached.blob.size, cached.blob.size);
+        return cached.blob;
       }
       if (this.offlineOnly) throw new Error("track is not available offline");
       const blob = await this.downloadTrackBlob(id, (received, total) =>
         this.notifyTrackProgress(id, received, total),
       );
-      await this.persistTrackBlob(id, blob);
+      await this.rememberTrackBlob(id, blob);
       return blob;
     });
     this.activeTrackRequests.set(id, pending);
@@ -466,9 +594,9 @@ export class MusicClient {
         if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
       })
       .catch(() => {});
-    return pending.finally(unsubscribe).then((blob) => {
+    return pending.finally(unsubscribe).then(async (blob) => {
       this.queueNativeTrack(id, blob);
-      return this.isTrackCached(id);
+      return { cached: true, persistent: await this.isTrackCached(id) };
     });
   }
 
@@ -517,7 +645,10 @@ export class MusicClient {
       }
     }
 
+    const memory = this.memoryTrackCache.get(id);
+    if (memory) return { blob: memory, persistent: false };
     const blob = await this.readPersistentTrackBlob(id);
+    if (blob) this.memoryTrackCache.set(id, blob);
     return blob ? { blob, persistent: true } : null;
   }
 
@@ -553,17 +684,9 @@ export class MusicClient {
     return null;
   }
 
-  /** @param {string} id @param {Blob} blob */
+  /** @param {string} id @param {Blob} blob @returns {Promise<string | false>} */
   rememberTrackBlob(id, blob) {
-    const stored = this.persistTrackBlob(id, blob);
-    const pending = stored.then(() => blob);
-    this.activeTrackRequests.set(id, pending);
-    pending
-      .finally(() => {
-        if (this.activeTrackRequests.get(id) === pending) this.activeTrackRequests.delete(id);
-      })
-      .catch(() => {});
-    return stored;
+    return Promise.resolve(this.memoryTrackCache.set(id, blob) ? "memory" : false);
   }
 
   /** @param {string} id @param {Blob} blob */
@@ -634,6 +757,7 @@ export class MusicClient {
     }
     this.coverCache.clear();
     this.activeTrackRequests.clear();
+    this.memoryTrackCache.clear();
     this.trackProgress.clear();
     await this.inner.close();
     this.inner.free();
@@ -641,7 +765,7 @@ export class MusicClient {
 }
 
 class BlobTrackSource {
-  /** @param {Blob} blob @param {() => void} releaseAudioPriority @param {Promise<boolean>} cacheReady */
+  /** @param {Blob} blob @param {() => void} releaseAudioPriority @param {Promise<string | false>} cacheReady */
   constructor(blob, releaseAudioPriority, cacheReady) {
     this.url = URL.createObjectURL(blob);
     this.done = cacheReady;
@@ -661,7 +785,7 @@ class BlobTrackSource {
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => Promise<boolean>} onComplete */
+  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => Promise<string | false>} onComplete */
   constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority, onComplete) {
     this.stream = stream;
     this.contentType = contentType;
@@ -674,7 +798,7 @@ class ProgressiveTrackSource {
     this.onComplete = onComplete;
     /** @type {Uint8Array[]} */
     this.chunks = [];
-    this.done = Promise.resolve(false);
+    this.done = /** @type {Promise<string | false>} */ (Promise.resolve(false));
     this.disposed = false;
     this.releaseAudioPriority = releaseAudioPriority;
     /** @type {null | (() => void)} */

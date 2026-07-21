@@ -136,6 +136,7 @@ export class FixtureClient {
   endpointId = "e2e-client";
   remoteId = "e2e-server";
   cached = new Set();
+  memoryCached = new Set();
   receivedBytes = 0;
 
   bootstrap() {
@@ -169,6 +170,10 @@ export class FixtureClient {
 
   setOfflineOnly() {}
 
+  setMemoryCacheSize() {
+    return Promise.resolve();
+  }
+
   connectionInfo() {
     return { path_type: "direct", address: "e2e", received_bytes: this.receivedBytes };
   }
@@ -178,10 +183,16 @@ export class FixtureClient {
     await delay(40);
     onProgress(TRACK_BYTES / 2, TRACK_BYTES);
     await delay(40);
-    this.cached.add(id);
+    this.memoryCached.add(id);
     onProgress(TRACK_BYTES, TRACK_BYTES);
     await delay(80);
-    return true;
+    return { cached: true, persistent: false };
+  }
+
+  async cacheTrack(id, onProgress = () => {}) {
+    const result = await this.prefetchTrack(id, onProgress);
+    this.cached.add(id);
+    return Boolean(result.cached);
   }
 
   request() {
@@ -219,6 +230,12 @@ export function fixtureCore(Client) {
     }
     static cacheStats() {
       return Promise.resolve({ tracks: { count: 0, size: 0 }, covers: { count: 0, size: 0 } });
+    }
+    static memoryCacheSize() {
+      return 256 * 1024 * 1024;
+    }
+    static setMemoryCacheSize(megabytes) {
+      return Number(megabytes) * 1024 * 1024;
     }
   };
 }
@@ -264,13 +281,14 @@ export class NativeFixtureClient extends FixtureClient {
     this.playing = true;
     onProgress(0, TRACK_BYTES);
     await delay(30);
-    this.cached.add(track.id);
+    this.memoryCached.add(track.id);
     onProgress(TRACK_BYTES, TRACK_BYTES);
     this.transfers[track.id] = {
       received: TRACK_BYTES,
       total: TRACK_BYTES,
       active: false,
-      cached: true,
+      cached: false,
+      memoryCached: true,
     };
     return this.snapshot();
   }

@@ -11,12 +11,16 @@
 
   import { ClientCore } from "@iroh-fm/client/core";
 
+  const MIN_MEMORY_CACHE_MIB = 32;
+  const MAX_MEMORY_CACHE_MIB = 2048;
+
   let settings = $state({
     ticket: App.connection.ticket,
     endpoint: App.connection.endpoint,
     relays: [...App.connection.relays],
     secret: App.connection.secret,
     starredKey: App.starredKey,
+    memoryCacheMiB: Math.round(ClientCore.memoryCacheSize() / 1024 / 1024),
     showSecret: false,
     storage: {
       loading: true,
@@ -148,6 +152,16 @@
     if (!settings.relays.length) settings.relays.push("");
   }
 
+  /** @param {string} value */
+  function updateMemoryCacheSize(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    settings.memoryCacheMiB = Math.min(
+      MAX_MEMORY_CACHE_MIB,
+      Math.max(MIN_MEMORY_CACHE_MIB, Math.round(parsed)),
+    );
+  }
+
   async function refreshStorageInfo() {
     const storage = settings.storage;
     storage.loading = true;
@@ -214,6 +228,8 @@
     App.connection.relays = [...settings.relays];
     App.connection.secret = secret;
     App.starredKey = settings.starredKey.trim();
+    const memoryCacheBytes = ClientCore.setMemoryCacheSize(settings.memoryCacheMiB);
+    if (App.connection.client) await App.connection.client.setMemoryCacheSize(memoryCacheBytes);
     if (App.starredKey) localStorage.setItem("iroh-fm-starred-key", App.starredKey);
     else localStorage.removeItem("iroh-fm-starred-key");
     localStorage.removeItem("iroh-fm-loved-key");
@@ -397,7 +413,7 @@
               Offline cache
             </p>
             <p class="text-3xs text-overlay1 mt-1">
-              Played and prefetched tracks are reused across visits.
+              Downloaded albums are kept for offline playback; normal playback uses a memory cache.
             </p>
           </div>
           <button
@@ -443,19 +459,33 @@
               >{settings.storage.requesting ? "REQUESTING…" : "KEEP OFFLINE"}</button
             >{/if}
         </div>
+        <div class="border-surface0 mt-3 flex items-center justify-between gap-3 border-t pt-3">
+          <div>
+            <p class="text-3xs text-subtext0">Memory cache limit</p>
+            <p class="text-4xs text-overlay0 mt-1">Tracks kept in RAM for quick replay.</p>
+          </div>
+          <label class="text-3xs text-subtext0 flex shrink-0 items-center gap-2">
+            <input
+              type="number"
+              min={MIN_MEMORY_CACHE_MIB}
+              max={MAX_MEMORY_CACHE_MIB}
+              step="16"
+              value={settings.memoryCacheMiB}
+              oninput={(event) => updateMemoryCacheSize(event.currentTarget.value)}
+              class="border-surface1 bg-mantle focus:border-mauve h-9 w-24 border px-2 text-right font-mono text-xs outline-none"
+              aria-label="Memory cache size in MiB"
+            />
+            MiB
+          </label>
+        </div>
       </section>
       <section
         aria-labelledby="update-title"
-        class="border-surface0 flex items-center justify-between gap-4 border-t pt-4"
+        class="border-surface0 flex flex-col items-center gap-3 border-t pt-5 text-center"
       >
-        <div class="min-w-0">
+        <div>
           <p id="update-title" class="text-4xs text-overlay0 font-mono tracking-[.14em] uppercase">
             Application update
-          </p>
-          <p class="text-3xs text-overlay1 mt-1 leading-4">
-            Check for a complete application update and activate it atomically. The current offline
-            shell, downloaded media, and connection settings stay available until the new shell is
-            ready.
           </p>
         </div>
         <button
@@ -466,9 +496,8 @@
           >{forcingUpdate ? "RESETTING…" : "FORCE UPDATE"}</button
         >
       </section>
-      <div class="text-2xs text-overlay1 flex items-start justify-between gap-4 leading-5">
-        <p>Credentials stay in this browser's localStorage. Saving restarts the iroh connection.</p>
-        <div class="text-4xs text-overlay0 flex shrink-0 flex-col items-end gap-0.5 font-mono">
+      <div class="text-2xs text-overlay1 flex justify-center text-center leading-5">
+        <div class="text-4xs text-overlay0 flex flex-col items-center gap-0.5 font-mono">
           <div class="flex items-center gap-2">
             <span title="Remote web build commit">WEB {__BUILD_COMMIT__}</span>
             <span aria-hidden="true" class="bg-surface1 h-3 w-px"></span>

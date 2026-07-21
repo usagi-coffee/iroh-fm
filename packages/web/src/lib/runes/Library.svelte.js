@@ -154,6 +154,7 @@ export class Library {
       if (track) track.updateMetadata(data);
       else track = new Track(data, cached.has(data.id));
       track.setCached(cached.has(data.id));
+      track.setMemoryCached(false);
       return track;
     });
     this.tracks = next;
@@ -168,6 +169,11 @@ export class Library {
   /** @param {Track} track */
   markCached(track) {
     track.setCached(true);
+  }
+
+  /** @param {Track} track */
+  markMemoryCached(track) {
+    track.setMemoryCached(true);
   }
 
   /** @param {boolean} [starredOnly] @param {string} [query] */
@@ -326,12 +332,12 @@ export class Library {
     this.cachingTrackIds.add(track.id);
     const downloadGeneration = track.startDownload();
     try {
-      const cached = await client.prefetchTrack(
+      const cached = await client.cacheTrack(
         track.id,
         (/** @type {number} */ received, /** @type {number} */ total) =>
           track.updateProgress(received, total, downloadGeneration),
       );
-      if (!cached) throw new Error("The browser could not store this track for offline playback.");
+      if (!cached) throw new Error("The client could not store this track for offline playback.");
       if (this.app.connection.client === client) this.markCached(track);
       else track.stopDownload(downloadGeneration);
     } catch (error) {
@@ -364,13 +370,12 @@ export class Library {
         this.cachingTrackIds.add(track.id);
         const downloadGeneration = track.startDownload();
         downloads.set(track, downloadGeneration);
-        const cached = await client.prefetchTrack(
+        const cached = await client.cacheTrack(
           track.id,
           (/** @type {number} */ received, /** @type {number} */ total) =>
             track.updateProgress(received, total, downloadGeneration),
         );
-        if (!cached)
-          throw new Error("The browser could not store this track for offline playback.");
+        if (!cached) throw new Error("The client could not store this track for offline playback.");
         if (this.app.connection.client !== client) {
           for (const [pending, generation] of downloads) pending.stopDownload(generation);
           return;
