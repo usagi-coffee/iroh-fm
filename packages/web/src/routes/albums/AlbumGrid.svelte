@@ -69,8 +69,8 @@
         getComputedStyle(document.documentElement).fontSize,
       );
       if (!Number.isFinite(measuredFontSize)) return;
-      gridWidth = width;
-      rootFontSize = measuredFontSize;
+      if (gridWidth !== width) gridWidth = width;
+      if (rootFontSize !== measuredFontSize) rootFontSize = measuredFontSize;
     };
     const storedAdjustment = Number.parseInt(localStorage.getItem(COLUMN_ADJUSTMENT_KEY) ?? "", 10);
     if (Number.isFinite(storedAdjustment))
@@ -105,9 +105,13 @@
         frame = requestAnimationFrame(center);
         return;
       }
-      const target = [...host.querySelectorAll("[data-album-id]")].find(
-        (element) => element instanceof HTMLElement && element.dataset.albumId === album.id,
-      );
+      let target = null;
+      for (const element of host.querySelectorAll("[data-album-id]")) {
+        if (element instanceof HTMLElement && element.dataset.albumId === album.id) {
+          target = element;
+          break;
+        }
+      }
       if (target instanceof HTMLElement) {
         const viewportRect = viewport.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
