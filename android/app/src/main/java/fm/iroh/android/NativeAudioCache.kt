@@ -93,6 +93,7 @@ object NativeAudioCache {
         if (
             totalBytes <= 0L ||
             totalBytes > Int.MAX_VALUE.toLong() ||
+            totalBytes > MAX_STREAMING_MEMORY_TRACK_BYTES ||
             offset < 0 ||
             length <= 0 ||
             offset > buffer.size - length
@@ -240,4 +241,7 @@ object NativeAudioCache {
     private const val DEFAULT_MEMORY_CACHE_BYTES = 256L * 1024L * 1024L
     private const val MIN_MEMORY_CACHE_BYTES = 32L * 1024L * 1024L
     private const val MAX_MEMORY_CACHE_BYTES = 2L * 1024L * 1024L * 1024L
+    // Avoid allocating a full large audio file when playback starts. Larger tracks
+    // remain streamable but are not retained in the in-memory cache.
+    private const val MAX_STREAMING_MEMORY_TRACK_BYTES = 32L * 1024L * 1024L
 }
