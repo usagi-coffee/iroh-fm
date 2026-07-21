@@ -24,8 +24,6 @@ export class Library {
   starredAlbumIds = $derived(new Set(this.starred.albums.map((album) => album.id)));
   /** @type {Track[]} */
   cachedTracks = $derived(this.tracks.filter((track) => track.cached));
-  /** @type {Set<string>} */
-  cachedTrackIds = $derived(new Set(this.cachedTracks.map((track) => track.id)));
   /** @type {SvelteSet<string>} */
   cachingTrackIds = new SvelteSet();
   /** @type {SvelteSet<string>} */
@@ -120,10 +118,7 @@ export class Library {
   );
   /** @type {import('../types').AlbumData[]} */
   offlineAlbums = $derived(
-    this.albums.filter(
-      (album) =>
-        album.track_ids.length > 0 && album.track_ids.some((id) => this.cachedTrackIds.has(id)),
-    ),
+    this.albums.filter((album) => (this.cachedTracksByAlbum.get(album.id)?.length ?? 0) > 0),
   );
   /** @type {import('../types').AlbumData[]} */
   visibleAlbums = $derived(this.offlineOnly ? this.offlineAlbums : this.albums);
@@ -134,7 +129,7 @@ export class Library {
         .filter(
           (album) =>
             album.track_ids.length > 0 &&
-            album.track_ids.every((id) => this.cachedTrackIds.has(id)),
+            this.cachedTracksByAlbum.get(album.id)?.length === album.track_ids.length,
         )
         .map((album) => album.id),
     ),
