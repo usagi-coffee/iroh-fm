@@ -120,7 +120,7 @@ export class Player {
     this.audioLoading = true;
     this.playing = false;
     if (this.nativePlayback(client)) {
-      if (!track.cached && !track.memoryCached && track.downloading) track.stopDownload();
+      if (track.downloading) track.stopDownload();
       const downloadGeneration = null;
       this.nativePlayPendingTrackId = track.id;
       let progressPending = false;
@@ -447,7 +447,10 @@ export class Player {
           this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
-        if (id === this.currentTrack?.id && this.nativePlayback()) continue;
+        if (id === this.currentTrack?.id && this.nativePlayback()) {
+          queuedTrack.downloading = false;
+          continue;
+        }
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);
