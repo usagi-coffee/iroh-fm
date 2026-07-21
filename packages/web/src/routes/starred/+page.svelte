@@ -4,8 +4,8 @@
   import TrackList from "../TrackList.svelte";
 
   let query = $state("");
-  let tracks = $derived(App.library.getFilteredTracks(true, query));
-  let items = $derived(App.library.getTrackListItems(tracks));
+  const tracks = $derived(App.library.getFilteredTracks(true, query));
+  const items = $derived(App.library.getTrackListItems(tracks));
 </script>
 
 <TrackList {tracks} {items} {query} onquery={(value) => (query = value)} />

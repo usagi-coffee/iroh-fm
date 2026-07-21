@@ -23,8 +23,8 @@
   /** @typedef {{ updateReady: boolean, onupdate: () => void }} Props */
   /** @type {Props} */
   let { updateReady, onupdate } = $props();
-  let path = $derived(page.url.pathname.replace(/\/$/, ""));
-  let connectionToggleTitle = $derived(
+  const path = $derived(page.url.pathname.replace(/\/$/, ""));
+  const connectionToggleTitle = $derived(
     App.library.offlineOnly
       ? "Offline-only mode enabled — use network"
       : App.connection.info.path_type === "relay"

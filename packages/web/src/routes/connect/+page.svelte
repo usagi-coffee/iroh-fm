@@ -450,7 +450,7 @@
 
 {#snippet QrScanner(/** @type {{ dismiss: (value: string | null) => void }} */ { dismiss })}
   {let error = $state("")}
-  {let scan = $derived(
+  {const scan = $derived(
     createQrScanner(
       dismiss,
       (reason) => (error = friendlyError(reason, "Could not start the camera.")),

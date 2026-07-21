@@ -34,8 +34,8 @@
   /** @type {ReturnType<typeof currentNativeRequirement>} */
   let initialNativeRequirement = $state(null);
   let initialWebUpdateRequired = $state(false);
-  let connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
-  let onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
+  const connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
+  const onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
   const nativeBuild = ClientCore.buildInfo();
   const nativeCompatibility = nativeBuild.then((buildInfo) => {
     initialNativeRequirement = currentNativeRequirement(buildInfo);

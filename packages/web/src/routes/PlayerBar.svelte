@@ -12,8 +12,8 @@
 
   import Cover from "./Cover.svelte";
 
-  let track = $derived(App.player.currentTrack);
-  let duration = $derived(App.player.duration || track?.duration_seconds || 0);
+  const track = $derived(App.player.currentTrack);
+  const duration = $derived(App.player.duration || track?.duration_seconds || 0);
 
   /** @param {HTMLAudioElement} audio */
   function syncAudioDuration(audio) {

@@ -33,7 +33,7 @@
   let { tracks, items, query, onquery } = $props();
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
-  let bufferSize = $derived(rowHeight * 60);
+  const bufferSize = $derived(rowHeight * 60);
   let focusPlayingTrackOnMount = true;
   const COVER_MARGIN = "150%";
 
@@ -432,8 +432,8 @@
     track,
   },
 )}
-  {let downloadDisabled = $derived(App.library.offlineOnly || track.cached || track.downloading)}
-  {let downloadLabel = $derived(
+  {const downloadDisabled = $derived(App.library.offlineOnly || track.cached || track.downloading)}
+  {const downloadLabel = $derived(
     track.cached
       ? "Cached"
       : track.downloading

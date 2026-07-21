@@ -18,13 +18,13 @@
    */
   /** @type {Props} */
   let { dismiss, album, tracks, title, cacheKey } = $props();
-  let cached = $derived(
+  const cached = $derived(
     album
       ? App.library.isAlbumFullyCached(album)
       : tracks.length > 0 && tracks.every((track) => track.cached),
   );
-  let starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)));
-  let stats = $derived.by(() => {
+  const starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)));
+  const stats = $derived.by(() => {
     let duration = 0;
     let size = 0;
     for (const track of tracks) {

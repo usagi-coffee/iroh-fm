@@ -87,7 +87,7 @@
 
   let visible = $state(false);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
-  let imageFailed = $derived(
+  const imageFailed = $derived(
     Boolean(
       failedRequest &&
       failedRequest.client === client &&
@@ -95,8 +95,8 @@
       failedRequest.fullQuality === fullQuality,
     ),
   );
-  let hue = $derived(titleHue(title));
-  let coverPromise = $derived(
+  const hue = $derived(titleHue(title));
+  const coverPromise = $derived(
     visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
   );
 

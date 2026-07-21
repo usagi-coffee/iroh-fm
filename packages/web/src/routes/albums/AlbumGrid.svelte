@@ -34,28 +34,28 @@
   let albumList = $state();
   /** @type {string | null} */
   let focusedAlbumId = null;
-  let autoColumns = $derived.by(() => {
+  const autoColumns = $derived.by(() => {
     const albumMinWidth = ALBUM_MIN_WIDTH_REM * rootFontSize;
     const gap = ALBUM_GAP_REM * rootFontSize;
     const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
     return Math.max(1, Math.floor((available + gap) / (albumMinWidth + gap)));
   });
-  let maxColumns = $derived.by(() => {
+  const maxColumns = $derived.by(() => {
     const minimum = ALBUM_ACTIONS_MIN_WIDTH_REM * rootFontSize;
     const gap = ALBUM_GAP_REM * rootFontSize;
     const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
     return Math.max(1, Math.min(MAX_COLUMNS, Math.floor((available + gap) / (minimum + gap))));
   });
-  let columns = $derived(Math.max(1, Math.min(maxColumns, autoColumns + columnAdjustment)));
-  let bufferSize = $derived(25 * rootFontSize);
-  let rows = $derived.by(() => {
+  const columns = $derived(Math.max(1, Math.min(maxColumns, autoColumns + columnAdjustment)));
+  const bufferSize = $derived(25 * rootFontSize);
+  const rows = $derived.by(() => {
     /** @type {import('$lib/types').AlbumData[][]} */
     const grouped = [];
     for (let index = 0; index < albums.length; index += columns)
       grouped.push(albums.slice(index, index + columns));
     return grouped;
   });
-  let playingAlbumId = $derived.by(() => {
+  const playingAlbumId = $derived.by(() => {
     const track = App.player.currentTrack;
     return track ? (App.library.albumByTrackId.get(track.id)?.id ?? null) : null;
   });

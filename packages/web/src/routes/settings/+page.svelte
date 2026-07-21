@@ -49,7 +49,7 @@
   /** @type {{ resolve: (value: string) => void, reject: (reason: unknown) => void }[]} */
   let endpointIdWaiters = [];
   let draftEndpointId = $state(endpointIdForSecret(settings.secret));
-  let canSave = $derived(
+  const canSave = $derived(
     Boolean(settings.endpoint.trim() ? cleanRelays(settings.relays).length : settings.ticket.trim()) &&
       !App.connection.connecting,
   );
