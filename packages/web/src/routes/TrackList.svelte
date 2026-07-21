@@ -32,7 +32,7 @@
   let { tracks, items, query, onquery } = $props();
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
-  const bufferSize = $derived(rowHeight * 60);
+  const bufferSize = $derived(rowHeight * 24);
   /** @type {{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | undefined} */
   let trackList = $state();
   const initialFocusTrackId =
@@ -46,6 +46,11 @@
       : -1,
   );
   const COVER_MARGIN = "150%";
+
+  /** @param {import('$lib/types').TrackListItem} item */
+  function trackItemKey(item) {
+    return item.key;
+  }
 
   function measureRowHeight() {
     const update = () => {
@@ -256,7 +261,7 @@
     <VirtualList
       bind:api={() => trackList, (value) => (trackList = value)}
       {items}
-      getKey={(item) => item.key}
+      getKey={trackItemKey}
       estimateSize={rowHeight}
       measureItems={false}
       overscan={bufferSize}

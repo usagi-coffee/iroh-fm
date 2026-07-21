@@ -9,8 +9,10 @@
    * @property {any[]} items
    * @property {(item: any) => string | number} getKey
    * @property {number | ((item: any, index: number) => number)} estimateSize
-   * @property {boolean} [measureItems]
+   * @property {boolean | "uniform"} [measureItems]
    * @property {number} [overscan]
+   * @property {number} [paddingStart]
+   * @property {number} [paddingEnd]
    * @property {number | null} [initialIndex]
    * @property {"start" | "center" | "end"} [initialAlign]
    * @property {VirtualListApi | undefined} [api]
@@ -24,6 +26,8 @@
     estimateSize,
     measureItems = true,
     overscan = 400,
+    paddingStart = 0,
+    paddingEnd = 0,
     initialIndex = null,
     initialAlign = "center",
     api = $bindable(),
@@ -33,11 +37,13 @@
   /** @type {HTMLElement | undefined} */
   let viewport;
   let viewportSize = $state(0);
-  let scrollOffset = $state(0);
+  let renderWindowOffset = $state(0);
   const measuredSizes = new SvelteMap();
+  /** @type {{ estimate: number, size: number } | null} */
+  let uniformMeasurement = $state(null);
   /** @type {ResizeObserver | undefined} */
   let itemObserver;
-  /** @type {WeakMap<Element, { id: string, index: number, estimate: number }>} */
+  /** @type {WeakMap<Element, { key: string | number, index: number }>} */
   const observedItems = new WeakMap();
 
   /** @param {any} item @param {number} index */
@@ -46,50 +52,108 @@
     return Math.max(1, Number.isFinite(value) ? value : 1);
   }
 
-  const fixedItemSize = $derived(
-    !measureItems && typeof estimateSize === "number" ? Math.max(1, estimateSize) : null,
-  );
+  const leadingPadding = $derived(Math.max(0, paddingStart));
+  const trailingPadding = $derived(Math.max(0, paddingEnd));
+  const windowStep = $derived(Math.max(1, overscan / 2));
+  const uniformEstimate = $derived.by(() => {
+    if (measureItems !== "uniform") return null;
+    if (typeof estimateSize === "number") return Math.max(1, estimateSize);
+    return items.length ? estimatedSize(items[0], 0) : 1;
+  });
+  const fixedItemSize = $derived.by(() => {
+    if (!measureItems && typeof estimateSize === "number") return Math.max(1, estimateSize);
+    if (uniformEstimate === null) return null;
+    return uniformMeasurement?.estimate === uniformEstimate
+      ? uniformMeasurement.size
+      : uniformEstimate;
+  });
 
-  /** @param {string | number} key @param {number} estimate */
-  function measurementId(key, estimate) {
-    return `${typeof key}:${String(key)}\u0000${estimate}`;
+  /** @param {ResizeObserverEntry} entry */
+  function observedHeight(entry) {
+    const borderSize = Array.isArray(entry.borderBoxSize)
+      ? entry.borderBoxSize[0]
+      : entry.borderBoxSize;
+    return borderSize?.blockSize ?? entry.contentRect.height;
+  }
+
+  /** @param {number} estimate @param {number} size */
+  function updateUniformMeasurement(estimate, size) {
+    if (
+      size <= 0 ||
+      (uniformMeasurement?.estimate === estimate && uniformMeasurement.size === size)
+    )
+      return;
+    const node = viewport;
+    const preserveAnchor = node?.style.visibility === "visible" && items.length > 0;
+    const anchorIndex = preserveAnchor ? indexAtOffset(node.scrollTop) : 0;
+    const anchorOffset = preserveAnchor ? node.scrollTop - offsetAt(anchorIndex) : 0;
+    uniformMeasurement = { estimate, size };
+    if (preserveAnchor)
+      queueMicrotask(() => {
+        if (viewport !== node) return;
+        node.scrollTop = leadingPadding + anchorIndex * size + anchorOffset;
+        updateScrollWindow(node.scrollTop);
+      });
   }
 
   function ensureItemObserver() {
     itemObserver ??= new ResizeObserver((entries) => {
+      const anchorIndex = viewport && items.length ? indexAtOffset(viewport.scrollTop) : 0;
+      let scrollCorrection = 0;
+      /** @type {{ estimate: number, size: number } | null} */
+      let nextUniformMeasurement = null;
       for (const entry of entries) {
         const measurement = observedItems.get(entry.target);
-        if (!measurement) continue;
-        const size = entry.target.getBoundingClientRect().height;
-        if (size <= 0 || measuredSizes.get(measurement.id) === size) continue;
-        const previous = measuredSizes.get(measurement.id) ?? measurement.estimate;
-        const anchorIndex = indexAtOffset(scrollOffset);
-        measuredSizes.set(measurement.id, size);
-        if (viewport && measurement.index < anchorIndex) {
-          viewport.scrollTop += size - previous;
-          scrollOffset = viewport.scrollTop;
+        if (!measurement || measurement.index >= items.length) continue;
+        const size = observedHeight(entry);
+        const estimate = estimatedSize(items[measurement.index], measurement.index);
+        if (measureItems === "uniform") {
+          if (size > 0) nextUniformMeasurement = { estimate, size };
+          continue;
         }
+        const previousMeasurement = measuredSizes.get(measurement.key);
+        const previous =
+          previousMeasurement?.estimate === estimate ? previousMeasurement.size : estimate;
+        if (size <= 0 || size === previous) continue;
+        measuredSizes.set(measurement.key, { estimate, size });
+        if (measurement.index < anchorIndex) scrollCorrection += size - previous;
+      }
+      if (nextUniformMeasurement)
+        updateUniformMeasurement(nextUniformMeasurement.estimate, nextUniformMeasurement.size);
+      if (viewport && scrollCorrection) {
+        viewport.scrollTop += scrollCorrection;
+        updateScrollWindow(viewport.scrollTop);
       }
     });
     return itemObserver;
   }
 
   const layout = $derived.by(() => {
-    if (fixedItemSize !== null) return { offsets: null, totalSize: items.length * fixedItemSize };
+    if (fixedItemSize !== null)
+      return {
+        offsets: null,
+        totalSize: leadingPadding + items.length * fixedItemSize + trailingPadding,
+      };
     const offsets = new Array(items.length + 1);
-    offsets[0] = 0;
+    offsets[0] = leadingPadding;
     for (let index = 0; index < items.length; index += 1) {
       const key = getKey(items[index]);
       const estimate = estimatedSize(items[index], index);
+      const measurement = measuredSizes.get(key);
       offsets[index + 1] =
-        offsets[index] + (measuredSizes.get(measurementId(key, estimate)) ?? estimate);
+        offsets[index] + (measurement?.estimate === estimate ? measurement.size : estimate);
     }
-    return { offsets, totalSize: offsets[items.length] ?? 0 };
+    return {
+      offsets,
+      totalSize: (offsets[items.length] ?? leadingPadding) + trailingPadding,
+    };
   });
 
   /** @param {number} index */
   function offsetAt(index) {
-    return fixedItemSize === null ? (layout.offsets?.[index] ?? 0) : index * fixedItemSize;
+    return fixedItemSize === null
+      ? (layout.offsets?.[index] ?? leadingPadding)
+      : leadingPadding + index * fixedItemSize;
   }
 
   /** Find the item containing an offset, or the closest item at either edge. */
@@ -97,7 +161,10 @@
   function indexAtOffset(offset) {
     if (!items.length) return 0;
     if (fixedItemSize !== null)
-      return Math.max(0, Math.min(items.length - 1, Math.floor(offset / fixedItemSize)));
+      return Math.max(
+        0,
+        Math.min(items.length - 1, Math.floor((offset - leadingPadding) / fixedItemSize)),
+      );
     let low = 0;
     let high = items.length - 1;
     while (low < high) {
@@ -112,10 +179,11 @@
     if (!items.length) return { start: 0, end: 0 };
     const fallbackIndex = Math.max(0, Math.min(items.length - 1, initialIndex ?? 0));
     const fallbackOffset = offsetAt(fallbackIndex);
-    const top = viewportSize ? scrollOffset : fallbackOffset;
+    const top = viewportSize ? renderWindowOffset : fallbackOffset;
     const height = viewportSize || estimatedSize(items[fallbackIndex], fallbackIndex);
     const start = indexAtOffset(Math.max(0, top - overscan));
-    const end = Math.min(items.length, indexAtOffset(top + height + overscan) + 1);
+    const scrollSlack = viewportSize ? windowStep : 0;
+    const end = Math.min(items.length, indexAtOffset(top + scrollSlack + height + overscan) + 1);
     return { start, end };
   });
 
@@ -125,6 +193,12 @@
       visible.push({ item: items[index], index, key: getKey(items[index]) });
     return visible;
   });
+
+  /** @param {number} offset */
+  function updateScrollWindow(offset) {
+    const next = Math.floor(Math.max(0, offset) / windowStep) * windowStep;
+    if (next !== renderWindowOffset) renderWindowOffset = next;
+  }
 
   /** @param {number} index @param {ScrollOptions} [options] */
   function scrollToIndex(index, options = {}) {
@@ -147,7 +221,7 @@
 
     const maximum = Math.max(0, layout.totalSize - viewport.clientHeight);
     viewport.scrollTop = Math.max(0, Math.min(maximum, next));
-    scrollOffset = viewport.scrollTop;
+    updateScrollWindow(viewport.scrollTop);
   }
 
   /** @param {HTMLElement} node */
@@ -157,25 +231,30 @@
       api = { scrollToIndex };
       const updateSize = () => {
         viewportSize = node.clientHeight;
-        scrollOffset = node.scrollTop;
+        updateScrollWindow(node.scrollTop);
       };
       updateSize();
       const observer = new ResizeObserver(updateSize);
       observer.observe(node);
+      /** @type {number | undefined} */
+      let revealFrame;
 
       if (initialIndex === null || !items.length) {
         node.style.visibility = "visible";
       } else {
         scrollToIndex(initialIndex, { align: initialAlign });
-        requestAnimationFrame(() => {
-          if (viewport !== node) return;
-          scrollToIndex(initialIndex, { align: initialAlign });
-          node.style.visibility = "visible";
-        });
+        if (!measureItems) node.style.visibility = "visible";
+        else
+          revealFrame = requestAnimationFrame(() => {
+            if (viewport !== node) return;
+            scrollToIndex(initialIndex, { align: initialAlign });
+            node.style.visibility = "visible";
+          });
       }
 
       return () => {
         observer.disconnect();
+        if (revealFrame !== undefined) cancelAnimationFrame(revealFrame);
         itemObserver?.disconnect();
         itemObserver = undefined;
         if (viewport === node) viewport = undefined;
@@ -188,22 +267,26 @@
   function measureItem(key, index) {
     /** @param {HTMLElement} node */
     return (node) => {
-      const estimate = estimatedSize(items[index], index);
-      const id = measurementId(key, estimate);
-      observedItems.set(node, { id, index, estimate });
-      const size = node.getBoundingClientRect().height;
-      if (size > 0) measuredSizes.set(id, size);
-      ensureItemObserver().observe(node);
-      return () => itemObserver?.unobserve(node);
+      return untrack(() => {
+        const estimate = estimatedSize(items[index], index);
+        observedItems.set(node, { key, index });
+        if (measureItems === "uniform" && uniformMeasurement?.estimate !== estimate)
+          updateUniformMeasurement(estimate, node.getBoundingClientRect().height);
+        ensureItemObserver().observe(node);
+        return () => {
+          observedItems.delete(node);
+          itemObserver?.unobserve(node);
+        };
+      });
     };
   }
 </script>
 
 <div
   {@attach setupViewport}
-  onscroll={(event) => (scrollOffset = event.currentTarget.scrollTop)}
+  onscroll={(event) => updateScrollWindow(event.currentTarget.scrollTop)}
   class="h-full overflow-y-auto"
-  style="visibility: hidden; overscroll-behavior: contain; overflow-anchor: none;"
+  style="visibility: hidden; overscroll-behavior: contain; overflow-anchor: none; contain: layout paint;"
 >
   <div class="relative w-full" style={`height:${layout.totalSize}px`}>
     <div
