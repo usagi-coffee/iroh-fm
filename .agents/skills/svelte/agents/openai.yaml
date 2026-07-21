@@ -1,0 +1,4 @@
+interface:
+  display_name: "Svelte"
+  short_description: "Edit svelte files"
+  default_prompt: "Use $svelte to edit svelte files."
