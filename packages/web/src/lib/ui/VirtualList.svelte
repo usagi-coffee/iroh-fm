@@ -318,6 +318,7 @@
 
 <div
   {@attach setupViewport}
+  data-virtual-viewport
   onscroll={(event) => updateViewportPosition(event.currentTarget)}
   class="h-full overflow-y-auto"
   style="visibility: hidden; overscroll-behavior: none; overflow-anchor: none;"

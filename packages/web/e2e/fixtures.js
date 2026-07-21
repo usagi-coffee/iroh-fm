@@ -30,6 +30,41 @@ export const album = {
   cover_art_id: "cover-1",
 };
 
+function fixtureLibrary() {
+  const requestedAlbums = Number.parseInt(
+    localStorage.getItem("iroh-fm-e2e-album-count") ?? "",
+    10,
+  );
+  if (!Number.isFinite(requestedAlbums) || requestedAlbums <= 1) return { albums: [album], tracks };
+
+  const albumCount = Math.min(500, requestedAlbums);
+  const generatedAlbums = [];
+  const generatedTracks = [];
+  for (let index = 1; index <= albumCount; index += 1) {
+    const suffix = String(index).padStart(3, "0");
+    const albumId = `album-${index}`;
+    const trackId = `track-${index}`;
+    const albumTitle = `Test Album ${suffix}`;
+    const generatedTrack = track(trackId, `Track ${suffix}`, "Fixture Artist", 1);
+    generatedTrack.album = albumTitle;
+    generatedTrack.album_artist = "Fixture Artist";
+    generatedTrack.cover_art_id = `cover-${index}`;
+    generatedTracks.push(generatedTrack);
+    generatedAlbums.push({
+      ...album,
+      id: albumId,
+      title: albumTitle,
+      artist: "Fixture Artist",
+      album_artist: "Fixture Artist",
+      track_ids: [trackId],
+      duration_seconds: TRACK_SECONDS,
+      size_bytes: TRACK_BYTES,
+      cover_art_id: `cover-${index}`,
+    });
+  }
+  return { albums: generatedAlbums, tracks: generatedTracks };
+}
+
 function track(id, title, artist, trackNumber) {
   return {
     id,
@@ -94,18 +129,26 @@ export class FixtureClient {
   receivedBytes = 0;
 
   bootstrap() {
+    const library = fixtureLibrary();
     return Promise.resolve({
       summary: {
-        LibrarySummary: { artist_count: 2, album_count: 1, track_count: tracks.length },
+        LibrarySummary: {
+          artist_count: 1,
+          album_count: library.albums.length,
+          track_count: library.tracks.length,
+        },
       },
-      albums: { Albums: [album] },
+      albums: { Albums: library.albums },
       artists: {
         Artists: [
-          { id: "artist-1", name: "Aurora Unit", album_ids: [album.id] },
-          { id: "artist-2", name: "Coastal Signal", album_ids: [album.id] },
+          {
+            id: "artist-1",
+            name: "Fixture Artist",
+            album_ids: library.albums.map(({ id }) => id),
+          },
         ],
       },
-      tracks: { Tracks: tracks },
+      tracks: { Tracks: library.tracks },
       starred: { Starred: { artists: [], albums: [], tracks: [] } },
     });
   }

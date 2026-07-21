@@ -69,3 +69,49 @@ test("shows resolved album covers immediately after remounting", async ({ page }
 
   expect(firstRender).toEqual({ image: true, fallback: false });
 });
+
+test("keeps album scrolling stable and centers a selected album track", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "120"));
+  await page.reload();
+  await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  const albumViewport = page.locator("[data-virtual-viewport]");
+  await page.waitForTimeout(250);
+  await albumViewport.evaluate((viewport) => (viewport.scrollTop = viewport.scrollHeight / 2));
+  await expect(page.locator("[data-album-id]").first()).toBeVisible();
+  await page.waitForTimeout(100);
+
+  const positions = await albumViewport.evaluate(async (viewport) => {
+    const values = [];
+    for (let sample = 0; sample < 10; sample += 1) {
+      values.push(viewport.scrollTop);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return values;
+  });
+  expect(positions[0]).toBeGreaterThan(100);
+  expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(1);
+
+  const albumCard = page.locator("[data-album-id]").nth(2);
+  const albumId = await albumCard.getAttribute("data-album-id");
+  await albumCard.locator("button.bg-mauve").click({ force: true });
+  await expect(page).toHaveURL(/\/tracks$/);
+
+  const trackId = albumId?.replace("album-", "track-");
+  const target = page.locator(`[data-track-id="${trackId}"]`);
+  await expect(target).toBeVisible();
+  await expect
+    .poll(() =>
+      target.evaluate((row) => {
+        const viewport = row.closest("[data-virtual-viewport]");
+        if (!(viewport instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
+        const viewportRect = viewport.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        return Math.abs(
+          rowRect.top + rowRect.height / 2 - (viewportRect.top + viewportRect.height / 2),
+        );
+      }),
+    )
+    .toBeLessThan(2);
+});
