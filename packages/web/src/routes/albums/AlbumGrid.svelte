@@ -4,6 +4,7 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
   import { longPress } from "$lib/ui/long-press.js";
+  import VirtualList from "$lib/ui/VirtualList.svelte";
   import { friendlyError } from "$lib/utils.js";
 
   import AddIcon from "virtual:icons/ri/add-line";
@@ -15,8 +16,6 @@
   import SubtractIcon from "virtual:icons/ri/subtract-line";
 
   import Cover from "../Cover.svelte";
-
-  import { VList } from "virtua/svelte";
 
   /** @typedef {{ albums: import('$lib/types').AlbumData[], followPlayingTrack?: boolean }} Props */
   /** @type {Props} */
@@ -30,7 +29,7 @@
   let gridWidth = $state(0);
   let rootFontSize = $state(16);
   let columnAdjustment = $state(0);
-  /** @type {import('virtua/svelte').VListHandle | undefined} */
+  /** @type {{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | undefined} */
   let albumList = $state();
   /** @type {string | null} */
   let focusedAlbumId = null;
@@ -55,10 +54,24 @@
       grouped.push(albums.slice(index, index + columns));
     return grouped;
   });
+  const estimatedRowHeight = $derived.by(() => {
+    const gap = ALBUM_GAP_REM * rootFontSize;
+    const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
+    const coverWidth = (available - Math.max(0, columns - 1) * gap) / columns;
+    return Math.max(rootFontSize * 8, coverWidth + rootFontSize * 3.75);
+  });
   const playingAlbumId = $derived.by(() => {
     const track = App.player.currentTrack;
     return track ? (App.library.albumByTrackId.get(track.id)?.id ?? null) : null;
   });
+  const initialPlayingRowIndex = $derived(
+    playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
+  );
+
+  /** @param {import('$lib/types').AlbumData[]} row */
+  function albumRowKey(row) {
+    return `${columns}:${row.map((album) => album.id).join("|")}`;
+  }
 
   /** @param {HTMLElement} node */
   function measureColumns(node) {
@@ -104,7 +117,7 @@
       return;
     }
     if (album.id === focusedAlbumId) return;
-    const rowIndex = rows.findIndex((row) => row.some((item) => item.id === album.id));
+    const rowIndex = initialPlayingRowIndex;
     if (rowIndex < 0) return;
     focusedAlbumId = album.id;
     let attempts = 60;
@@ -113,26 +126,8 @@
     let frame;
     const center = () => {
       if (cancelled || attempts-- <= 0) return;
-      const viewport = host.firstElementChild;
-      if (!(viewport instanceof HTMLElement)) {
-        frame = requestAnimationFrame(center);
-        return;
-      }
-      let target = null;
-      for (const element of host.querySelectorAll("[data-album-id]")) {
-        if (element instanceof HTMLElement && element.dataset.albumId === album.id) {
-          target = element;
-          break;
-        }
-      }
-      if (target instanceof HTMLElement) {
-        const viewportRect = viewport.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const offset =
-          targetRect.top + targetRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
-        if (Math.abs(offset) > 1) viewport.scrollBy({ top: offset, behavior: "auto" });
-        return;
-      }
+      const target = host.querySelector(`[data-album-id="${CSS.escape(album.id)}"]`);
+      if (target instanceof HTMLElement) return;
       albumList?.scrollToIndex(rowIndex, { align: "center" });
       frame = requestAnimationFrame(center);
     };
@@ -214,12 +209,13 @@
     {@attach focusPlayingAlbum}
     class="min-h-0 flex-1"
   >
-    <VList
-      bind:this={albumList}
-      data={rows}
-      getKey={(row) => `${columns}:${row.map((album) => album.id).join("|")}`}
-      {bufferSize}
-      style="height: 100%; overscroll-behavior: contain;"
+    <VirtualList
+      bind:api={() => albumList, (value) => (albumList = value)}
+      items={rows}
+      getKey={albumRowKey}
+      estimateSize={estimatedRowHeight}
+      overscan={bufferSize}
+      initialIndex={initialPlayingRowIndex >= 0 ? initialPlayingRowIndex : null}
     >
       {#snippet children(row, rowIndex)}
         <div
@@ -308,6 +304,6 @@
           {/each}
         </div>
       {/snippet}
-    </VList>
+    </VirtualList>
   </div>
 </section>

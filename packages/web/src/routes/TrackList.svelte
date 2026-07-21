@@ -10,6 +10,7 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
   import { longPress } from "$lib/ui/long-press.js";
+  import VirtualList from "$lib/ui/VirtualList.svelte";
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
   import DownloadIcon from "virtual:icons/ri/download-line";
@@ -19,8 +20,6 @@
   import SearchIcon from "virtual:icons/ri/search-line";
 
   import Cover from "./Cover.svelte";
-
-  import { VList } from "virtua/svelte";
 
   /**
    * @typedef {Object} Props
@@ -34,7 +33,18 @@
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   const bufferSize = $derived(rowHeight * 60);
-  let focusPlayingTrackOnMount = true;
+  /** @type {{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | undefined} */
+  let trackList = $state();
+  const initialFocusTrackId =
+    App.library.pendingTrackFocusId ??
+    page.state.focusTrackId ??
+    untrack(() => App.player.currentTrack?.id) ??
+    null;
+  const initialFocusIndex = $derived(
+    initialFocusTrackId
+      ? items.findIndex((item) => item.kind === "track" && item.track.id === initialFocusTrackId)
+      : -1,
+  );
   const COVER_MARGIN = "150%";
 
   function measureRowHeight() {
@@ -170,77 +180,29 @@
 
   /** @param {HTMLElement} host */
   function focusRequestedTrack(host) {
-    const playingTrackId = focusPlayingTrackOnMount
-      ? untrack(() => App.player.currentTrack?.id)
-      : null;
-    focusPlayingTrackOnMount = false;
-    const trackId = App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? playingTrackId;
+    const trackId =
+      App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? initialFocusTrackId;
     if (!trackId) return;
-    const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
+    const index =
+      trackId === initialFocusTrackId
+        ? initialFocusIndex
+        : items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
     App.library.selectedTrackId = trackId;
-    let attempts = 120;
+    let attempts = 30;
     let cancelled = false;
-    let centeredFrames = 0;
     /** @type {number | undefined} */
     let frame;
-    const retry = () => {
-      if (!cancelled && attempts-- > 0) frame = requestAnimationFrame(scroll);
-    };
     const scroll = () => {
-      const viewport = host.firstElementChild;
-      if (!(viewport instanceof HTMLElement)) {
-        retry();
-        return;
-      }
-      let target = null;
-      for (const element of host.querySelectorAll("[data-track-id]")) {
-        if (element instanceof HTMLElement && element.dataset.trackId === trackId) {
-          target = element;
-          break;
-        }
-      }
+      if (cancelled || attempts-- <= 0) return;
+      const target = host.querySelector(`[data-track-id="${CSS.escape(trackId)}"]`);
       if (target instanceof HTMLElement) {
-        const viewportRect = viewport.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const offset =
-          targetRect.top + targetRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
-        if (Math.abs(offset) > 1) {
-          centeredFrames = 0;
-          viewport.scrollBy({ top: offset, behavior: "auto" });
-          retry();
-          return;
-        }
-        if (++centeredFrames < 2) {
-          retry();
-          return;
-        }
         App.library.pendingTrackFocusId = null;
         if (page.state.focusTrackId) replaceState(page.url, {});
         return;
       }
-      centeredFrames = 0;
-      const measuredRoot = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-      const measuredRow = Number.isFinite(measuredRoot) ? measuredRoot * ROW_HEIGHT_REM : rowHeight;
-      const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-      if (maxTop === 0 && items.length > 1) {
-        retry();
-        return;
-      }
-      const rendered = host.querySelector("[data-list-index]");
-      const renderedIndex =
-        rendered instanceof HTMLElement ? Number(rendered.dataset.listIndex) : Number.NaN;
-      const requested = Number.isFinite(renderedIndex)
-        ? viewport.scrollTop +
-          (rendered instanceof HTMLElement
-            ? rendered.getBoundingClientRect().top - viewport.getBoundingClientRect().top
-            : 0) +
-          (index - renderedIndex) * measuredRow -
-          (viewport.clientHeight - measuredRow) / 2
-        : (index / Math.max(1, items.length - 1)) * maxTop;
-      const top = Math.min(maxTop, Math.max(0, requested));
-      viewport.scrollTo({ top, behavior: "auto" });
-      retry();
+      trackList?.scrollToIndex(index, { align: "center" });
+      frame = requestAnimationFrame(scroll);
     };
     frame = requestAnimationFrame(scroll);
     return () => {
@@ -291,12 +253,14 @@
   </div>
 
   <div class="min-h-0 flex-1" {@attach immediateTauriWheelScroll} {@attach focusRequestedTrack}>
-    <VList
-      data={items}
+    <VirtualList
+      bind:api={() => trackList, (value) => (trackList = value)}
+      {items}
       getKey={(item) => item.key}
-      itemSize={rowHeight}
-      {bufferSize}
-      style="height: 100%; overscroll-behavior: contain;"
+      estimateSize={rowHeight}
+      measureItems={false}
+      overscan={bufferSize}
+      initialIndex={initialFocusIndex >= 0 ? initialFocusIndex : null}
     >
       {#snippet children(item, itemIndex)}
         {#if item}
@@ -415,7 +379,7 @@
           {/if}
         {/if}
       {/snippet}
-    </VList>
+    </VirtualList>
   </div>
 </section>
 
