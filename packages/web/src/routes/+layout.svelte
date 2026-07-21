@@ -29,6 +29,7 @@
   let { children } = $props();
   let updateReady = $state(false);
   let updateBannerDismissed = $state(false);
+  let webUpdateApplying = $state(false);
   /** @type {ReturnType<typeof currentNativeRequirement>} */
   let nativeUpgrade = $state(null);
   /** @type {ReturnType<typeof currentNativeRequirement>} */
@@ -78,6 +79,17 @@
     };
   }
 
+  async function applyWebUpdate() {
+    if (webUpdateApplying) return;
+    webUpdateApplying = true;
+    try {
+      if (!(await activateServiceWorkerUpdate())) webUpdateApplying = false;
+    } catch (error) {
+      webUpdateApplying = false;
+      console.error("[web-update] activation failed", error);
+    }
+  }
+
   /** @param {EventTarget | null} target */
   function isEditableTarget(target) {
     return (
@@ -93,6 +105,10 @@
   function globalKeybinds() {
     /** @param {KeyboardEvent} event */
     const keydown = (event) => {
+      if (webUpdateApplying) {
+        event.preventDefault();
+        return;
+      }
       if (
         event.defaultPrevented ||
         event.isComposing ||
@@ -211,7 +227,7 @@
       >
         <button
           type="button"
-          onclick={activateServiceWorkerUpdate}
+          onclick={applyWebUpdate}
           class="text-3xs hover:bg-mauve/15 flex min-w-0 flex-1 items-center justify-center gap-2 font-mono font-bold tracking-[.08em]"
           title="Install application update"
           ><RefreshIcon class="text-sm" />WEB UPDATE AVAILABLE</button
@@ -258,7 +274,7 @@
         </p>
         <button
           type="button"
-          onclick={activateServiceWorkerUpdate}
+          onclick={applyWebUpdate}
           class="bg-mauve text-3xs text-crust mt-4 px-4 py-2 font-mono font-bold">WEB UPDATE</button
         >
       </div>
@@ -359,7 +375,7 @@
                     <div class="shrink-0">
                       <TopBar
                         updateReady={updateReady && !nativeUpgrade}
-                        onupdate={activateServiceWorkerUpdate}
+                        onupdate={applyWebUpdate}
                       />
                       {@render updateNotice(false)}
                     </div>
@@ -413,4 +429,21 @@
       {/if}
     {/snippet}
   </svelte:boundary>
+  {#if webUpdateApplying}
+    <div
+      class="bg-crust text-text fixed inset-0 z-[100] grid place-items-center p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-label="Applying web update"
+    >
+      <div class="flex w-full max-w-xs flex-col items-center gap-4 text-center">
+        <RefreshIcon class="text-mauve animate-spin text-3xl" />
+        <div>
+          <p class="text-sm font-semibold">Applying web update</p>
+          <p class="text-2xs text-overlay1 mt-1">Please wait while the new version is installed…</p>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

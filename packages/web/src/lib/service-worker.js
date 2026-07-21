@@ -419,7 +419,7 @@ export function subscribeToServiceWorkerStatus(listener) {
 }
 
 export async function activateServiceWorkerUpdate() {
-  if (DEVELOPMENT || nativeUpgrade) return;
+  if (DEVELOPMENT || nativeUpgrade) return false;
   try {
     let remoteBuild;
     try {
@@ -427,11 +427,11 @@ export async function activateServiceWorkerUpdate() {
     } catch (error) {
       logError("activation:check-unavailable", error);
     }
-    if (remoteBuild === PAGE_BUILD && activeBuild === PAGE_BUILD) return;
+    if (remoteBuild === PAGE_BUILD && activeBuild === PAGE_BUILD) return false;
 
     const targetBuild = remoteBuild && remoteBuild !== PAGE_BUILD ? remoteBuild : availableBuild;
     if (targetBuild) await install(targetBuild);
-    if (nativeUpgrade) return;
+    if (nativeUpgrade) return false;
 
     const registration = await getRegistration();
     let worker = targetBuild ? findWorker(registration, targetBuild) : undefined;
@@ -447,15 +447,17 @@ export async function activateServiceWorkerUpdate() {
     await approve(worker);
     await controlled;
     location.reload();
+    return true;
   } catch (error) {
     logError("activation:fallback", error);
     try {
       await remoteVersion();
     } catch (networkError) {
       logError("activation:deferred-offline", networkError);
-      return;
+      return false;
     }
     await resetAndReload("activation-failed");
+    return true;
   }
 }
 
