@@ -10,6 +10,7 @@ class DesktopInner extends NativeFixtureClient {
   constructor() {
     super();
     globalThis.__IROH_FM_E2E_METRICS__ = this.metrics;
+    globalThis.__IROH_FM_E2E_DESKTOP__ = this;
   }
 
   request(raw) {
@@ -84,6 +85,16 @@ class DesktopInner extends NativeFixtureClient {
     const next = this.queue[(this.currentIndex + 1) % this.queue.length];
     if (next && next !== track.id) void this.prefetchTrack(next);
     return state;
+  }
+
+  playerState(options) {
+    const state = this.snapshot(options);
+    delete state.timestamp;
+    const wait = this.nextPlayerStateDelay ?? 0;
+    this.nextPlayerStateDelay = 0;
+    if (!wait) return Promise.resolve(state);
+    this.metrics.delayedStateCaptured = (this.metrics.delayedStateCaptured ?? 0) + 1;
+    return delay(wait).then(() => state);
   }
 
   setOfflineOnly() {}

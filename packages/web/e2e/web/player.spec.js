@@ -24,6 +24,41 @@ test("plays tracks and navigates forward and backward", async ({ page }) => {
   ).toHaveText("First Light");
 });
 
+test("keeps the new album selected when an older Desktop state arrives", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "This exercises Desktop state polling.");
+
+  await page.getByRole("button", { name: "Play Nebula Drift" }).click();
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("Nebula Drift");
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+
+  await page.evaluate(() => {
+    globalThis.__IROH_FM_E2E_DESKTOP__.nextPlayerStateDelay = 650;
+  });
+  await expect
+    .poll(
+      () => page.evaluate(() => globalThis.__IROH_FM_E2E_METRICS__?.delayedStateCaptured ?? 0),
+      { timeout: 2_000 },
+    )
+    .toBe(1);
+
+  await page.locator('[data-album-id="album-1"] button.bg-mauve').click({ force: true });
+  await expect(page).toHaveURL(/\/tracks$/);
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("First Light");
+
+  await page.waitForTimeout(700);
+  const selected = page.getByRole("row").filter({ hasText: "First Light" });
+  expect(await selected.getAttribute("aria-selected")).toBe("true");
+  expect(
+    await page.locator("footer").getByTitle("Show currently playing track").first().textContent(),
+  ).toBe("First Light");
+});
+
 test("selects tracks with arrow keys and starts playback with Enter", async ({ page }) => {
   await page.getByRole("row").first().click();
   await page.keyboard.press("ArrowDown");

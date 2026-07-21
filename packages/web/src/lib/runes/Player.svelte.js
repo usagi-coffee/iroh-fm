@@ -123,7 +123,14 @@ export class Player {
         progressPending = true;
         void client
           .playerState()
-          .then((/** @type {any} */ state) => this.applyNativeState(state, false, client))
+          .then((/** @type {any} */ state) => {
+            if (
+              generation === this.generation &&
+              this.nativePlayPendingTrackId === track.id &&
+              this.app.connection.client === client
+            )
+              this.applyNativeState(state, false, client);
+          })
           .catch(() => {})
           .finally(() => (progressPending = false));
       }, 200);
@@ -354,15 +361,20 @@ export class Player {
 
   async refreshNativeState(client = this.app.connection.client) {
     if (!this.nativePlayback(client) || this.nativeStatePending) return;
+    const generation = this.generation;
+    const pendingTrackId = this.nativePlayPendingTrackId;
     this.nativeStatePending = true;
     try {
-      this.applyNativeState(
-        await client.playerState(
-          client.native ? { includeQueue: untrack(() => this.queue.length === 0) } : undefined,
-        ),
-        false,
-        client,
+      const state = await client.playerState(
+        client.native ? { includeQueue: untrack(() => this.queue.length === 0) } : undefined,
       );
+      if (
+        this.app.connection.client !== client ||
+        generation !== this.generation ||
+        pendingTrackId !== this.nativePlayPendingTrackId
+      )
+        return;
+      this.applyNativeState(state, false, client);
     } catch {
       // The activity or message channel can be transitioning while the TWA wakes.
     } finally {

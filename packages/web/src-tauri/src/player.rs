@@ -14,6 +14,7 @@ use crate::{DesktopState, track};
 
 const CROSSFADE: Duration = Duration::from_millis(1_500);
 const CROSSFADE_STEPS: u32 = 30;
+const QUEUE_MONITOR_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Default, Serialize)]
 pub(super) struct DesktopTransfer {
@@ -87,11 +88,15 @@ fn decoder(bytes: Vec<u8>) -> Result<Decoder<Cursor<Vec<u8>>>, String> {
         .map_err(|error| error.to_string())
 }
 
+fn sync_active(active: &mut VecDeque<usize>, remaining: usize) {
+    while active.len() > remaining {
+        active.pop_front();
+    }
+}
+
 fn sync(audio: &mut DesktopAudio) {
     let remaining = audio.player.as_ref().map_or(0, |player| player.len());
-    while audio.active.len() > remaining {
-        audio.active.pop_front();
-    }
+    sync_active(&mut audio.active, remaining);
 }
 
 pub(super) fn close(audio: &mut DesktopAudio) {
@@ -152,6 +157,15 @@ fn snapshot(
     }
 }
 
+fn next_prefetch_index(audio: &DesktopAudio) -> Option<usize> {
+    if audio.queue.len() < 2 || audio.active.len() >= 2 || audio.prefetching.is_some() {
+        return None;
+    }
+    let current = audio.active.front().copied()?;
+    let next = (current + 1) % audio.queue.len();
+    (!audio.active.contains(&next)).then_some(next)
+}
+
 fn schedule_prefetch(state: DesktopState, client_handle: u64) {
     let scheduled = {
         let mut registry = match state.0.lock() {
@@ -160,16 +174,9 @@ fn schedule_prefetch(state: DesktopState, client_handle: u64) {
         };
         let audio = &mut registry.audio;
         sync(audio);
-        let Some(&current) = audio.active.front() else {
+        let Some(next) = next_prefetch_index(audio) else {
             return;
         };
-        if audio.queue.len() < 2 || audio.active.len() >= 2 || audio.prefetching.is_some() {
-            return;
-        }
-        let next = (current + 1) % audio.queue.len();
-        if audio.active.contains(&next) {
-            return;
-        }
         audio.prefetching = Some(next);
         (
             audio.generation,
@@ -203,6 +210,31 @@ fn schedule_prefetch(state: DesktopState, client_handle: u64) {
                 }
             }
             Err(error) => log::warn!("desktop player prefetch failed track_id={track_id}: {error}"),
+        }
+    });
+}
+
+fn monitor_queue(state: DesktopState, client_handle: u64, generation: u64) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(QUEUE_MONITOR_INTERVAL).await;
+            let running = {
+                let mut registry = match state.0.lock() {
+                    Ok(registry) => registry,
+                    Err(_) => return,
+                };
+                let audio = &mut registry.audio;
+                if audio.generation != generation {
+                    false
+                } else {
+                    sync(audio);
+                    audio.player.is_some() && !audio.queue.is_empty()
+                }
+            };
+            if !running {
+                return;
+            }
+            schedule_prefetch(state.clone(), client_handle);
         }
     });
 }
@@ -294,7 +326,8 @@ async fn start(
             log::info!("desktop player crossfade complete");
         });
     }
-    schedule_prefetch(state, client_handle);
+    schedule_prefetch(state.clone(), client_handle);
+    monitor_queue(state, client_handle, generation);
     Ok(result)
 }
 
@@ -481,5 +514,29 @@ mod tests {
         let full = snapshot(&mut audio, true, false);
         assert_eq!(full.queue.as_deref(), Some(audio.queue.as_slice()));
         assert!(full.current_index.is_some());
+    }
+
+    #[test]
+    fn completed_sources_advance_the_active_queue() {
+        let mut active = VecDeque::from([3, 4, 5]);
+
+        sync_active(&mut active, 2);
+        assert_eq!(active, VecDeque::from([4, 5]));
+
+        sync_active(&mut active, 1);
+        assert_eq!(active, VecDeque::from([5]));
+    }
+
+    #[test]
+    fn automatic_advance_opens_another_prefetch_slot() {
+        let mut audio = DesktopAudio {
+            queue: vec!["first".into(), "second".into(), "third".into()],
+            active: VecDeque::from([0, 1]),
+            ..DesktopAudio::default()
+        };
+
+        assert_eq!(next_prefetch_index(&audio), None);
+        sync_active(&mut audio.active, 1);
+        assert_eq!(next_prefetch_index(&audio), Some(2));
     }
 }

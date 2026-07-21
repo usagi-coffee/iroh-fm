@@ -243,11 +243,14 @@ export class Library {
   }
 
   /** @param {import('../types').AlbumData} album */
-  async selectAlbum(album) {
+  firstAvailableTrackForAlbum(album) {
     const ids = new Set(album.track_ids);
-    const first = this.tracks.find(
-      (track) => ids.has(track.id) && (!this.offlineOnly || track.cached),
-    );
+    return this.tracks.find((track) => ids.has(track.id) && (!this.offlineOnly || track.cached));
+  }
+
+  /** @param {import('../types').AlbumData} album */
+  async selectAlbum(album) {
+    const first = this.firstAvailableTrackForAlbum(album);
     if (!first) return null;
     await this.focusTrack(first);
     return first;
@@ -262,8 +265,12 @@ export class Library {
 
   /** @param {import('../types').AlbumData} album */
   async playAndSelectAlbum(album) {
-    const first = await this.selectAlbum(album);
-    if (first) await this.app.player.playAlbum(album);
+    const first = this.firstAvailableTrackForAlbum(album);
+    if (!first) return;
+    this.requestTrackFocus(first);
+    const playback = this.app.player.playAlbum(album);
+    await goto(resolve("/tracks"));
+    await playback;
   }
 
   /** @param {Track} track @param {{ stopPropagation(): void } | undefined} [event] */
