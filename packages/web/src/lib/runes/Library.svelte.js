@@ -265,12 +265,9 @@ export class Library {
 
   /** @param {import('../types').AlbumData} album */
   async playAndSelectAlbum(album) {
-    const first = this.firstAvailableTrackForAlbum(album);
+    const first = await this.selectAlbum(album);
     if (!first) return;
-    this.requestTrackFocus(first);
-    const playback = this.app.player.playAlbum(album);
-    await goto(resolve("/tracks"));
-    await playback;
+    await this.app.player.playAlbum(album);
   }
 
   /** @param {Track} track @param {{ stopPropagation(): void } | undefined} [event] */
