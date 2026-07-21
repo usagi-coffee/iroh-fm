@@ -19,6 +19,14 @@
     fullQuality = false,
   } = $props();
   const LOAD_DELAY_MS = 150;
+
+  /** @param {string} value */
+  function titleHue(value) {
+    let total = 27;
+    for (const character of value) total += character.charCodeAt(0);
+    return total % 360;
+  }
+
   let visible = $state(false);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
   let imageFailed = $derived(
@@ -29,7 +37,7 @@
       failedRequest.fullQuality === fullQuality,
     ),
   );
-  let hue = $derived([...title].reduce((total, char) => total + char.charCodeAt(0), 27) % 360);
+  let hue = $derived(titleHue(title));
   let coverPromise = $derived(
     visible && client && id ? client.coverUrl(id, { fullQuality }) : null,
   );
