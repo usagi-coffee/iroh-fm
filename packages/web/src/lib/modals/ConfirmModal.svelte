@@ -21,6 +21,14 @@
     eyebrow = "",
     danger = false,
   } = $props();
+
+  function cancel() {
+    dismiss(false);
+  }
+
+  function confirm() {
+    dismiss(true);
+  }
 </script>
 
 <SnippetModal
@@ -47,13 +55,13 @@
   <div class="border-surface0 bg-mantle flex justify-end gap-2 border-t px-5 py-3">
     <button
       type="button"
-      onclick={() => dismiss(false)}
+      onclick={cancel}
       class="border-surface1 text-3xs text-subtext0 hover:bg-surface0 border px-4 py-2 font-mono"
       >{cancelLabel}</button
     >
     <button
       type="button"
-      onclick={() => dismiss(true)}
+      onclick={confirm}
       class="text-3xs text-crust px-4 py-2 font-mono font-bold {danger
         ? 'bg-red hover:bg-maroon'
         : 'bg-mauve hover:bg-pink'}">{confirmLabel}</button
