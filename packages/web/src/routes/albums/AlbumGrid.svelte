@@ -215,6 +215,9 @@
           style={`grid-template-columns:repeat(${columns},minmax(0,1fr))`}
         >
           {#each row as album (album.id)}
+            {let starred = $derived(App.library.starredAlbumIds.has(album.id))}
+            {let cached = $derived(App.library.fullyCachedAlbumIds.has(album.id))}
+            {let caching = $derived(App.library.cachingAlbumIds.has(album.id))}
             <article
               data-album-id={album.id}
               {@attach longPress(() => openActions(album))}
@@ -242,36 +245,27 @@
                   <button
                     type="button"
                     onclick={(event) => starAlbum(album, event)}
-                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {App.library.starredAlbumIds.has(
-                      album.id,
-                    )
+                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {starred
                       ? 'text-pink pointer-events-auto translate-y-0 opacity-100'
                       : 'text-subtext0 pointer-events-none translate-y-1 opacity-0'}"
-                    title={App.library.starredAlbumIds.has(album.id)
-                      ? "Unstar album"
-                      : "Star album"}><HeartIcon class="text-xs" /></button
+                    title={starred ? "Unstar album" : "Star album"}
+                    ><HeartIcon class="text-xs" /></button
                   >
                   <button
                     type="button"
                     onclick={(event) => cacheAlbum(album, event)}
-                    disabled={App.library.offlineOnly ||
-                      App.library.isAlbumFullyCached(album) ||
-                      App.library.cachingAlbumIds.has(album.id)}
-                    class="bg-crust/85 text-subtext0 hover:bg-crust hover:text-mauve pointer-events-none grid size-7 translate-y-1 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 disabled:cursor-default {App.library.isAlbumFullyCached(
-                      album,
-                    )
+                    disabled={App.library.offlineOnly || cached || caching}
+                    class="bg-crust/85 text-subtext0 hover:bg-crust hover:text-mauve pointer-events-none grid size-7 translate-y-1 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 disabled:cursor-default {cached
                       ? '!text-green'
-                      : ''} {App.library.cachingAlbumIds.has(album.id)
-                      ? 'text-mauve animate-pulse'
-                      : ''}"
-                    title={App.library.isAlbumFullyCached(album)
+                      : ''} {caching ? 'text-mauve animate-pulse' : ''}"
+                    title={cached
                       ? "Album cached"
-                      : App.library.cachingAlbumIds.has(album.id)
+                      : caching
                         ? "Downloading album"
                         : "Download album"}
-                    >{#if App.library.isAlbumFullyCached(album)}<CachedIcon
+                    >{#if cached}<CachedIcon class="text-xs" />{:else}<DownloadIcon
                         class="text-xs"
-                      />{:else}<DownloadIcon class="text-xs" />{/if}</button
+                      />{/if}</button
                   >
                 </div>
                 <button
