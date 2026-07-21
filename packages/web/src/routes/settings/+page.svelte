@@ -42,15 +42,49 @@
     detail: "Reading service worker status.",
     hash: "—",
   });
-  let draftEndpointId = $derived(
-    settings.secret.trim()
-      ? ClientCore.endpointIdForSecret(settings.secret.trim())
-      : Promise.resolve(""),
-  );
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let endpointIdTimer;
+  /** @type {{ resolve: (value: string) => void, reject: (reason: unknown) => void }[]} */
+  let endpointIdWaiters = [];
+  let draftEndpointId = $state(endpointIdForSecret(settings.secret));
   let canSave = $derived(
     Boolean(settings.endpoint.trim() ? cleanRelays(settings.relays).length : settings.ticket.trim()) &&
       !App.connection.connecting,
   );
+
+  /** @param {string} secret */
+  function endpointIdForSecret(secret) {
+    const value = secret.trim();
+    return value ? Promise.resolve(ClientCore.endpointIdForSecret(value)) : Promise.resolve("");
+  }
+
+  /** @param {string} value */
+  function updateSecret(value) {
+    settings.secret = value;
+    if (endpointIdTimer) clearTimeout(endpointIdTimer);
+    const secret = value.trim();
+    if (!secret) {
+      endpointIdTimer = undefined;
+      for (const waiter of endpointIdWaiters.splice(0)) waiter.resolve("");
+      draftEndpointId = Promise.resolve("");
+      return;
+    }
+    draftEndpointId = new Promise((resolve, reject) => {
+      endpointIdWaiters.push({ resolve, reject });
+      endpointIdTimer = setTimeout(() => {
+        endpointIdTimer = undefined;
+        const waiters = endpointIdWaiters.splice(0);
+        Promise.resolve(ClientCore.endpointIdForSecret(secret)).then(
+          (endpointId) => {
+            for (const waiter of waiters) waiter.resolve(endpointId);
+          },
+          (error) => {
+            for (const waiter of waiters) waiter.reject(error);
+          },
+        );
+      }, 180);
+    });
+  }
 
   function initialize() {
     refreshStorageInfo();
@@ -58,9 +92,14 @@
     void ClientCore.buildInfo()
       .then((info) => (nativeBuildInfo = info))
       .catch((error) => console.warn("[build] could not read native build information", error));
-    return subscribeToServiceWorkerStatus((status) => {
+    const unsubscribe = subscribeToServiceWorkerStatus((status) => {
       serviceWorkerStatus = status;
     });
+    return () => {
+      unsubscribe();
+      if (endpointIdTimer) clearTimeout(endpointIdTimer);
+      for (const waiter of endpointIdWaiters.splice(0)) waiter.resolve("");
+    };
   }
 
   /** @param {string} value */
@@ -275,7 +314,7 @@
         <div class="relative">
           <input
             id="settings-secret"
-            bind:value={settings.secret}
+            bind:value={() => settings.secret, updateSecret}
             type={settings.showSecret ? "text" : "password"}
             spellcheck="false"
             autocomplete="new-password"
