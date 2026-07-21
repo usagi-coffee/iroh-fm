@@ -83,7 +83,10 @@
     if (webUpdateApplying) return;
     webUpdateApplying = true;
     try {
-      if (!(await activateServiceWorkerUpdate())) webUpdateApplying = false;
+      const native = await nativeBuild;
+      const reload = native?.platform !== "Android";
+      if (!(await activateServiceWorkerUpdate({ reload }))) webUpdateApplying = false;
+      else if (!reload) updateBannerDismissed = true;
     } catch (error) {
       webUpdateApplying = false;
       console.error("[web-update] activation failed", error);

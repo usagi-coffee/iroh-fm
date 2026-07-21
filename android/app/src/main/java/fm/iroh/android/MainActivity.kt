@@ -107,7 +107,9 @@ class MainActivity : ComponentActivity() {
             }
             Log.d(TAG, "Relationship result: relation=$relationName($relation) origin=$requestedOrigin result=$result")
             when (relation) {
-                CustomTabsService.RELATION_USE_AS_ORIGIN -> postMessageRelationshipValidated = result
+                CustomTabsService.RELATION_USE_AS_ORIGIN -> {
+                    postMessageRelationshipValidated = result
+                }
                 CustomTabsService.RELATION_HANDLE_ALL_URLS -> twaRelationshipValidated = result
             }
             dispatchReadyIfNeeded()
@@ -115,10 +117,17 @@ class MainActivity : ComponentActivity() {
 
         override fun onNavigationEvent(event: Int, extras: Bundle?) {
             if (event != NAVIGATION_FINISHED) return
+            closeActiveClient("navigation finished")
             readyDispatched = false
             channelReady = false
             messageChannelReady = false
+            postMessageRelationshipValidated = false
             val generation = ++navigationGeneration
+            session?.validateRelationship(
+                CustomTabsService.RELATION_USE_AS_ORIGIN,
+                origin,
+                Bundle(),
+            )
             val delay = if (twaRelationshipValidated) 200L else 1_000L
             if (!twaRelationshipValidated)
                 Log.d(TAG, "Scheduling postMessage after cold-start validation delay")
@@ -225,9 +234,9 @@ class MainActivity : ComponentActivity() {
 
     private fun requestPostMessageChannel(generation: Int, attempt: Int) {
         if (generation != navigationGeneration || messageChannelReady) return
-        val requested = session?.requestPostMessageChannel(origin, origin, Bundle()) ?: false
+        val requested = session?.requestPostMessageChannel(origin) ?: false
         Log.d(TAG, "Requested postMessage channel: accepted=$requested attempt=$attempt")
-        if (!messageChannelReady && attempt < POST_MESSAGE_ATTEMPTS) {
+        if (!messageChannelReady && !requested && attempt < POST_MESSAGE_ATTEMPTS) {
             mainHandler.postDelayed(
                 { requestPostMessageChannel(generation, attempt + 1) },
                 POST_MESSAGE_RETRY_DELAY_MS,
@@ -356,12 +365,15 @@ class MainActivity : ComponentActivity() {
             .put("commit", BuildConfig.BUILD_COMMIT)
             .put("epoch", BuildConfig.EPOCH)
             .put("epochCommit", BuildConfig.EPOCH_COMMIT)
-        "connect" -> JSONObject(NativeCore.unwrap(NativeCore.connect(payload.toString()))).also {
-            NativeCore.activeClientHandle = it.getLong("handle")
-            NativeCore.activeRemoteId = it.getString("remoteId")
-            NativeCore.offlineOnly = false
-            it.put("compactQueue", true)
-            it.put("requestChunks", true)
+        "connect" -> {
+            closeActiveClient("superseded by new connection")
+            JSONObject(NativeCore.unwrap(NativeCore.connect(payload.toString()))).also {
+                NativeCore.activeClientHandle = it.getLong("handle")
+                NativeCore.activeRemoteId = it.getString("remoteId")
+                NativeCore.offlineOnly = false
+                it.put("compactQueue", true)
+                it.put("requestChunks", true)
+            }
         }
         "request" -> executeBackendRequest(payload)
         "coverArt" -> JSONObject(
@@ -379,12 +391,8 @@ class MainActivity : ComponentActivity() {
         "parseTicket" -> JSONObject(NativeCore.unwrap(NativeCore.parseTicket(payload.getString("ticket"))))
         "close" -> {
             val handle = payload.getLong("handle")
-            NativeCore.closeClient(handle)
-            if (NativeCore.activeClientHandle == handle) {
-                NativeCore.activeClientHandle = 0
-                NativeCore.activeRemoteId = ""
-                NativeCore.offlineOnly = false
-            }
+            if (NativeCore.activeClientHandle == handle) closeActiveClient("web request")
+            else NativeCore.closeClient(handle)
             JSONObject()
         }
         "cachedTrackIds" -> JSONArray(
@@ -441,6 +449,16 @@ class MainActivity : ComponentActivity() {
         "playerCommand" -> playerCommand(payload)
         "playerState" -> playerState(payload.optBoolean("includeQueue", false))
         else -> error("unsupported native action: $action")
+    }
+
+    private fun closeActiveClient(reason: String) {
+        val handle = NativeCore.activeClientHandle
+        if (handle == 0L) return
+        Log.d(TAG, "Closing active native client: reason=$reason handle=$handle")
+        NativeCore.closeClient(handle)
+        NativeCore.activeClientHandle = 0L
+        NativeCore.activeRemoteId = ""
+        NativeCore.offlineOnly = false
     }
 
     private fun executeBackendRequest(payload: JSONObject): Any {
