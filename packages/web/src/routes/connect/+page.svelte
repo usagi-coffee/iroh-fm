@@ -189,7 +189,7 @@
         >
           <span>#</span><span>Album</span><span>Title</span><span>Artist</span><span>Time</span>
         </div>
-        {#each DEMO_TRACKS as track (track[0])}<div
+        {#each DEMO_TRACKS as track}<div
             class="border-surface0/40 text-2xs grid h-7 grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] items-center border-b px-2"
           >
             <span class="text-overlay0 font-mono">{track[0]}</span><span
@@ -206,7 +206,7 @@
           >
         </div>
         <div class="grid grid-cols-3 gap-x-3 gap-y-5">
-          {#each DEMO_ALBUMS as album (album[0])}<article class="min-w-0">
+          {#each DEMO_ALBUMS as album}<article class="min-w-0">
               <div class={`grid aspect-square place-items-center bg-gradient-to-br ${album[2]}`}>
                 <div
                   class="border-crust/20 bg-crust/25 grid size-1/2 place-items-center rounded-full border"
