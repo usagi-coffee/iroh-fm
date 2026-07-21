@@ -120,8 +120,27 @@ export class Player {
     this.audioLoading = true;
     this.playing = false;
     if (this.nativePlayback(client)) {
-      if (track.downloading) track.stopDownload();
-      const downloadGeneration = null;
+      let downloadGeneration = /** @type {number | null} */ (null);
+      if (client.native && !track.cached && !track.memoryCached) {
+        if (track.downloading) track.stopDownload();
+        const memoryDownloadGeneration = track.startDownload();
+        downloadGeneration = memoryDownloadGeneration;
+        void client
+          .prefetchTrack(
+            track.id,
+            (/** @type {number} */ received, /** @type {number} */ total) =>
+              track.updateProgress(received, total, memoryDownloadGeneration),
+          )
+          .then((/** @type {{cached: boolean}} */ result) => {
+            if (this.app.connection.client === client && result?.cached)
+              this.app.library.markMemoryCached(track);
+            else track.stopDownload(memoryDownloadGeneration);
+          })
+          .catch((/** @type {unknown} */ error) => {
+            track.stopDownload(memoryDownloadGeneration);
+            console.warn("[player] Android memory prefetch failed", error);
+          });
+      } else if (track.downloading) track.stopDownload();
       this.nativePlayPendingTrackId = track.id;
       let progressPending = false;
       const progressTimer = setInterval(() => {
@@ -447,7 +466,11 @@ export class Player {
           this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
-        if (id === this.currentTrack?.id && this.nativePlayback()) {
+        if (
+          id === this.currentTrack?.id &&
+          this.nativePlayback() &&
+          !this.app.connection.client?.native
+        ) {
           queuedTrack.downloading = false;
           continue;
         }

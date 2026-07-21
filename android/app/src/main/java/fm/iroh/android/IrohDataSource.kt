@@ -19,7 +19,7 @@ class IrohDataSource(
     private var trackId: String? = null
     private var absolutePosition = 0L
     private var fileSize = 0L
-    private var memoryBytes: ByteArray? = null
+    private var memoryTrack: NativeAudioCache.MemoryTrack? = null
     private var memoryPosition = 0
 
     override fun open(dataSpec: DataSpec): Long {
@@ -30,7 +30,7 @@ class IrohDataSource(
         uri = dataSpec.uri
         trackId = dataSpec.uri.lastPathSegment ?: error("missing track id")
         if (useMemoryCache) NativeAudioCache.memoryTrack(NativeCore.activeRemoteId, trackId!!)?.let { cached ->
-            memoryBytes = cached
+            memoryTrack = cached
             memoryPosition = dataSpec.position.coerceIn(0L, cached.size.toLong()).toInt()
             fileSize = cached.size.toLong()
             remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
@@ -79,9 +79,9 @@ class IrohDataSource(
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (remaining == 0L) return C.RESULT_END_OF_INPUT
-        memoryBytes?.let { cached ->
+        memoryTrack?.let { cached ->
             val wanted = minOf(length.toLong(), remaining).toInt()
-            cached.copyInto(buffer, offset, memoryPosition, memoryPosition + wanted)
+            cached.read(memoryPosition, buffer, offset, wanted)
             memoryPosition += wanted
             remaining -= wanted
             return wanted
@@ -126,7 +126,7 @@ class IrohDataSource(
         trackId = null
         absolutePosition = 0L
         fileSize = 0L
-        memoryBytes = null
+        memoryTrack = null
         memoryPosition = 0
     }
 

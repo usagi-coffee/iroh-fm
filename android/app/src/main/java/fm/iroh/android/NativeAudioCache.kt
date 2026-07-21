@@ -3,6 +3,7 @@ package fm.iroh.android
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.media3.common.C
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -13,6 +14,7 @@ import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
 import java.util.LinkedHashMap
+import org.json.JSONObject
 
 /** Audio storage shared by the TWA bridge and the foreground playback service. */
 object NativeAudioCache {
@@ -23,10 +25,49 @@ object NativeAudioCache {
     private lateinit var offlineDownloadFactory: CacheDataSource.Factory
     private lateinit var playbackFactory: CacheDataSource.Factory
     private val memoryLock = Any()
-    private val memoryTracks = LinkedHashMap<String, ByteArray>(0, 0.75f, true)
+    class MemoryTrack(val size: Int) {
+        private val chunks = mutableMapOf<Int, ByteArray>()
+
+        fun write(position: Int, source: ByteArray, offset: Int, length: Int) {
+            var sourceOffset = offset
+            var targetPosition = position
+            var remaining = length
+            while (remaining > 0) {
+                val chunkIndex = targetPosition / NativeAudioCache.MEMORY_CHUNK_BYTES
+                val chunkOffset = targetPosition % NativeAudioCache.MEMORY_CHUNK_BYTES
+                val chunkStart = chunkIndex * NativeAudioCache.MEMORY_CHUNK_BYTES
+                val chunkSize = minOf(NativeAudioCache.MEMORY_CHUNK_BYTES, size - chunkStart)
+                val chunk = chunks.getOrPut(chunkIndex) { ByteArray(chunkSize) }
+                val copied = minOf(remaining, chunk.size - chunkOffset)
+                source.copyInto(chunk, chunkOffset, sourceOffset, sourceOffset + copied)
+                sourceOffset += copied
+                targetPosition += copied
+                remaining -= copied
+            }
+        }
+
+        fun read(position: Int, target: ByteArray, offset: Int, length: Int): Int {
+            var targetOffset = offset
+            var sourcePosition = position
+            var remaining = minOf(length, size - position)
+            val requested = remaining
+            while (remaining > 0) {
+                val chunkIndex = sourcePosition / NativeAudioCache.MEMORY_CHUNK_BYTES
+                val chunkOffset = sourcePosition % NativeAudioCache.MEMORY_CHUNK_BYTES
+                val chunk = chunks[chunkIndex] ?: error("incomplete memory track")
+                val copied = minOf(remaining, chunk.size - chunkOffset)
+                chunk.copyInto(target, targetOffset, chunkOffset, chunkOffset + copied)
+                targetOffset += copied
+                sourcePosition += copied
+                remaining -= copied
+            }
+            return requested
+        }
+    }
+    private val memoryTracks = LinkedHashMap<String, MemoryTrack>(0, 0.75f, true)
     private data class MemoryRange(val start: Long, val end: Long)
     private data class PartialMemoryTrack(
-        val bytes: ByteArray,
+        val track: MemoryTrack,
         val ranges: MutableList<MemoryRange> = mutableListOf(),
         var coveredBytes: Long = 0L,
     )
@@ -66,7 +107,7 @@ object NativeAudioCache {
     fun isPlaybackCached(remoteId: String, trackId: String): Boolean =
         isOfflineCached(remoteId, trackId)
 
-    fun memoryTrack(remoteId: String, trackId: String): ByteArray? = synchronized(memoryLock) {
+    fun memoryTrack(remoteId: String, trackId: String): MemoryTrack? = synchronized(memoryLock) {
         memoryTracks[cacheKey(remoteId, trackId)]
     }
 
@@ -76,7 +117,9 @@ object NativeAudioCache {
 
     fun rememberMemoryTrack(remoteId: String, trackId: String, bytes: ByteArray) {
         synchronized(memoryLock) {
-            insertMemoryTrackLocked(cacheKey(remoteId, trackId), bytes)
+            val track = MemoryTrack(bytes.size)
+            track.write(0, bytes, 0, bytes.size)
+            insertMemoryTrackLocked(cacheKey(remoteId, trackId), track)
         }
     }
 
@@ -93,7 +136,6 @@ object NativeAudioCache {
         if (
             totalBytes <= 0L ||
             totalBytes > Int.MAX_VALUE.toLong() ||
-            totalBytes > MAX_STREAMING_MEMORY_TRACK_BYTES ||
             offset < 0 ||
             length <= 0 ||
             offset > buffer.size - length
@@ -102,13 +144,13 @@ object NativeAudioCache {
         if (memoryTracks.containsKey(key)) return true
         val total = totalBytes.toInt()
         var partial = partialMemoryTracks[key]
-        if (partial == null || partial.bytes.size != total) {
+        if (partial == null || partial.track.size != total) {
             partial?.let {
                 partialMemoryTracks.remove(key)
-                partialMemoryBytes -= it.bytes.size.toLong()
+                partialMemoryBytes -= it.track.size.toLong()
             }
             if (!reservePartialMemoryLocked(total.toLong())) return false
-            val newPartial = PartialMemoryTrack(ByteArray(total))
+            val newPartial = PartialMemoryTrack(MemoryTrack(total))
             partial = newPartial
             partialMemoryTracks[key] = newPartial
             partialMemoryBytes += total.toLong()
@@ -117,13 +159,13 @@ object NativeAudioCache {
         val start = position.coerceIn(0L, totalBytes)
         val copyLength = minOf(length.toLong(), totalBytes - start).toInt()
         if (copyLength <= 0) return track.coveredBytes >= totalBytes
-        buffer.copyInto(track.bytes, start.toInt(), offset, offset + copyLength)
+        track.track.write(start.toInt(), buffer, offset, copyLength)
         addMemoryRange(track, start, start + copyLength)
         if (track.coveredBytes < totalBytes) return false
 
         partialMemoryTracks.remove(key)
         partialMemoryBytes -= totalBytes
-        insertMemoryTrackLocked(key, track.bytes)
+        insertMemoryTrackLocked(key, track.track)
         true
     }
 
@@ -135,18 +177,18 @@ object NativeAudioCache {
         while (memoryBytes + partialMemoryBytes > memoryCacheBytes) {
             val key = partialMemoryTracks.keys.firstOrNull() ?: break
             val partial = partialMemoryTracks.remove(key) ?: break
-            partialMemoryBytes -= partial.bytes.size.toLong()
+            partialMemoryBytes -= partial.track.size.toLong()
         }
     }
 
-    private fun insertMemoryTrackLocked(key: String, bytes: ByteArray) {
-        if (bytes.isEmpty() || bytes.size.toLong() > memoryCacheBytes) return
+    private fun insertMemoryTrackLocked(key: String, track: MemoryTrack) {
+        if (track.size <= 0 || track.size.toLong() > memoryCacheBytes) return
         memoryBytes -= memoryTracks.remove(key)?.size?.toLong() ?: 0L
-        while (memoryBytes + partialMemoryBytes + bytes.size > memoryCacheBytes) {
+        while (memoryBytes + partialMemoryBytes + track.size > memoryCacheBytes) {
             if (!evictOldestMemoryTrackLocked()) return
         }
-        memoryTracks[key] = bytes
-        memoryBytes += bytes.size
+        memoryTracks[key] = track
+        memoryBytes += track.size
     }
 
     private fun reservePartialMemoryLocked(bytes: Long): Boolean {
@@ -155,7 +197,7 @@ object NativeAudioCache {
             if (evictOldestMemoryTrackLocked()) continue
             val key = partialMemoryTracks.keys.firstOrNull() ?: return false
             val partial = partialMemoryTracks.remove(key) ?: continue
-            partialMemoryBytes -= partial.bytes.size.toLong()
+            partialMemoryBytes -= partial.track.size.toLong()
         }
         return true
     }
@@ -204,6 +246,44 @@ object NativeAudioCache {
         return Stats(completeKeys, offlineCache.cacheSpace)
     }
 
+    /** Downloads a complete track into the RAM LRU without writing it to disk. */
+    fun prefetchTrack(clientHandle: Long, remoteId: String, trackId: String): Boolean {
+        memoryTrack(remoteId, trackId)?.let {
+            NativeTransferProgress.update(trackId, it.size.toLong(), it.size.toLong(), reset = true)
+            return true
+        }
+        var streamHandle = 0L
+        var transferStarted = false
+        try {
+            val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(clientHandle, trackId)))
+            streamHandle = opened.getLong("handle")
+            val total = opened.getLong("fileSize")
+            if (!canCacheMemoryTrack(total)) return false
+            NativeTransferProgress.update(trackId, 0L, total, reset = true)
+            NativeTransferProgress.begin(trackId)
+            transferStarted = true
+            val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+            var position = 0L
+            while (position < total) {
+                val wanted = minOf(buffer.size.toLong(), total - position).toInt()
+                val read = NativeCore.readStream(streamHandle, buffer, 0, wanted)
+                if (read == C.RESULT_END_OF_INPUT) break
+                if (read < 0) error("iroh stream failed while caching in memory")
+                recordMemoryBytes(remoteId, trackId, position, buffer, 0, read, total)
+                position += read
+                NativeTransferProgress.update(trackId, position, total)
+            }
+            return position == total && isMemoryCached(remoteId, trackId)
+        } finally {
+            if (streamHandle != 0L) NativeCore.closeStream(streamHandle)
+            if (transferStarted) NativeTransferProgress.end(trackId)
+        }
+    }
+
+    private fun canCacheMemoryTrack(bytes: Long): Boolean = synchronized(memoryLock) {
+        bytes >= 1L && bytes <= Int.MAX_VALUE.toLong() && bytes <= memoryCacheBytes
+    }
+
     fun cacheTrack(remoteId: String, trackId: String): Boolean {
         val key = cacheKey(remoteId, trackId)
         if (isComplete(offlineCache, key)) {
@@ -241,7 +321,5 @@ object NativeAudioCache {
     private const val DEFAULT_MEMORY_CACHE_BYTES = 256L * 1024L * 1024L
     private const val MIN_MEMORY_CACHE_BYTES = 32L * 1024L * 1024L
     private const val MAX_MEMORY_CACHE_BYTES = 2L * 1024L * 1024L * 1024L
-    // Avoid allocating a full large audio file when playback starts. Larger tracks
-    // remain streamable but are not retained in the in-memory cache.
-    private const val MAX_STREAMING_MEMORY_TRACK_BYTES = 32L * 1024L * 1024L
+    private const val MEMORY_CHUNK_BYTES = 1024 * 1024
 }

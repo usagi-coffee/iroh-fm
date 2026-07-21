@@ -306,6 +306,19 @@ export class NativeMusicClient {
   /** Explicitly download a track into the persistent Android cache. */
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
   async cacheTrack(id, onProgress = () => {}) {
+    const result = await this.transferTrack("cacheTrack", id, onProgress);
+    return Boolean(result.cached);
+  }
+
+  /** Download a track into Android's in-memory LRU without writing to disk. */
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  async prefetchTrack(id, onProgress = () => {}) {
+    const result = await this.transferTrack("prefetchTrack", id, onProgress);
+    return { cached: Boolean(result.cached), persistent: false };
+  }
+
+  /** @param {"cacheTrack" | "prefetchTrack"} action @param {string} id @param {(received: number, total: number) => void} onProgress */
+  async transferTrack(action, id, onProgress) {
     if (this.offlineOnly) throw new Error("track is not available offline");
     let polling = false;
     const reportProgress = async () => {
@@ -324,20 +337,15 @@ export class NativeMusicClient {
     const timer = setInterval(reportProgress, NATIVE_CACHE_PROGRESS_MS);
     try {
       const result = await nativeRequest(
-        "cacheTrack",
+        action,
         { handle: this.handle, remoteId: this.remoteId, trackId: id },
         NATIVE_CACHE_TIMEOUT_MS,
       );
       await reportProgress();
-      return Boolean(result.cached);
+      return result;
     } finally {
       clearInterval(timer);
     }
-  }
-
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
-  prefetchTrack(id, onProgress = () => {}) {
-    return this.cacheTrack(id, onProgress);
   }
 
   /** @param {string} id @param {{ fullQuality?: boolean }} [options] */

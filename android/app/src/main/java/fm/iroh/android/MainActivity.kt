@@ -222,6 +222,7 @@ class MainActivity : ComponentActivity() {
             "endpointId",
             "parseTicket",
             "close",
+            "prefetchTrack",
             "cacheTrack",
             "cachedTrackIds",
             "cacheStats",
@@ -326,6 +327,22 @@ class MainActivity : ComponentActivity() {
         "cachedTrackIds" -> JSONArray(
             NativeAudioCache.cachedTrackIds(payload.getString("remoteId")).toList(),
         )
+        "prefetchTrack" -> {
+            check(payload.getLong("handle") == NativeCore.activeClientHandle) {
+                "native client is no longer active"
+            }
+            check(payload.getString("remoteId") == NativeCore.activeRemoteId) {
+                "native server changed while caching track"
+            }
+            JSONObject().put(
+                "cached",
+                NativeAudioCache.prefetchTrack(
+                    payload.getLong("handle"),
+                    payload.getString("remoteId"),
+                    payload.getString("trackId"),
+                ),
+            )
+        }
         "cacheTrack" -> {
             check(payload.getLong("handle") == NativeCore.activeClientHandle) {
                 "native client is no longer active"
