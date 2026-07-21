@@ -5,6 +5,7 @@ import { MusicClient } from "@iroh-fm/client";
 class DesktopInner extends NativeFixtureClient {
   native = true;
   nativeCache = new Map();
+  memoryCache = new Set();
   metrics = { downloads: {} };
 
   constructor() {
@@ -45,7 +46,7 @@ class DesktopInner extends NativeFixtureClient {
     return Promise.resolve(new Set(this.nativeCache.keys()));
   }
 
-  async prefetchTrack(id, onProgress = () => {}) {
+  async cacheTrack(id, onProgress = () => {}) {
     if (this.nativeCache.has(id)) {
       onProgress(TRACK_BYTES, TRACK_BYTES);
       return true;
@@ -80,11 +81,46 @@ class DesktopInner extends NativeFixtureClient {
     this.trackId = track.id;
     this.position = 0;
     this.playing = true;
-    await this.prefetchTrack(track.id);
+    await this.prefetchMemoryTrack(track.id);
     const state = this.snapshot();
     const next = this.queue[(this.currentIndex + 1) % this.queue.length];
-    if (next && next !== track.id) void this.prefetchTrack(next);
+    if (next && next !== track.id) void this.prefetchMemoryTrack(next);
     return state;
+  }
+
+  async prefetchMemoryTrack(id, onProgress = () => {}) {
+    if (this.memoryCache.has(id)) {
+      onProgress(TRACK_BYTES, TRACK_BYTES);
+      this.transfers[id] = {
+        received: TRACK_BYTES,
+        total: TRACK_BYTES,
+        active: false,
+        cached: false,
+        memoryCached: true,
+      };
+      return;
+    }
+    this.metrics.downloads[id] = (this.metrics.downloads[id] ?? 0) + 1;
+    this.transfers[id] = { received: 0, total: TRACK_BYTES, active: true, cached: false };
+    onProgress(0, TRACK_BYTES);
+    await delay(40);
+    this.transfers[id] = {
+      received: TRACK_BYTES / 2,
+      total: TRACK_BYTES,
+      active: true,
+      cached: false,
+    };
+    onProgress(TRACK_BYTES / 2, TRACK_BYTES);
+    await delay(40);
+    this.memoryCache.add(id);
+    this.transfers[id] = {
+      received: TRACK_BYTES,
+      total: TRACK_BYTES,
+      active: false,
+      cached: false,
+      memoryCached: true,
+    };
+    onProgress(TRACK_BYTES, TRACK_BYTES);
   }
 
   playerState(options) {

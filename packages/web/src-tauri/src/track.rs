@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    collections::{HashMap, VecDeque},
+    path::PathBuf,
+};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use client::Client;
@@ -31,6 +34,96 @@ fn legacy_cache_path(remote_id: &str, track_id: &str) -> PathBuf {
     cache_dir(remote_id).join(URL_SAFE_NO_PAD.encode(track_id))
 }
 
+const DEFAULT_MEMORY_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+pub(super) struct MemoryTrackCache {
+    entries: HashMap<String, Vec<u8>>,
+    order: VecDeque<String>,
+    bytes: usize,
+    max_bytes: usize,
+}
+
+impl Default for MemoryTrackCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            max_bytes: DEFAULT_MEMORY_CACHE_BYTES,
+        }
+    }
+}
+
+impl MemoryTrackCache {
+    fn key(remote_id: &str, track_id: &str) -> String {
+        format!("{remote_id}\u{0}{track_id}")
+    }
+
+    fn get(&mut self, remote_id: &str, track_id: &str) -> Option<Vec<u8>> {
+        let key = Self::key(remote_id, track_id);
+        let bytes = self.entries.get(&key)?.clone();
+        self.order.retain(|item| item != &key);
+        self.order.push_back(key);
+        Some(bytes)
+    }
+
+    fn insert(&mut self, remote_id: &str, track_id: &str, bytes: Vec<u8>) {
+        if bytes.is_empty() || bytes.len() > self.max_bytes {
+            return;
+        }
+        let key = Self::key(remote_id, track_id);
+        if let Some(previous) = self.entries.remove(&key) {
+            self.bytes -= previous.len();
+        }
+        self.order.retain(|item| item != &key);
+        while self.bytes + bytes.len() > self.max_bytes {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(previous) = self.entries.remove(&oldest) {
+                self.bytes -= previous.len();
+            }
+        }
+        self.bytes += bytes.len();
+        self.entries.insert(key.clone(), bytes);
+        self.order.push_back(key);
+    }
+
+    pub(super) fn resize(&mut self, max_bytes: usize) {
+        self.max_bytes = max_bytes;
+        while self.bytes > self.max_bytes {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(previous) = self.entries.remove(&oldest) {
+                self.bytes -= previous.len();
+            }
+        }
+    }
+}
+
+fn transfer(
+    state: &DesktopState,
+    track_id: &str,
+    received: u64,
+    total: u64,
+    cached: bool,
+    memory_cached: bool,
+) {
+    if let Ok(mut registry) = state.0.lock() {
+        registry.audio.transfers.insert(
+            track_id.to_string(),
+            DesktopTransfer {
+                received,
+                total,
+                active: false,
+                cached,
+                memory_cached,
+            },
+        );
+    }
+}
+
 pub(super) async fn download(
     state: DesktopState,
     client: Client,
@@ -38,24 +131,32 @@ pub(super) async fn download(
 ) -> Result<Vec<u8>, String> {
     let remote_id = client.remote_id().to_string();
     let path = cache_path(&remote_id, &track_id);
-    let cached = match tokio::fs::read(&path).await {
-        Ok(bytes) => Some(bytes),
-        Err(_) => tokio::fs::read(legacy_cache_path(&remote_id, &track_id))
-            .await
-            .ok(),
+    let cached = state
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.memory_tracks.get(&remote_id, &track_id))
+        .map(|bytes| (bytes, false, true));
+    let cached = match cached {
+        Some(cached) => Some(cached),
+        None => match tokio::fs::read(&path).await {
+            Ok(bytes) => Some((bytes, true, false)),
+            Err(_) => tokio::fs::read(legacy_cache_path(&remote_id, &track_id))
+                .await
+                .ok()
+                .map(|bytes| (bytes, true, false)),
+        },
     };
     if let Some(bytes) = cached {
-        if let Ok(mut registry) = state.0.lock() {
-            registry.audio.transfers.insert(
-                track_id,
-                DesktopTransfer {
-                    received: bytes.len() as u64,
-                    total: bytes.len() as u64,
-                    active: false,
-                    cached: true,
-                },
-            );
-        }
+        let (bytes, persistent, memory_cached) = bytes;
+        transfer(
+            &state,
+            &track_id,
+            bytes.len() as u64,
+            bytes.len() as u64,
+            persistent,
+            memory_cached,
+        );
         return Ok(bytes);
     }
     if state
@@ -105,6 +206,30 @@ pub(super) async fn download(
             descriptor.file_size
         ));
     }
+    if let Ok(mut registry) = state.0.lock() {
+        registry
+            .memory_tracks
+            .insert(&remote_id, &track_id, bytes.clone());
+    }
+    transfer(
+        &state,
+        &track_id,
+        descriptor.file_size,
+        descriptor.file_size,
+        false,
+        true,
+    );
+    Ok(bytes)
+}
+
+pub(super) async fn download_to_disk(
+    state: DesktopState,
+    client: Client,
+    track_id: String,
+) -> Result<(), String> {
+    let remote_id = client.remote_id().to_string();
+    let bytes = download(state.clone(), client, track_id.clone()).await?;
+    let path = cache_path(&remote_id, &track_id);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -116,18 +241,15 @@ pub(super) async fn download(
     tokio::fs::write(cache_id_path(&remote_id, &track_id), track_id.as_bytes())
         .await
         .map_err(|error| error.to_string())?;
-    if let Ok(mut registry) = state.0.lock() {
-        registry.audio.transfers.insert(
-            track_id,
-            DesktopTransfer {
-                received: descriptor.file_size,
-                total: descriptor.file_size,
-                active: false,
-                cached: true,
-            },
-        );
-    }
-    Ok(bytes)
+    transfer(
+        &state,
+        &track_id,
+        bytes.len() as u64,
+        bytes.len() as u64,
+        true,
+        false,
+    );
+    Ok(())
 }
 
 pub(super) async fn cached_ids(remote_id: &str) -> Result<Vec<String>, String> {

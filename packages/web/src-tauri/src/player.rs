@@ -22,6 +22,8 @@ pub(super) struct DesktopTransfer {
     pub(super) total: u64,
     pub(super) active: bool,
     pub(super) cached: bool,
+    #[serde(rename = "memoryCached")]
+    pub(super) memory_cached: bool,
 }
 
 pub(super) struct DesktopAudio {

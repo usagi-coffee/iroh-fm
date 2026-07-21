@@ -27,6 +27,7 @@ struct NativeRegistry {
     clients: HashMap<u64, Client>,
     streams: HashMap<u64, Arc<AsyncMutex<DesktopStream>>>,
     audio: player::DesktopAudio,
+    memory_tracks: track::MemoryTrackCache,
     offline_only: bool,
 }
 
@@ -329,7 +330,7 @@ async fn desktop_cache_track(
     handle: u64,
     track_id: String,
 ) -> Result<Value, String> {
-    track::download((*state).clone(), state.client(handle)?, track_id).await?;
+    track::download_to_disk((*state).clone(), state.client(handle)?, track_id).await?;
     Ok(serde_json::json!({ "cached": true }))
 }
 
@@ -352,6 +353,23 @@ async fn desktop_cache_stats(state: State<'_, DesktopState>, handle: u64) -> Res
         "tracks": { "count": track_count, "size": track_size },
         "covers": { "count": cover_count, "size": cover_size },
     }))
+}
+
+#[tauri::command]
+fn desktop_set_memory_cache_size(
+    state: State<'_, DesktopState>,
+    handle: u64,
+    bytes: u64,
+) -> Result<(), String> {
+    state.client(handle)?;
+    let bytes = usize::try_from(bytes).map_err(|_| "memory cache size is too large".to_string())?;
+    state
+        .0
+        .lock()
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?
+        .memory_tracks
+        .resize(bytes);
+    Ok(())
 }
 
 #[tauri::command]
@@ -480,6 +498,7 @@ pub fn run() {
             desktop_cache_progress,
             desktop_set_offline_only,
             desktop_cache_stats,
+            desktop_set_memory_cache_size,
             desktop_close,
             desktop_generate_identity,
             desktop_endpoint_id_for_secret,

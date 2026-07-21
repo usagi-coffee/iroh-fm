@@ -160,8 +160,9 @@ class DesktopInner {
     return new Set(await invoke("desktop_cached_track_ids", { handle: this.handle }));
   }
 
+  /** Explicitly download a track into the persistent Desktop cache. */
   /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
-  async prefetchTrack(id, onProgress = () => {}) {
+  async cacheTrack(id, onProgress = () => {}) {
     let polling = false;
     const report = async () => {
       if (polling) return;
@@ -184,6 +185,11 @@ class DesktopInner {
     }
   }
 
+  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  prefetchTrack(id, onProgress = () => {}) {
+    return this.cacheTrack(id, onProgress);
+  }
+
   /** @param {boolean} enabled */
   setOfflineOnly(enabled) {
     return invoke("desktop_set_offline_only", { enabled: Boolean(enabled) });
@@ -191,6 +197,11 @@ class DesktopInner {
 
   cacheStats() {
     return invoke("desktop_cache_stats", { handle: this.handle });
+  }
+
+  /** @param {number} bytes */
+  setMemoryCacheSize(bytes) {
+    return invoke("desktop_set_memory_cache_size", { handle: this.handle, bytes });
   }
 
   async close() {
