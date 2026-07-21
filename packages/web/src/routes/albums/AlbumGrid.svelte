@@ -62,6 +62,9 @@
 
   /** @param {HTMLElement} node */
   function measureColumns(node) {
+    let pendingWidth = 0;
+    /** @type {number | undefined} */
+    let frame;
     /** @param {number} width */
     const update = (width) => {
       if (width <= 0) return;
@@ -76,9 +79,19 @@
     if (Number.isFinite(storedAdjustment))
       columnAdjustment = Math.max(-MAX_COLUMNS, Math.min(MAX_COLUMNS, storedAdjustment));
     update(node.clientWidth);
-    const observer = new ResizeObserver((entries) => update(entries[0]?.contentRect.width ?? 0));
+    const observer = new ResizeObserver((entries) => {
+      pendingWidth = entries[0]?.contentRect.width ?? 0;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        update(pendingWidth);
+      });
+    });
     observer.observe(node);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
   }
 
   /** @param {HTMLElement} host */
