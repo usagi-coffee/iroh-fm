@@ -9,12 +9,20 @@ description: "Use only when editing Android code under android, crates/android-n
 
 ## Verify
 
+Choose checks by the code changed:
+
+- Kotlin, resources, manifest, or Gradle: assemble the debug APK.
+- Rust/JNI: run `cargo check`, then `build-rust.sh` before assembling the APK.
+- Android-facing Web/client behavior: run the Android E2E project.
+
 ```sh
 cargo check -p iroh-fm-android-native
 ./android/build-rust.sh
 gradle -p android assembleDebug
 bun run --cwd packages/web test:e2e --project=android
 ```
+
+Do not rebuild Rust for a Kotlin-only change when all three existing JNI libraries are present under `android/app/src/main/jniLibs`. Do not run the signed release build merely for validation.
 
 ## Commit Strategy
 
