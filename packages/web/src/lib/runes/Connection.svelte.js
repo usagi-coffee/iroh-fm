@@ -21,6 +21,8 @@ export class Connection {
   info = $state({ path_type: "unknown", address: "", received_bytes: 0 });
   receivedBytesPerSecond = $state(0);
   ticketParseGeneration = 0;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  ticketParseTimer;
   identityGeneration = 0;
   operationGeneration = 0;
   autoConnectAttempted = false;
@@ -173,11 +175,21 @@ export class Connection {
     if (!parseAddress) return;
     this.endpoint = "";
     this.relays = [""];
-    void this.syncTicketAddress(value);
+    if (this.ticketParseTimer) clearTimeout(this.ticketParseTimer);
+    this.ticketParseGeneration += 1;
+    if (!value.trim()) return;
+    this.ticketParseTimer = setTimeout(() => {
+      this.ticketParseTimer = undefined;
+      void this.syncTicketAddress(value);
+    }, 180);
   }
 
   /** @param {string} value */
   async syncTicketAddress(value) {
+    if (this.ticketParseTimer) {
+      clearTimeout(this.ticketParseTimer);
+      this.ticketParseTimer = undefined;
+    }
     const generation = ++this.ticketParseGeneration;
     if (!value.trim()) return;
     try {

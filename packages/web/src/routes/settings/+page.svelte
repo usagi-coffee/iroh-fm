@@ -32,6 +32,8 @@
     },
   });
   let ticketParseGeneration = 0;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let ticketParseTimer;
   let endpointCopied = $state(false);
   let forcingUpdate = $state(false);
   /** @type {{platform: string, commit: string} | null} */
@@ -97,6 +99,7 @@
     });
     return () => {
       unsubscribe();
+      if (ticketParseTimer) clearTimeout(ticketParseTimer);
       if (endpointIdTimer) clearTimeout(endpointIdTimer);
       for (const waiter of endpointIdWaiters.splice(0)) waiter.resolve("");
     };
@@ -107,11 +110,21 @@
     settings.ticket = value;
     settings.endpoint = "";
     settings.relays = [""];
-    syncTicketAddress(value);
+    if (ticketParseTimer) clearTimeout(ticketParseTimer);
+    ticketParseGeneration += 1;
+    if (!value.trim()) return;
+    ticketParseTimer = setTimeout(() => {
+      ticketParseTimer = undefined;
+      void syncTicketAddress(value);
+    }, 180);
   }
 
   /** @param {string} value */
   async function syncTicketAddress(value) {
+    if (ticketParseTimer) {
+      clearTimeout(ticketParseTimer);
+      ticketParseTimer = undefined;
+    }
     const generation = ++ticketParseGeneration;
     if (!value.trim()) return;
     try {
