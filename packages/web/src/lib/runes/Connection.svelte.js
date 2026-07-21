@@ -20,6 +20,7 @@ export class Connection {
   /** @type {import('../types').ConnectionInfo} */
   info = $state({ path_type: "unknown", address: "", received_bytes: 0 });
   receivedBytesPerSecond = $state(0);
+  connectionSamples = new WeakMap();
   ticketParseGeneration = 0;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   ticketParseTimer;
@@ -49,40 +50,46 @@ export class Connection {
     return () => window.removeEventListener("hashchange", importConnection);
   };
 
-  /** @param {any} client */
-  monitor(client) {
+  /** @param {any} client @param {number} [intervalMs] */
+  monitor(client, intervalMs = 1000) {
     return () => {
       if (!client) {
         this.info = { path_type: "unknown", address: "", received_bytes: 0 };
         this.receivedBytesPerSecond = 0;
         return;
       }
-      let previousBytes = 0;
-      let previousTime = performance.now();
-      let initialized = false;
-      const update = () => {
+      let active = true;
+      let updating = false;
+      const update = async () => {
+        if (!active || updating) return;
+        updating = true;
         try {
-          const info = client.connectionInfo();
+          const info = await client.connectionInfo();
+          if (!active) return;
           const now = performance.now();
-          if (initialized) {
-            const elapsed = now - previousTime;
-            const received = Math.max(0, info.received_bytes - previousBytes);
+          const previous = this.connectionSamples.get(client);
+          if (previous) {
+            const elapsed = now - previous.time;
+            const received = Math.max(0, info.received_bytes - previous.bytes);
             this.receivedBytesPerSecond = elapsed > 0 ? (received * 1000) / elapsed : 0;
           } else {
             this.receivedBytesPerSecond = 0;
-            initialized = true;
           }
-          previousBytes = info.received_bytes;
-          previousTime = now;
+          this.connectionSamples.set(client, { bytes: info.received_bytes, time: now });
           this.info = info;
           void this.app.player.refreshNativeState(client);
         } catch {
           // The connection may be closing while settings are applied.
+        } finally {
+          updating = false;
         }
       };
-      update();
-      const interval = setInterval(update, 1000);
-      return () => clearInterval(interval);
+      void update();
+      const interval = setInterval(() => void update(), intervalMs);
+      return () => {
+        active = false;
+        clearInterval(interval);
+      };
     };
   }
 

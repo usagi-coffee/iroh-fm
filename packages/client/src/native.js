@@ -232,7 +232,8 @@ export class NativeMusicClient {
     this.compactQueue = Boolean(connection.compactQueue);
     this.native = true;
     this.info = { path_type: "unknown", address: "", received_bytes: 0 };
-    this.infoPending = false;
+    /** @type {Promise<any> | null} */
+    this.infoPending = null;
     this.coverUrls = new Map();
     this.coverRequests = new Map();
     this.coverActive = 0;
@@ -269,14 +270,14 @@ export class NativeMusicClient {
   }
 
   connectionInfo() {
-    if (!this.infoPending) {
-      this.infoPending = true;
-      void nativeRequest("connectionInfo", { handle: this.handle })
-        .then((info) => (this.info = info))
-        .catch(() => {})
-        .finally(() => (this.infoPending = false));
-    }
-    return this.info;
+    if (this.infoPending) return this.infoPending;
+    const request = nativeRequest("connectionInfo", { handle: this.handle })
+      .then((info) => (this.info = info))
+      .finally(() => {
+        if (this.infoPending === request) this.infoPending = null;
+      });
+    this.infoPending = request;
+    return request;
   }
 
   /** @param {boolean} offlineOnly */

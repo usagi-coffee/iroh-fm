@@ -37,6 +37,10 @@
   const connectPath = $derived(resolve("/connect").replace(/\/$/, ""));
   const onConnectPage = $derived(page.url.pathname.replace(/\/$/, "") === connectPath);
   const nativeBuild = ClientCore.buildInfo();
+  const monitoredClient = $derived(App.connection.loadingClient ?? App.connection.client);
+  const connectionMonitor = $derived(
+    App.connection.monitor(monitoredClient, App.connection.loadingClient ? 250 : 1000),
+  );
   const nativeCompatibility = nativeBuild.then((buildInfo) => {
     initialNativeRequirement = currentNativeRequirement(buildInfo);
     return initialNativeRequirement;
@@ -142,6 +146,7 @@
   {@attach watchUpdates}
   {@attach globalKeybinds}
   {@attach App.connection.attachHashChanges}
+  {@attach connectionMonitor}
 >
   {#snippet errorToast()}
     {#if App.connection.client && App.connection.error}
@@ -261,10 +266,7 @@
   {/snippet}
 
   {#snippet loading(/** @type {{ text: string, step: number }} */ { text, step })}
-    <div
-      {@attach App.connection.monitor(App.connection.loadingClient)}
-      class="bg-base text-text grid h-dvh place-items-center p-6"
-    >
+    <div class="bg-base text-text grid h-dvh place-items-center p-6">
       <div class="flex w-full max-w-56 flex-col items-center gap-4 text-center">
         <img src={asset("/pwa-icon-192.png")} alt="" class="size-12 rounded-xl" />
         <div>
@@ -353,10 +355,7 @@
                     <p class="text-3xs text-overlay1 font-mono">OPENING LIBRARY…</p>
                   </div>
                 {:else}
-                  <div
-                    {@attach App.connection.monitor(App.connection.client)}
-                    class="bg-base text-text flex h-dvh flex-col overflow-hidden"
-                  >
+                  <div class="bg-base text-text flex h-dvh flex-col overflow-hidden">
                     <div class="shrink-0">
                       <TopBar
                         updateReady={updateReady && !nativeUpgrade}

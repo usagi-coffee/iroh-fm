@@ -5,6 +5,17 @@ const stateListeners = new Set();
 class AndroidMusicClient extends NativeFixtureClient {
   native = true;
 
+  async bootstrap(...args) {
+    if (localStorage.getItem("e2e-slow-native-startup")) await delay(1_400);
+    return super.bootstrap(...args);
+  }
+
+  async connectionInfo() {
+    await delay(20);
+    if (localStorage.getItem("e2e-slow-native-startup")) this.receivedBytes += 128 * 1024;
+    return super.connectionInfo();
+  }
+
   async playNative(track, queue, onProgress) {
     const state = await super.playNative(track, queue, onProgress);
     const nextId = this.queue[(this.currentIndex + 1) % this.queue.length];
