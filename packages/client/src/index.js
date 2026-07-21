@@ -7,9 +7,11 @@ const MAX_CONCURRENT_COVER_FETCHES = 3;
 const MAX_COVER_FETCHES_DURING_AUDIO = 1;
 const CONNECT_TIMEOUT_MS = 10_000;
 const MEMORY_CACHE_SIZE_KEY = "iroh-fm-memory-cache-size";
-const DEFAULT_MEMORY_CACHE_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_MEMORY_CACHE_BYTES = 256 * 1024 * 1024;
+export const ANDROID_DEFAULT_MEMORY_CACHE_BYTES = 64 * 1024 * 1024;
 const MIN_MEMORY_CACHE_BYTES = 32 * 1024 * 1024;
-const MAX_MEMORY_CACHE_BYTES = 256 * 1024 * 1024;
+export const MAX_MEMORY_CACHE_BYTES = 5 * 1024 * 1024 * 1024;
+export const ANDROID_MAX_MEMORY_CACHE_BYTES = 256 * 1024 * 1024;
 const MEMORY_TRACK_CACHE_MAX_BYTES = DEFAULT_MEMORY_CACHE_BYTES;
 const MAX_MEDIA_BUFFER_AHEAD_SECONDS = 90;
 const RETAIN_MEDIA_BUFFER_BEHIND_SECONDS = 15;
@@ -102,10 +104,10 @@ export class TrackMemoryCache {
   }
 }
 
-/** @param {number} bytes */
-function normalizeMemoryCacheBytes(bytes) {
-  if (!Number.isFinite(bytes)) return DEFAULT_MEMORY_CACHE_BYTES;
-  return Math.min(MAX_MEMORY_CACHE_BYTES, Math.max(MIN_MEMORY_CACHE_BYTES, Math.round(bytes)));
+/** @param {number} bytes @param {number} defaultBytes @param {number} maxBytes */
+function normalizeMemoryCacheBytes(bytes, defaultBytes, maxBytes) {
+  if (!Number.isFinite(bytes)) return defaultBytes;
+  return Math.min(maxBytes, Math.max(MIN_MEMORY_CACHE_BYTES, Math.round(bytes)));
 }
 
 /** @param {Promise<any>} pending */
@@ -172,16 +174,27 @@ export class MusicClient {
     await loadWasm();
   }
 
-  static memoryCacheSize() {
-    if (typeof localStorage === "undefined") return DEFAULT_MEMORY_CACHE_BYTES;
+  static memoryCacheSize(
+    maxBytes = MAX_MEMORY_CACHE_BYTES,
+    defaultBytes = DEFAULT_MEMORY_CACHE_BYTES,
+  ) {
+    if (typeof localStorage === "undefined") return defaultBytes;
     const configured = localStorage.getItem(MEMORY_CACHE_SIZE_KEY);
-    if (configured === null) return DEFAULT_MEMORY_CACHE_BYTES;
-    return normalizeMemoryCacheBytes(Number(configured) * 1024 * 1024);
+    if (configured === null) return defaultBytes;
+    return normalizeMemoryCacheBytes(Number(configured) * 1024 * 1024, defaultBytes, maxBytes);
   }
 
-  /** @param {number} megabytes */
-  static setMemoryCacheSize(megabytes) {
-    const bytes = normalizeMemoryCacheBytes(Number(megabytes) * 1024 * 1024);
+  /** @param {number} megabytes @param {number} [maxBytes] @param {number} [defaultBytes] */
+  static setMemoryCacheSize(
+    megabytes,
+    maxBytes = MAX_MEMORY_CACHE_BYTES,
+    defaultBytes = DEFAULT_MEMORY_CACHE_BYTES,
+  ) {
+    const bytes = normalizeMemoryCacheBytes(
+      Number(megabytes) * 1024 * 1024,
+      defaultBytes,
+      maxBytes,
+    );
     if (typeof localStorage !== "undefined")
       localStorage.setItem(MEMORY_CACHE_SIZE_KEY, String(Math.round(bytes / 1024 / 1024)));
     return bytes;
@@ -366,7 +379,11 @@ export class MusicClient {
 
   /** @param {number} bytes */
   setMemoryCacheSize(bytes) {
-    const size = normalizeMemoryCacheBytes(bytes);
+    const size = normalizeMemoryCacheBytes(
+      bytes,
+      DEFAULT_MEMORY_CACHE_BYTES,
+      MAX_MEMORY_CACHE_BYTES,
+    );
     this.memoryTrackCache.resize(size);
     if (typeof this.inner.setMemoryCacheSize === "function")
       return this.inner.setMemoryCacheSize(size);

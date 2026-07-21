@@ -43,6 +43,11 @@ pub(super) struct MemoryTrackCache {
     max_bytes: usize,
 }
 
+pub(super) struct MemoryTrackId {
+    pub(super) remote_id: String,
+    pub(super) track_id: String,
+}
+
 impl Default for MemoryTrackCache {
     fn default() -> Self {
         Self {
@@ -67,38 +72,59 @@ impl MemoryTrackCache {
         Some(bytes)
     }
 
-    fn insert(&mut self, remote_id: &str, track_id: &str, bytes: Vec<u8>) {
+    fn id(key: &str) -> MemoryTrackId {
+        let (remote_id, track_id) = key.split_once('\0').unwrap_or_default();
+        MemoryTrackId {
+            remote_id: remote_id.to_string(),
+            track_id: track_id.to_string(),
+        }
+    }
+
+    fn evict_oldest(&mut self) -> Option<MemoryTrackId> {
+        let oldest = self.order.pop_front()?;
+        if let Some(previous) = self.entries.remove(&oldest) {
+            self.bytes -= previous.len();
+        }
+        Some(Self::id(&oldest))
+    }
+
+    fn insert(
+        &mut self,
+        remote_id: &str,
+        track_id: &str,
+        bytes: Vec<u8>,
+    ) -> (bool, Vec<MemoryTrackId>) {
         if bytes.is_empty() || bytes.len() > self.max_bytes {
-            return;
+            return (false, Vec::new());
         }
         let key = Self::key(remote_id, track_id);
         if let Some(previous) = self.entries.remove(&key) {
             self.bytes -= previous.len();
         }
         self.order.retain(|item| item != &key);
+        let mut evicted = Vec::new();
         while self.bytes + bytes.len() > self.max_bytes {
-            let Some(oldest) = self.order.pop_front() else {
+            let Some(oldest) = self.evict_oldest() else {
                 break;
             };
-            if let Some(previous) = self.entries.remove(&oldest) {
-                self.bytes -= previous.len();
-            }
+            evicted.push(oldest);
         }
         self.bytes += bytes.len();
         self.entries.insert(key.clone(), bytes);
         self.order.push_back(key);
+        (true, evicted)
     }
 
-    pub(super) fn resize(&mut self, max_bytes: usize) {
+    pub(super) fn resize(&mut self, max_bytes: usize) -> Vec<MemoryTrackId> {
         self.max_bytes = max_bytes;
+        let mut evicted = Vec::new();
         while self.bytes > self.max_bytes {
-            let Some(oldest) = self.order.pop_front() else {
+            let Some(oldest) = self.evict_oldest() else {
                 break;
             };
-            if let Some(previous) = self.entries.remove(&oldest) {
-                self.bytes -= previous.len();
-            }
+            evicted.push(oldest);
         }
+        evicted
     }
 }
 
@@ -206,18 +232,32 @@ pub(super) async fn download(
             descriptor.file_size
         ));
     }
-    if let Ok(mut registry) = state.0.lock() {
-        registry
+    let memory_cached = if let Ok(mut registry) = state.0.lock() {
+        let (stored, evicted) = registry
             .memory_tracks
             .insert(&remote_id, &track_id, bytes.clone());
-    }
+        for evicted in evicted {
+            if evicted.remote_id == remote_id {
+                registry.audio.transfers.insert(
+                    evicted.track_id,
+                    DesktopTransfer {
+                        memory_cached: false,
+                        ..DesktopTransfer::default()
+                    },
+                );
+            }
+        }
+        stored
+    } else {
+        false
+    };
     transfer(
         &state,
         &track_id,
         descriptor.file_size,
         descriptor.file_size,
         false,
-        true,
+        memory_cached,
     );
     Ok(bytes)
 }
@@ -324,5 +364,26 @@ mod tests {
             cache_path("remote", &track_id),
             cache_path("remote", "other")
         );
+    }
+
+    #[test]
+    fn memory_cache_reports_rejected_and_evicted_tracks() {
+        let mut cache = MemoryTrackCache::default();
+        cache.resize(4);
+
+        let (stored, evicted) = cache.insert("remote", "first", vec![1; 3]);
+        assert!(stored);
+        assert!(evicted.is_empty());
+
+        let (stored, evicted) = cache.insert("remote", "second", vec![2; 3]);
+        assert!(stored);
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].remote_id, "remote");
+        assert_eq!(evicted[0].track_id, "first");
+
+        let (stored, evicted) = cache.insert("remote", "oversized", vec![3; 5]);
+        assert!(!stored);
+        assert!(evicted.is_empty());
+        assert!(cache.get("remote", "oversized").is_none());
     }
 }

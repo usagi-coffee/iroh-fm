@@ -151,7 +151,8 @@ function receiveMessage(message) {
   }
   const request = pending.get(message.id);
   if (!request) {
-    if (message.id) console.warn(`[native bridge] response has no pending request: id=${message.id}`);
+    if (message.id)
+      console.warn(`[native bridge] response has no pending request: id=${message.id}`);
     return;
   }
   clearTimeout(request.timer);
@@ -207,7 +208,9 @@ export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS)
       }
       const total = Math.ceil(raw.length / NATIVE_REQUEST_CHUNK_CHARS);
       if (action === "play")
-        console.info(`[native bridge] posting chunked request: action=play id=${id} chunks=${total}`);
+        console.info(
+          `[native bridge] posting chunked request: action=play id=${id} chunks=${total}`,
+        );
       for (let index = 0; index < total; index += 1) {
         target.postMessage(
           JSON.stringify({

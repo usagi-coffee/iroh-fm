@@ -6,7 +6,12 @@ import {
   isDesktop,
   parseDesktopTicket,
 } from "./desktop.js";
-import { MusicClient } from "./index.js";
+import {
+  ANDROID_DEFAULT_MEMORY_CACHE_BYTES,
+  ANDROID_MAX_MEMORY_CACHE_BYTES,
+  MAX_MEMORY_CACHE_BYTES,
+  MusicClient,
+} from "./index.js";
 import { NativeMusicClient, detectNative, isNative, nativeRequest } from "./native.js";
 
 export class ClientCore {
@@ -28,7 +33,7 @@ export class ClientCore {
     if (isDesktop()) return connectDesktop(options);
     if (!isNative()) return MusicClient.connect(options);
     return NativeMusicClient.connect(options).then((client) => {
-      void client.setMemoryCacheSize(MusicClient.memoryCacheSize());
+      void client.setMemoryCacheSize(ClientCore.memoryCacheSize());
       return client;
     });
   }
@@ -57,12 +62,27 @@ export class ClientCore {
   }
 
   static memoryCacheSize() {
-    return MusicClient.memoryCacheSize();
+    return isNative()
+      ? MusicClient.memoryCacheSize(
+          ANDROID_MAX_MEMORY_CACHE_BYTES,
+          ANDROID_DEFAULT_MEMORY_CACHE_BYTES,
+        )
+      : MusicClient.memoryCacheSize();
+  }
+
+  static memoryCacheMaxSize() {
+    return isNative() ? ANDROID_MAX_MEMORY_CACHE_BYTES : MAX_MEMORY_CACHE_BYTES;
   }
 
   /** @param {number} megabytes */
   static setMemoryCacheSize(megabytes) {
-    return MusicClient.setMemoryCacheSize(megabytes);
+    return isNative()
+      ? MusicClient.setMemoryCacheSize(
+          megabytes,
+          ANDROID_MAX_MEMORY_CACHE_BYTES,
+          ANDROID_DEFAULT_MEMORY_CACHE_BYTES,
+        )
+      : MusicClient.setMemoryCacheSize(megabytes);
   }
 }
 

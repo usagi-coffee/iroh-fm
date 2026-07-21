@@ -493,6 +493,7 @@ mod tests {
                         total: 10,
                         active: false,
                         cached: true,
+                        memory_cached: false,
                     },
                 ),
                 (
@@ -502,6 +503,7 @@ mod tests {
                         total: 10,
                         active: true,
                         cached: false,
+                        memory_cached: false,
                     },
                 ),
             ]),

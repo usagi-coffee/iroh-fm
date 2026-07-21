@@ -27,3 +27,33 @@ test("marks the desktop-prefetched next track in the memory cache", async ({ pag
     )
     .toBe(1);
 });
+
+test("does not show download progress while reopening an LRU-cached track", async ({ page }) => {
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  const firstTrack = page.getByRole("row").filter({ hasText: "First Light" });
+  const secondTrack = page.getByRole("row").filter({ hasText: "Nebula Drift" });
+  await expect(secondTrack.locator('[title="In memory cache"]')).toBeVisible();
+
+  await page.getByRole("button", { name: "Play Nebula Drift" }).click();
+  await expect(firstTrack.locator('[title="In memory cache"]')).toBeVisible();
+  await page.evaluate(() => {
+    globalThis.__IROH_FM_E2E_DESKTOP__.memoryCacheHitDelay = 500;
+  });
+
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  const playerButton = page.locator("footer").getByRole("button", { name: "Loading" });
+  await expect(playerButton).toBeVisible();
+  await expect(playerButton).not.toContainText("%");
+});
+
+test("clears the orange marker when Desktop evicts an LRU track", async ({ page }) => {
+  await page.evaluate(() => {
+    globalThis.__IROH_FM_E2E_DESKTOP__.maxMemoryTracks = 1;
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  const firstTrack = page.getByRole("row").filter({ hasText: "First Light" });
+  const secondTrack = page.getByRole("row").filter({ hasText: "Nebula Drift" });
+
+  await expect(secondTrack.locator('[title="In memory cache"]')).toBeVisible();
+  await expect(firstTrack.locator('[title="In memory cache"]')).toHaveCount(0);
+});

@@ -234,6 +234,9 @@ export function fixtureCore(Client) {
     static memoryCacheSize() {
       return 256 * 1024 * 1024;
     }
+    static memoryCacheMaxSize() {
+      return 5 * 1024 * 1024 * 1024;
+    }
     static setMemoryCacheSize(megabytes) {
       return Number(megabytes) * 1024 * 1024;
     }

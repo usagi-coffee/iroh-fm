@@ -81,6 +81,10 @@ class AndroidMusicClient extends NativeFixtureClient {
 }
 
 export class ClientCore extends fixtureCore(AndroidMusicClient) {
+  static memoryCacheMaxSize() {
+    return 256 * 1024 * 1024;
+  }
+
   static buildInfo() {
     return Promise.resolve({
       platform: "Android",

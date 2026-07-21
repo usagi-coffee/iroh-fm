@@ -90,6 +90,7 @@ class DesktopInner extends NativeFixtureClient {
 
   async prefetchMemoryTrack(id, onProgress = () => {}) {
     if (this.memoryCache.has(id)) {
+      if (this.memoryCacheHitDelay) await delay(this.memoryCacheHitDelay);
       onProgress(TRACK_BYTES, TRACK_BYTES);
       this.transfers[id] = {
         received: TRACK_BYTES,
@@ -113,6 +114,17 @@ class DesktopInner extends NativeFixtureClient {
     onProgress(TRACK_BYTES / 2, TRACK_BYTES);
     await delay(40);
     this.memoryCache.add(id);
+    if (this.memoryCache.size > (this.maxMemoryTracks ?? Number.POSITIVE_INFINITY)) {
+      const evicted = this.memoryCache.values().next().value;
+      this.memoryCache.delete(evicted);
+      this.transfers[evicted] = {
+        received: 0,
+        total: TRACK_BYTES,
+        active: false,
+        cached: false,
+        memoryCached: false,
+      };
+    }
     this.transfers[id] = {
       received: TRACK_BYTES,
       total: TRACK_BYTES,
@@ -171,6 +183,15 @@ export class ClientCore {
   }
   static cacheStats() {
     return Promise.resolve({ tracks: { count: 0, size: 0 }, covers: { count: 0, size: 0 } });
+  }
+  static memoryCacheSize() {
+    return 256 * 1024 * 1024;
+  }
+  static memoryCacheMaxSize() {
+    return 5 * 1024 * 1024 * 1024;
+  }
+  static setMemoryCacheSize(megabytes) {
+    return Number(megabytes) * 1024 * 1024;
   }
 }
 

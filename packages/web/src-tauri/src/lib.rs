@@ -361,14 +361,24 @@ fn desktop_set_memory_cache_size(
     handle: u64,
     bytes: u64,
 ) -> Result<(), String> {
-    state.client(handle)?;
     let bytes = usize::try_from(bytes).map_err(|_| "memory cache size is too large".to_string())?;
-    state
+    let remote_id = state.client(handle)?.remote_id().to_string();
+    let mut registry = state
         .0
         .lock()
-        .map_err(|_| "desktop native registry lock poisoned".to_string())?
-        .memory_tracks
-        .resize(bytes);
+        .map_err(|_| "desktop native registry lock poisoned".to_string())?;
+    let evicted = registry.memory_tracks.resize(bytes);
+    for evicted in evicted {
+        if evicted.remote_id == remote_id {
+            registry.audio.transfers.insert(
+                evicted.track_id,
+                player::DesktopTransfer {
+                    memory_cached: false,
+                    ..player::DesktopTransfer::default()
+                },
+            );
+        }
+    }
     Ok(())
 }
 

@@ -14,6 +14,7 @@
 
   const track = $derived(App.player.currentTrack);
   const duration = $derived(App.player.duration || track?.duration_seconds || 0);
+  const downloading = $derived(Boolean(track?.downloading && !track.cached && !track.memoryCached));
 </script>
 
 <footer class="border-surface1 bg-crust relative h-18 shrink-0 border-t">
@@ -50,21 +51,24 @@
         type="button"
         onclick={() => App.player.toggle()}
         disabled={!track || App.player.audioLoading}
-        aria-label={App.player.audioLoading
+        aria-label={App.player.audioLoading && downloading
           ? `Downloading ${Math.round(App.player.downloadProgress * 100)}%`
-          : App.player.playing
-            ? "Pause"
-            : "Play"}
+          : App.player.audioLoading
+            ? "Loading"
+            : App.player.playing
+              ? "Pause"
+              : "Play"}
         class="bg-text text-crust hover:bg-mauve relative grid size-10 overflow-hidden disabled:opacity-70"
       >
-        {#if track && App.player.downloadProgress < 1}<span
+        {#if downloading}<span
             class="bg-mauve absolute inset-y-0 left-0 transition-[width] duration-150"
             style={`width:${App.player.downloadProgress * 100}%`}
             aria-hidden="true"
           ></span>{/if}
         <span class="relative z-10 grid size-full place-items-center"
-          >{#if App.player.audioLoading}<span class="text-4xs font-mono font-bold"
+          >{#if App.player.audioLoading && downloading}<span class="text-4xs font-mono font-bold"
               >{Math.round(App.player.downloadProgress * 100)}%</span
+            >{:else if App.player.audioLoading}<span class="text-4xs font-mono font-bold">…</span
             >{:else if App.player.playing}<PauseIcon class="text-lg" />{:else}<PlayIcon
               class="text-lg"
             />{/if}</span

@@ -77,7 +77,8 @@ export class Player {
     if (!client) return;
     const index = queue.findIndex((item) => item.id === track.id);
     const next = queue[(index + 1) % queue.length];
-    if (!next || next.id === track.id || next.cached || next.memoryCached || next.downloading) return;
+    if (!next || next.id === track.id || next.cached || next.memoryCached || next.downloading)
+      return;
     const downloadGeneration = next.startDownload();
     client
       .prefetchTrack(next.id, (/** @type {number} */ received, /** @type {number} */ total) =>
@@ -164,7 +165,10 @@ export class Player {
             this.prefetchNext(track, sourceQueue, generation);
         }
       } catch (error) {
-        console.error(`[player] native play failed: trackId=${track.id} generation=${generation}`, error);
+        console.error(
+          `[player] native play failed: trackId=${track.id} generation=${generation}`,
+          error,
+        );
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
           if (downloadGeneration !== null) track.stopDownload(downloadGeneration);
