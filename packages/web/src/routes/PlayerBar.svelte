@@ -14,6 +14,8 @@
 
   let track = $derived(App.player.currentTrack);
   let duration = $derived(App.player.duration || track?.duration_seconds || 0);
+  let downloadProgress = $derived(App.player.downloadProgress);
+  let downloadPercent = $derived(Math.round(downloadProgress * 100));
 
   /** @param {HTMLAudioElement} audio */
   function syncAudioDuration(audio) {
@@ -59,20 +61,20 @@
         onclick={() => App.player.toggle()}
         disabled={!track || App.player.audioLoading}
         aria-label={App.player.audioLoading
-          ? `Downloading ${Math.round(App.player.downloadProgress * 100)}%`
+          ? `Downloading ${downloadPercent}%`
           : App.player.playing
             ? "Pause"
             : "Play"}
         class="bg-text text-crust hover:bg-mauve relative grid size-10 overflow-hidden disabled:opacity-70"
       >
-        {#if track && App.player.downloadProgress < 1}<span
+        {#if track && downloadProgress < 1}<span
             class="bg-mauve absolute inset-y-0 left-0 transition-[width] duration-150"
-            style={`width:${App.player.downloadProgress * 100}%`}
+            style={`width:${downloadPercent}%`}
             aria-hidden="true"
           ></span>{/if}
         <span class="relative z-10 grid size-full place-items-center"
           >{#if App.player.audioLoading}<span class="text-4xs font-mono font-bold"
-              >{Math.round(App.player.downloadProgress * 100)}%</span
+              >{downloadPercent}%</span
             >{:else if App.player.playing}<PauseIcon class="text-lg" />{:else}<PlayIcon
               class="text-lg"
             />{/if}</span
