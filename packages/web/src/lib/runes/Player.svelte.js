@@ -4,6 +4,8 @@ import { friendlyError } from "../utils.js";
 
 import { subscribeNativePlayerState } from "@iroh-fm/client/core";
 
+const NATIVE_STATE_MAX_AGE_MS = 200;
+
 export class Player {
   /** @type {HTMLAudioElement | null} */
   audio = null;
@@ -371,6 +373,13 @@ export class Player {
   /** @param {any} state @param {boolean} [applySeekPosition] @param {any} [client] */
   applyNativeState(state, applySeekPosition = false, client = this.app.connection.client) {
     if (!state || !this.nativePlayback(client)) return;
+    const timestamp = Number(state.timestamp);
+    if (
+      Number.isFinite(timestamp) &&
+      timestamp > 0 &&
+      Date.now() - timestamp > NATIVE_STATE_MAX_AGE_MS
+    )
+      return;
     this.applyNativeTransfers(state);
     if (this.nativePlayPendingTrackId && state.trackId !== this.nativePlayPendingTrackId) return;
     const track = state.trackId ? this.app.library.tracksById.get(state.trackId) : null;

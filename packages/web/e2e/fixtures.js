@@ -185,6 +185,7 @@ export class NativeFixtureClient extends FixtureClient {
 
   snapshot({ includeQueue = true } = {}) {
     const state = {
+      timestamp: Date.now(),
       trackId: this.trackId,
       playing: this.playing,
       loading: this.loading,

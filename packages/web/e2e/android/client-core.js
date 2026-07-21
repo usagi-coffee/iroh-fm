@@ -19,6 +19,18 @@ class AndroidMusicClient extends NativeFixtureClient {
   async playNative(track, queue, onProgress) {
     const state = await super.playNative(track, queue, onProgress);
     const nextId = this.queue[(this.currentIndex + 1) % this.queue.length];
+    if (nextId && localStorage.getItem("e2e-stale-native-state")) {
+      const staleState = {
+        ...this.snapshot(),
+        timestamp: Date.now() - 1_000,
+        trackId: nextId,
+        currentIndex: (this.currentIndex + 1) % this.queue.length,
+        position: 19,
+      };
+      setTimeout(() => {
+        for (const listener of stateListeners) listener(staleState);
+      }, 50);
+    }
     if (nextId && nextId !== track.id) void this.prefetchNativeNext(nextId);
     return state;
   }

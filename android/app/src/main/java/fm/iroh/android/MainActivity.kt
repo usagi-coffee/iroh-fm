@@ -472,6 +472,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         return JSONObject()
+            .put("timestamp", System.currentTimeMillis())
             .put("trackId", trackId ?: JSONObject.NULL)
             .put("currentIndex", player?.currentMediaItemIndex ?: 0)
             .put("playing", player?.isPlaying == true)

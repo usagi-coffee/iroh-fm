@@ -29,3 +29,14 @@ test("marks Android played and prefetched tracks from transfer state", async ({ 
   await expect(playedTrack.locator('[title="Cached"]')).toBeVisible();
   await expect(playedTrack.locator('[title="Cached"]')).toHaveClass(/text-green/);
 });
+
+test("discards stale native playback states after resume", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("e2e-stale-native-state", "1"));
+  await page.getByRole("button", { name: "Play First Light" }).click();
+
+  const currentTrack = page.locator("footer").getByTitle("Show currently playing track").first();
+  await expect(currentTrack).toHaveText("First Light");
+  await page.waitForTimeout(100);
+  await expect(currentTrack).toHaveText("First Light");
+  await expect(page.getByRole("slider", { name: "Playback position" })).toHaveValue("0");
+});
