@@ -71,10 +71,10 @@ iroh-fm \
 
 ## Apps
 
-| App | Get it |
-| --- | --- |
-| Web | [Open the web player](https://usagi-coffee.github.io/iroh-fm/) |
-| Desktop | [Download a Desktop release](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-) |
+| App     | Get it                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------ |
+| Web     | [Open the web player](https://usagi-coffee.github.io/iroh-fm/)                             |
+| Desktop | [Download a Desktop release](https://github.com/usagi-coffee/iroh-fm/releases?q=desktop-)  |
 | Android | [Download an Android release](https://github.com/usagi-coffee/iroh-fm/releases?q=android-) |
 
 ## Web player

@@ -50,8 +50,9 @@
   let endpointIdWaiters = [];
   let draftEndpointId = $state(endpointIdForSecret(settings.secret));
   const canSave = $derived(
-    Boolean(settings.endpoint.trim() ? cleanRelays(settings.relays).length : settings.ticket.trim()) &&
-      !App.connection.connecting,
+    Boolean(
+      settings.endpoint.trim() ? cleanRelays(settings.relays).length : settings.ticket.trim(),
+    ) && !App.connection.connecting,
   );
 
   /** @param {string} secret */

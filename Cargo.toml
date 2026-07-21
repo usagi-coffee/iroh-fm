@@ -15,12 +15,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 axum = "0.8"
-image = { version = "0.25.10", default-features = false, features = [
-  "gif",
-  "jpeg",
-  "png",
-  "webp",
-] }
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 iroh = "1.0.3"
 iroh-tickets = "1.0.0"
 iroh-mdns-address-lookup = "0.4"

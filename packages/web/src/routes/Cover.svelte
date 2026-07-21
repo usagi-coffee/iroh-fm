@@ -14,7 +14,9 @@
 
   /** @param {object | null} client @param {string | null} id @param {boolean} fullQuality */
   function resolvedCoverUrl(client, id, fullQuality) {
-    return client && id ? (resolvedCoverUrls.get(client)?.get(coverKey(id, fullQuality)) ?? null) : null;
+    return client && id
+      ? (resolvedCoverUrls.get(client)?.get(coverKey(id, fullQuality)) ?? null)
+      : null;
   }
 
   /** @param {import('@iroh-fm/client').MusicClient} client @param {string} id @param {boolean} fullQuality */
@@ -68,8 +70,7 @@
       const listeners = new Map();
       const observer = new IntersectionObserver(
         (entries) => {
-          for (const observed of entries)
-            listeners.get(observed.target)?.(observed.isIntersecting);
+          for (const observed of entries) listeners.get(observed.target)?.(observed.isIntersecting);
         },
         { root, rootMargin },
       );

@@ -7,10 +7,10 @@
     ".": "./src/index.js",
     "./core": "./src/core.js"
   },
-  "dependencies": {
-    "@tauri-apps/api": "^2.11.0"
-  },
   "scripts": {
     "build:wasm": "bun run build.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0"
   }
 }

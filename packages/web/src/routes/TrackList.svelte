@@ -122,9 +122,7 @@
   /** @param {-1 | 1} direction */
   function moveSearchSelection(direction) {
     if (!tracks.length) return;
-    const selectedIndex = tracks.findIndex(
-      (track) => track.id === App.library.selectedTrackId,
-    );
+    const selectedIndex = tracks.findIndex((track) => track.id === App.library.selectedTrackId);
     const start = selectedIndex < 0 ? (direction > 0 ? -1 : tracks.length) : selectedIndex;
     const nextIndex = Math.max(0, Math.min(tracks.length - 1, start + direction));
     App.library.requestTrackFocus(tracks[nextIndex]);
@@ -176,8 +174,7 @@
       ? untrack(() => App.player.currentTrack?.id)
       : null;
     focusPlayingTrackOnMount = false;
-    const trackId =
-      App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? playingTrackId;
+    const trackId = App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? playingTrackId;
     if (!trackId) return;
     const index = items.findIndex((item) => item.kind === "track" && item.track.id === trackId);
     if (index < 0) return;
@@ -293,11 +290,7 @@
     >
   </div>
 
-  <div
-    class="min-h-0 flex-1"
-    {@attach immediateTauriWheelScroll}
-    {@attach focusRequestedTrack}
-  >
+  <div class="min-h-0 flex-1" {@attach immediateTauriWheelScroll} {@attach focusRequestedTrack}>
     <VList
       data={items}
       getKey={(item) => item.key}
@@ -308,117 +301,117 @@
       {#snippet children(item, itemIndex)}
         {#if item}
           {#if item.kind === "album"}
-          <button
-            data-list-index={itemIndex}
-            {@attach longPress(() =>
-              openAlbumActions(item.album, item.tracks, item.title, item.album?.id ?? item.key),
-            )}
-            type="button"
-            onclick={() => App.player.playAlbumTracks(item.tracks, tracks)}
-            oncontextmenu={(event) =>
-              openAlbumActions(
-                item.album,
-                item.tracks,
-                item.title,
-                item.album?.id ?? item.key,
-                event,
-              )}
-            class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full items-center gap-2 border-y px-2 text-left transition"
-            aria-label={`Play album ${item.title}`}
-          >
-            <Cover
-              client={App.connection.client}
-              id={item.coverArtId}
-              title={item.title}
-              rootMargin={COVER_MARGIN}
-              class="size-5 shrink-0 rounded-sm"
-            />
-            <p class="text-track min-w-0 flex-1 truncate">
-              <span class="text-mauve font-semibold">{item.title}</span><span
-                class="text-3xs text-overlay1 ml-2">{item.artist}</span
-              >
-            </p>
-            <span class="text-3xs text-overlay0 shrink-0 font-mono"
-              >{formatTime(item.durationSeconds)}</span
-            >
-          </button>
-        {:else}
-          <div
-            data-list-index={itemIndex}
-            data-track-id={item.track.id}
-            {@attach longPress(() => openTrackActions(item.track))}
-            role="row"
-            tabindex="0"
-            aria-selected={App.library.selectedTrackId === item.track.id}
-            onclick={() => (App.library.selectedTrackId = item.track.id)}
-            ondblclick={() => playTrackFromList(item.track)}
-            oncontextmenu={(event) => openTrackActions(item.track, event)}
-            onkeydown={(event) => {
-              if (event.key === "Enter") playTrackFromList(item.track);
-              else if (event.key === " ") {
-                event.preventDefault();
-                App.library.selectedTrackId = item.track.id;
-              }
-            }}
-            class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
-              .player.currentTrack?.id === item.track.id
-              ? 'bg-mauve/15'
-              : App.library.selectedTrackId === item.track.id
-                ? 'bg-surface0'
-                : 'hover:bg-surface0/60'}"
-          >
             <button
+              data-list-index={itemIndex}
+              {@attach longPress(() =>
+                openAlbumActions(item.album, item.tracks, item.title, item.album?.id ?? item.key),
+              )}
               type="button"
-              onclick={(event) => {
-                event.stopPropagation();
-                playTrackFromList(item.track);
-              }}
-              class="text-3xs text-overlay0 hover:text-mauve grid size-6 place-items-center font-mono"
-              aria-label={`Play ${item.track.title}`}
+              onclick={() => App.player.playAlbumTracks(item.tracks, tracks)}
+              oncontextmenu={(event) =>
+                openAlbumActions(
+                  item.album,
+                  item.tracks,
+                  item.title,
+                  item.album?.id ?? item.key,
+                  event,
+                )}
+              class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full items-center gap-2 border-y px-2 text-left transition"
+              aria-label={`Play album ${item.title}`}
             >
-              {#if item.track.downloading}
-                <span class="bg-surface1 h-1 w-4 overflow-hidden"
-                  ><span
-                    class="bg-mauve block h-full transition-[width] duration-150"
-                    style={`width:${item.track.progress * 100}%`}
-                  ></span></span
+              <Cover
+                client={App.connection.client}
+                id={item.coverArtId}
+                title={item.title}
+                rootMargin={COVER_MARGIN}
+                class="size-5 shrink-0 rounded-sm"
+              />
+              <p class="text-track min-w-0 flex-1 truncate">
+                <span class="text-mauve font-semibold">{item.title}</span><span
+                  class="text-3xs text-overlay1 ml-2">{item.artist}</span
                 >
-              {:else if App.player.currentTrack?.id === item.track.id && App.player.playing}
-                <PauseIcon class="text-2xs" />
-              {:else if item.track.cached}
-                <span class="text-green" title="Cached"
-                  >{item.track.track_number || item.trackIndex + 1}</span
-                >
-              {:else}
-                <span class="group-hover:hidden"
-                  >{item.track.track_number || item.trackIndex + 1}</span
-                ><span class="hidden group-hover:block"><PlayIcon class="text-3xs" /></span>
-              {/if}
-            </button>
-            <div class="text-mauve tablet-xl:block hidden min-w-0 truncate pr-2">
-              {item.track.album}
-            </div>
-            <div class="flex min-w-0 items-center gap-2 pr-2">
-              <span class="text-teal truncate">{item.track.title}</span><button
-                type="button"
-                onclick={(event) => App.library.toggleStar(item.track, event)}
-                class="text-overlay0 hover:text-pink ml-auto hidden shrink-0 group-hover:block {App.library.starredTrackIds.has(
-                  item.track.id,
-                )
-                  ? 'text-pink !block'
-                  : ''}"
-                aria-label="Toggle favorite"><HeartIcon class="text-2xs" /></button
-              ><span class="text-4xs text-overlay0 tablet-xl:hidden truncate">
-                · {item.track.artist}</span
+              </p>
+              <span class="text-3xs text-overlay0 shrink-0 font-mono"
+                >{formatTime(item.durationSeconds)}</span
               >
+            </button>
+          {:else}
+            <div
+              data-list-index={itemIndex}
+              data-track-id={item.track.id}
+              {@attach longPress(() => openTrackActions(item.track))}
+              role="row"
+              tabindex="0"
+              aria-selected={App.library.selectedTrackId === item.track.id}
+              onclick={() => (App.library.selectedTrackId = item.track.id)}
+              ondblclick={() => playTrackFromList(item.track)}
+              oncontextmenu={(event) => openTrackActions(item.track, event)}
+              onkeydown={(event) => {
+                if (event.key === "Enter") playTrackFromList(item.track);
+                else if (event.key === " ") {
+                  event.preventDefault();
+                  App.library.selectedTrackId = item.track.id;
+                }
+              }}
+              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
+                .player.currentTrack?.id === item.track.id
+                ? 'bg-mauve/15'
+                : App.library.selectedTrackId === item.track.id
+                  ? 'bg-surface0'
+                  : 'hover:bg-surface0/60'}"
+            >
+              <button
+                type="button"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  playTrackFromList(item.track);
+                }}
+                class="text-3xs text-overlay0 hover:text-mauve grid size-6 place-items-center font-mono"
+                aria-label={`Play ${item.track.title}`}
+              >
+                {#if item.track.downloading}
+                  <span class="bg-surface1 h-1 w-4 overflow-hidden"
+                    ><span
+                      class="bg-mauve block h-full transition-[width] duration-150"
+                      style={`width:${item.track.progress * 100}%`}
+                    ></span></span
+                  >
+                {:else if App.player.currentTrack?.id === item.track.id && App.player.playing}
+                  <PauseIcon class="text-2xs" />
+                {:else if item.track.cached}
+                  <span class="text-green" title="Cached"
+                    >{item.track.track_number || item.trackIndex + 1}</span
+                  >
+                {:else}
+                  <span class="group-hover:hidden"
+                    >{item.track.track_number || item.trackIndex + 1}</span
+                  ><span class="hidden group-hover:block"><PlayIcon class="text-3xs" /></span>
+                {/if}
+              </button>
+              <div class="text-mauve tablet-xl:block hidden min-w-0 truncate pr-2">
+                {item.track.album}
+              </div>
+              <div class="flex min-w-0 items-center gap-2 pr-2">
+                <span class="text-teal truncate">{item.track.title}</span><button
+                  type="button"
+                  onclick={(event) => App.library.toggleStar(item.track, event)}
+                  class="text-overlay0 hover:text-pink ml-auto hidden shrink-0 group-hover:block {App.library.starredTrackIds.has(
+                    item.track.id,
+                  )
+                    ? 'text-pink !block'
+                    : ''}"
+                  aria-label="Toggle favorite"><HeartIcon class="text-2xs" /></button
+                ><span class="text-4xs text-overlay0 tablet-xl:hidden truncate">
+                  · {item.track.artist}</span
+                >
+              </div>
+              <div class="text-subtext0 tablet-xl:block hidden min-w-0 truncate pr-2">
+                {item.track.artist}
+              </div>
+              <div class="text-3xs text-overlay0 text-right font-mono">
+                {formatTime(item.track.duration_seconds)}
+              </div>
             </div>
-            <div class="text-subtext0 tablet-xl:block hidden min-w-0 truncate pr-2">
-              {item.track.artist}
-            </div>
-            <div class="text-3xs text-overlay0 text-right font-mono">
-              {formatTime(item.track.duration_seconds)}
-            </div>
-          </div>
           {/if}
         {/if}
       {/snippet}
