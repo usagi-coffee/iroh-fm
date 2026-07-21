@@ -121,7 +121,7 @@ export class Player {
     this.playing = false;
     if (this.nativePlayback(client)) {
       let downloadGeneration = /** @type {number | null} */ (null);
-      if (client.native && !track.cached && !track.memoryCached) {
+      if (client.native && !client.nativePlayback && !track.cached && !track.memoryCached) {
         if (track.downloading) track.stopDownload();
         const memoryDownloadGeneration = track.startDownload();
         downloadGeneration = memoryDownloadGeneration;
