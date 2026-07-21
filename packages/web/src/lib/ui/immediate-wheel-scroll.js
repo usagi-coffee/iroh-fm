@@ -30,7 +30,8 @@ export function immediateTauriWheelScroll(host) {
           ? event.deltaY * viewport.clientHeight
           : event.deltaY;
     frame ??= requestAnimationFrame(() => {
-      viewport.scrollTop += pendingDelta;
+      const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      viewport.scrollTop = Math.max(0, Math.min(maximum, viewport.scrollTop + pendingDelta));
       pendingDelta = 0;
       frame = undefined;
     });

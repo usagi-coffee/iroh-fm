@@ -38,6 +38,7 @@
   let viewport;
   let viewportSize = $state(0);
   let renderWindowOffset = $state(0);
+  let pinnedToEnd = false;
   const measuredSizes = new SvelteMap();
   /** @type {{ estimate: number, size: number } | null} */
   let uniformMeasurement = $state(null);
@@ -85,21 +86,28 @@
       return;
     const node = viewport;
     const preserveAnchor = node?.style.visibility === "visible" && items.length > 0;
+    const preserveEnd = preserveAnchor && (pinnedToEnd || isAtEnd(node));
     const anchorIndex = preserveAnchor ? indexAtOffset(node.scrollTop) : 0;
     const anchorOffset = preserveAnchor ? node.scrollTop - offsetAt(anchorIndex) : 0;
     uniformMeasurement = { estimate, size };
     if (preserveAnchor)
       queueMicrotask(() => {
         if (viewport !== node) return;
-        node.scrollTop = leadingPadding + anchorIndex * size + anchorOffset;
-        updateScrollWindow(node.scrollTop);
+        node.scrollTop = preserveEnd
+          ? maximumScrollOffset(node)
+          : leadingPadding + anchorIndex * size + anchorOffset;
+        updateViewportPosition(node);
       });
   }
 
   function ensureItemObserver() {
     itemObserver ??= new ResizeObserver((entries) => {
-      const anchorIndex = viewport && items.length ? indexAtOffset(viewport.scrollTop) : 0;
+      const observedViewport = viewport;
+      const preserveEnd = Boolean(observedViewport && (pinnedToEnd || isAtEnd(observedViewport)));
+      const anchorIndex =
+        observedViewport && items.length ? indexAtOffset(observedViewport.scrollTop) : 0;
       let scrollCorrection = 0;
+      let layoutChanged = false;
       /** @type {{ estimate: number, size: number } | null} */
       let nextUniformMeasurement = null;
       for (const entry of entries) {
@@ -116,14 +124,18 @@
           previousMeasurement?.estimate === estimate ? previousMeasurement.size : estimate;
         if (size <= 0 || size === previous) continue;
         measuredSizes.set(measurement.key, { estimate, size });
+        layoutChanged = true;
         if (measurement.index < anchorIndex) scrollCorrection += size - previous;
       }
       if (nextUniformMeasurement)
         updateUniformMeasurement(nextUniformMeasurement.estimate, nextUniformMeasurement.size);
-      if (viewport && scrollCorrection) {
-        viewport.scrollTop += scrollCorrection;
-        updateScrollWindow(viewport.scrollTop);
-      }
+      if (observedViewport && layoutChanged)
+        queueMicrotask(() => {
+          if (viewport !== observedViewport) return;
+          if (preserveEnd) observedViewport.scrollTop = maximumScrollOffset(observedViewport);
+          else if (scrollCorrection) observedViewport.scrollTop += scrollCorrection;
+          updateViewportPosition(observedViewport);
+        });
     });
     return itemObserver;
   }
@@ -200,6 +212,23 @@
     if (next !== renderWindowOffset) renderWindowOffset = next;
   }
 
+  /** @param {HTMLElement} node */
+  function maximumScrollOffset(node) {
+    return Math.max(0, layout.totalSize - node.clientHeight);
+  }
+
+  /** @param {HTMLElement} node */
+  function isAtEnd(node) {
+    const maximum = maximumScrollOffset(node);
+    return maximum > 2 && maximum - node.scrollTop <= 2;
+  }
+
+  /** @param {HTMLElement} node */
+  function updateViewportPosition(node) {
+    updateScrollWindow(node.scrollTop);
+    pinnedToEnd = isAtEnd(node);
+  }
+
   /** @param {number} index @param {ScrollOptions} [options] */
   function scrollToIndex(index, options = {}) {
     if (!viewport || !items.length) return;
@@ -219,9 +248,9 @@
     else if (itemEnd > viewEnd) next = itemEnd - viewport.clientHeight;
     else return;
 
-    const maximum = Math.max(0, layout.totalSize - viewport.clientHeight);
+    const maximum = maximumScrollOffset(viewport);
     viewport.scrollTop = Math.max(0, Math.min(maximum, next));
-    updateScrollWindow(viewport.scrollTop);
+    updateViewportPosition(viewport);
   }
 
   /** @param {HTMLElement} node */
@@ -230,8 +259,15 @@
       viewport = node;
       api = { scrollToIndex };
       const updateSize = () => {
+        const preserveEnd = pinnedToEnd;
         viewportSize = node.clientHeight;
-        updateScrollWindow(node.scrollTop);
+        if (preserveEnd)
+          queueMicrotask(() => {
+            if (viewport !== node) return;
+            node.scrollTop = maximumScrollOffset(node);
+            updateViewportPosition(node);
+          });
+        else updateViewportPosition(node);
       };
       updateSize();
       const observer = new ResizeObserver(updateSize);
@@ -284,9 +320,9 @@
 
 <div
   {@attach setupViewport}
-  onscroll={(event) => updateScrollWindow(event.currentTarget.scrollTop)}
+  onscroll={(event) => updateViewportPosition(event.currentTarget)}
   class="h-full overflow-y-auto"
-  style="visibility: hidden; overscroll-behavior: contain; overflow-anchor: none; contain: layout paint;"
+  style="visibility: hidden; overscroll-behavior: none; overflow-anchor: none;"
 >
   <div class="relative w-full" style={`height:${layout.totalSize}px`}>
     <div
