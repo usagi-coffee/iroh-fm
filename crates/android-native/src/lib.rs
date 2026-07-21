@@ -102,27 +102,27 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_initialize(
     _class: JClass,
     _application_context: JObject,
 ) -> jstring {
+    #[cfg(target_os = "android")]
     let result = (|| {
-        #[cfg(target_os = "android")]
-        {
-            if ANDROID_APPLICATION_CONTEXT.get().is_none() {
-                let vm = env.get_java_vm().map_err(|error| error.to_string())?;
-                let context = env
-                    .new_global_ref(_application_context)
-                    .map_err(|error| error.to_string())?;
-                unsafe {
-                    iroh_dns::install_android_jni_context(
-                        vm.get_java_vm_pointer().cast(),
-                        context.as_obj().as_raw().cast(),
-                    );
-                }
-                ANDROID_APPLICATION_CONTEXT.set(context).map_err(|_| {
-                    "Android application context was already initialized".to_string()
-                })?;
+        if ANDROID_APPLICATION_CONTEXT.get().is_none() {
+            let vm = env.get_java_vm().map_err(|error| error.to_string())?;
+            let context = env
+                .new_global_ref(_application_context)
+                .map_err(|error| error.to_string())?;
+            unsafe {
+                iroh_dns::install_android_jni_context(
+                    vm.get_java_vm_pointer().cast(),
+                    context.as_obj().as_raw().cast(),
+                );
             }
+            ANDROID_APPLICATION_CONTEXT
+                .set(context)
+                .map_err(|_| "Android application context was already initialized".to_string())?;
         }
         Ok("initialized".to_string())
     })();
+    #[cfg(not(target_os = "android"))]
+    let result: Result<String, String> = Ok("initialized".to_string());
     java_string(&mut env, result)
 }
 
@@ -343,7 +343,7 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_generateIdentity(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let result = (|| {
+    let result = {
         let secret = SecretKey::generate();
         let encoded = secret
             .to_bytes()
@@ -355,7 +355,7 @@ pub extern "system" fn Java_fm_iroh_android_NativeCore_generateIdentity(
             "endpointId": secret.public().to_string(),
         }))
         .map_err(|error| error.to_string())
-    })();
+    };
     java_string(&mut env, result)
 }
 

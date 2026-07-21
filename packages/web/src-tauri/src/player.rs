@@ -293,7 +293,7 @@ async fn start(
         }
         let outgoing = audio.player.take();
         let player = Arc::new(Player::connect_new(
-            &audio.device.as_ref().expect("device exists").mixer(),
+            audio.device.as_ref().expect("device exists").mixer(),
         ));
         player.set_volume(if outgoing.is_some() {
             0.0

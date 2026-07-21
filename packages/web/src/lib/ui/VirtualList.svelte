@@ -159,7 +159,7 @@
         offsets: null,
         totalSize: leadingPadding + items.length * fixedItemSize + trailingPadding,
       };
-    const offsets = new Array(items.length + 1);
+    const offsets = Array.from({ length: items.length + 1 });
     offsets[0] = leadingPadding;
     for (let index = 0; index < items.length; index += 1) {
       const key = getKey(items[index]);
