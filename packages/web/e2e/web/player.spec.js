@@ -69,6 +69,31 @@ test("selects tracks with arrow keys and starts playback with Enter", async ({ p
   ).toHaveText("Nebula Drift");
 });
 
+test("does not restore stale track focus after playing an album", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "web", "The multi-album fixture belongs to the Web client.");
+
+  await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "3"));
+  await page.reload();
+  await expect(page.getByRole("row")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Play Track 001" }).click();
+  await page.getByRole("link", { name: "STARRED", exact: true }).click();
+  await page.getByRole("link", { name: "TRACKS", exact: true }).click();
+  await expect(page.locator('[data-track-id="track-1"]')).toHaveAttribute("aria-selected", "true");
+
+  await page.locator('[data-album-id="album-2"] button.bg-mauve').click({ force: true });
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("Track 002");
+  await page.waitForTimeout(200);
+  expect(await page.locator('[data-track-id="track-2"]').getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(await page.locator('[data-track-id="track-1"]').getAttribute("aria-selected")).toBe(
+    "false",
+  );
+});
+
 test("seeks five seconds right and left with the keyboard", async ({ page }) => {
   await page.getByRole("button", { name: "Play First Light" }).click();
   const position = page.getByRole("slider", { name: "Playback position" });

@@ -39,6 +39,7 @@
     page.state.focusTrackId ??
     untrack(() => App.player.currentTrack?.id) ??
     null;
+  let initialFocusPending = Boolean(initialFocusTrackId);
   const initialFocusIndex = $derived(
     initialFocusTrackId
       ? items.findIndex((item) => item.kind === "track" && item.track.id === initialFocusTrackId)
@@ -185,7 +186,9 @@
   /** @param {HTMLElement} host */
   function focusRequestedTrack(host) {
     const trackId =
-      App.library.pendingTrackFocusId ?? page.state.focusTrackId ?? initialFocusTrackId;
+      App.library.pendingTrackFocusId ??
+      page.state.focusTrackId ??
+      (initialFocusPending ? initialFocusTrackId : null);
     if (!trackId) return;
     const index =
       trackId === initialFocusTrackId
@@ -212,6 +215,7 @@
       }
       const target = host.querySelector(`[data-track-id="${CSS.escape(trackId)}"]`);
       if (target instanceof HTMLElement) {
+        initialFocusPending = false;
         App.library.pendingTrackFocusId = null;
         if (page.state.focusTrackId) replaceState(page.url, {});
         return;
