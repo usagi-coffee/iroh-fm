@@ -24,19 +24,12 @@
   /** @type {Props} */
   let { updateReady, onupdate } = $props();
   let path = $derived(page.url.pathname.replace(/\/$/, ""));
-  let tracksActive = $derived(path.endsWith("/tracks"));
-  let albumsActive = $derived(path.endsWith("/albums"));
-  let starredActive = $derived(path.endsWith("/starred"));
-  let settingsActive = $derived(path.endsWith("/settings"));
-  let connectionInfo = $derived(App.connection.info);
-  let connectionPath = $derived(connectionInfo.path_type);
-  let hasConnectionAddress = $derived(Boolean(connectionInfo.address));
   let connectionToggleTitle = $derived(
     App.library.offlineOnly
       ? "Offline-only mode enabled — use network"
-      : connectionPath === "relay"
+      : App.connection.info.path_type === "relay"
         ? "Connected via relay — use cached music only"
-        : connectionPath === "direct"
+        : App.connection.info.path_type === "direct"
           ? "Connected directly — use cached music only"
           : "Connecting — use cached music only",
   );
@@ -82,19 +75,25 @@
     <a
       href={resolve("/tracks")}
       onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}
-      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {tracksActive
+      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
+        '/tracks',
+      )
         ? 'bg-surface0 text-text'
         : 'text-overlay1'}">TRACKS</a
     >
     <a
       href={resolve("/albums")}
-      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {albumsActive
+      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
+        '/albums',
+      )
         ? 'bg-surface0 text-text'
         : 'text-overlay1'}">ALBUMS</a
     >
     <a
       href={resolve("/starred")}
-      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {starredActive
+      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
+        '/starred',
+      )
         ? 'bg-surface0 text-pink'
         : 'text-overlay1'}">STARRED</a
     >
@@ -108,19 +107,19 @@
   <div class="flex h-full min-w-0 items-center">
     <div
       class="border-surface0 text-4xs text-overlay1 tablet-xl:flex hidden h-full min-w-36 items-center gap-2 border-l px-2 font-mono"
-      title={`${connectionPath}: ${connectionInfo.address || "selecting path"} · ${formatBytes(App.connection.receivedBytesPerSecond)}/s · ${formatBytes(connectionInfo.received_bytes)} received`}
+      title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"} · ${formatBytes(App.connection.receivedBytesPerSecond)}/s · ${formatBytes(App.connection.info.received_bytes)} received`}
     >
       <span class="flex min-w-0 flex-1 flex-col items-end text-right leading-tight"
         ><span
           class="text-subtext0 text-5xs desktop:max-w-44 flex max-w-28 items-center gap-1"
-          ><span class="truncate">{connectionAddressLabel(connectionInfo)}</span><span
-            class="size-1.5 shrink-0 rounded-full {hasConnectionAddress
+          ><span class="truncate">{connectionAddressLabel(App.connection.info)}</span><span
+            class="size-1.5 shrink-0 rounded-full {App.connection.info.address
               ? 'bg-green'
               : 'bg-yellow animate-pulse'}"
           ></span></span
         ><span class="text-overlay0 text-5xs flex items-center gap-2 whitespace-nowrap"
           ><span class="flex items-center gap-1"><DatabaseIcon class="text-4xs" />{formatBytes(
-              connectionInfo.received_bytes,
+              App.connection.info.received_bytes,
             )}</span
           ><span>↓ {formatBytes(App.connection.receivedBytesPerSecond)}/s</span></span
         ></span
@@ -144,19 +143,21 @@
       aria-label={connectionToggleTitle}
       aria-pressed={App.library.offlineOnly}
       >{#if App.library.offlineOnly}<OfflineIcon class="text-sm" />{:else}<span
-          class="tablet-xl:hidden {hasConnectionAddress
+          class="tablet-xl:hidden {App.connection.info.address
             ? 'text-green'
             : 'text-yellow animate-pulse'}"
-          >{#if connectionPath === "relay"}<RelayIcon
+          >{#if App.connection.info.path_type === "relay"}<RelayIcon
               class="text-sm"
-            />{:else if connectionPath === "direct"}<DirectIcon
+            />{:else if App.connection.info.path_type === "direct"}<DirectIcon
               class="text-sm"
             />{:else}<ConnectingIcon class="text-sm" />{/if}</span
         ><OfflineIcon class="tablet-xl:block hidden text-sm" />{/if}</button
     >
     <a
       href={resolve("/settings")}
-      class="border-surface0 hover:bg-surface0 hover:text-mauve grid h-full w-9 place-items-center border-l {settingsActive
+      class="border-surface0 hover:bg-surface0 hover:text-mauve grid h-full w-9 place-items-center border-l {path.endsWith(
+        '/settings',
+      )
         ? 'bg-surface0 text-mauve'
         : 'text-overlay1'}"
       title="Connection settings"><SettingsIcon class="text-sm" /></a
