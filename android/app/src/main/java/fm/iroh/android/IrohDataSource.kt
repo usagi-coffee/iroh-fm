@@ -8,9 +8,11 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import org.json.JSONObject
 import java.io.IOException
-import java.io.ByteArrayOutputStream
 
-class IrohDataSource : BaseDataSource(true) {
+class IrohDataSource(
+    private val useMemoryCache: Boolean = true,
+    private val populateMemoryCache: Boolean = true,
+) : BaseDataSource(true) {
     private var streamHandle = 0L
     private var remaining = C.LENGTH_UNSET.toLong()
     private var uri: Uri? = null
@@ -19,7 +21,6 @@ class IrohDataSource : BaseDataSource(true) {
     private var fileSize = 0L
     private var memoryBytes: ByteArray? = null
     private var memoryPosition = 0
-    private var memoryCandidate: ByteArrayOutputStream? = null
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
@@ -28,7 +29,7 @@ class IrohDataSource : BaseDataSource(true) {
         check(client != 0L) { "iroh client is not connected" }
         uri = dataSpec.uri
         trackId = dataSpec.uri.lastPathSegment ?: error("missing track id")
-        NativeAudioCache.memoryTrack(NativeCore.activeRemoteId, trackId!!)?.let { cached ->
+        if (useMemoryCache) NativeAudioCache.memoryTrack(NativeCore.activeRemoteId, trackId!!)?.let { cached ->
             memoryBytes = cached
             memoryPosition = dataSpec.position.coerceIn(0L, cached.size.toLong()).toInt()
             fileSize = cached.size.toLong()
@@ -42,11 +43,6 @@ class IrohDataSource : BaseDataSource(true) {
         val opened = JSONObject(NativeCore.unwrap(NativeCore.openStream(client, trackId!!)))
         streamHandle = opened.getLong("handle")
         fileSize = opened.getLong("fileSize")
-        memoryCandidate = if (dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong()) {
-            ByteArrayOutputStream(fileSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
-        } else {
-            null
-        }
         Log.d(TAG, "Native iroh stream opened: trackId=$trackId bytes=$fileSize position=${dataSpec.position}")
         var skipped = 0L
         val scratch = ByteArray(64 * 1024)
@@ -55,6 +51,17 @@ class IrohDataSource : BaseDataSource(true) {
             val read = NativeCore.readStream(streamHandle, scratch, 0, wanted)
             if (read == C.RESULT_END_OF_INPUT) break
             if (read < 0) throw IOException("iroh stream failed while seeking")
+            if (populateMemoryCache) {
+                NativeAudioCache.recordMemoryBytes(
+                    NativeCore.activeRemoteId,
+                    trackId!!,
+                    skipped,
+                    scratch,
+                    0,
+                    read,
+                    fileSize,
+                )
+            }
             skipped += read
         }
         absolutePosition = skipped
@@ -84,8 +91,19 @@ class IrohDataSource : BaseDataSource(true) {
         if (read == C.RESULT_END_OF_INPUT) return C.RESULT_END_OF_INPUT
         if (read < 0) throw IOException("iroh stream read failed")
         if (remaining != C.LENGTH_UNSET.toLong()) remaining -= read
+        val readPosition = absolutePosition
         absolutePosition += read
-        memoryCandidate?.write(buffer, offset, read)
+        if (populateMemoryCache) {
+            NativeAudioCache.recordMemoryBytes(
+                NativeCore.activeRemoteId,
+                trackId!!,
+                readPosition,
+                buffer,
+                offset,
+                read,
+                fileSize,
+            )
+        }
         trackId?.let {
             NativeTransferProgress.update(it, absolutePosition, fileSize)
         }
@@ -97,13 +115,6 @@ class IrohDataSource : BaseDataSource(true) {
 
     override fun close() {
         val closingTrackId = trackId
-        if (closingTrackId != null && memoryCandidate != null && absolutePosition == fileSize) {
-            NativeAudioCache.rememberMemoryTrack(
-                NativeCore.activeRemoteId,
-                closingTrackId,
-                memoryCandidate!!.toByteArray(),
-            )
-        }
         if (streamHandle != 0L) {
             Log.d(TAG, "Native iroh stream closed: uri=$uri")
             NativeCore.closeStream(streamHandle)
@@ -117,11 +128,14 @@ class IrohDataSource : BaseDataSource(true) {
         fileSize = 0L
         memoryBytes = null
         memoryPosition = 0
-        memoryCandidate = null
     }
 
-    class Factory : DataSource.Factory {
-        override fun createDataSource(): DataSource = IrohDataSource()
+    class Factory(
+        private val useMemoryCache: Boolean = true,
+        private val populateMemoryCache: Boolean = true,
+    ) : DataSource.Factory {
+        override fun createDataSource(): DataSource =
+            IrohDataSource(useMemoryCache, populateMemoryCache)
     }
 
     companion object { private const val TAG = "iroh.fm.playback" }

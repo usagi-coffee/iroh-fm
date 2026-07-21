@@ -77,7 +77,7 @@ export class Player {
     if (!client) return;
     const index = queue.findIndex((item) => item.id === track.id);
     const next = queue[(index + 1) % queue.length];
-    if (!next || next.id === track.id || next.cached || next.downloading) return;
+    if (!next || next.id === track.id || next.cached || next.memoryCached || next.downloading) return;
     const downloadGeneration = next.startDownload();
     client
       .prefetchTrack(next.id, (/** @type {number} */ received, /** @type {number} */ total) =>
@@ -120,7 +120,8 @@ export class Player {
     this.audioLoading = true;
     this.playing = false;
     if (this.nativePlayback(client)) {
-      const downloadGeneration = track.cached ? null : track.startDownload();
+      if (!track.cached && !track.memoryCached && track.downloading) track.stopDownload();
+      const downloadGeneration = null;
       this.nativePlayPendingTrackId = track.id;
       let progressPending = false;
       const progressTimer = setInterval(() => {
@@ -166,7 +167,7 @@ export class Player {
       }
       return;
     }
-    const downloadGeneration = track.cached ? null : track.startDownload();
+    const downloadGeneration = track.cached || track.memoryCached ? null : track.startDownload();
     this.audioDownloadGeneration = downloadGeneration;
     try {
       const source = await client.trackSource(
@@ -446,6 +447,7 @@ export class Player {
           this.app.library.markMemoryCached(queuedTrack);
           continue;
         }
+        if (id === this.currentTrack?.id && this.nativePlayback()) continue;
         const received = Math.max(0, Number(transfer.received) || 0);
         const total = Math.max(0, Number(transfer.total) || Number(queuedTrack.file_size) || 0);
         queuedTrack.updateProgress(received, total);

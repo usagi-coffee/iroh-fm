@@ -47,6 +47,13 @@ class MainActivity : ComponentActivity() {
     private val sendLock = Any()
     private var transferSequence = 0L
     private val incomingRequestTransfers = mutableMapOf<String, IncomingRequestTransfer>()
+    private val playerStateTicker = object : Runnable {
+        override fun run() {
+            if (!channelReady) return
+            send(JSONObject().put("module", "native").put("event", "state").put("state", playerState()))
+            mainHandler.postDelayed(this, PLAYER_STATE_UPDATE_INTERVAL_MS)
+        }
+    }
 
     private val callback = object : CustomTabsCallback() {
         override fun onRelationshipValidationResult(
@@ -70,6 +77,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onNavigationEvent(event: Int, extras: Bundle?) {
             if (event != NAVIGATION_FINISHED) return
+            mainHandler.removeCallbacks(playerStateTicker)
             readyDispatched = false
             channelReady = false
             messageChannelReady = false
@@ -97,7 +105,12 @@ class MainActivity : ComponentActivity() {
         val result = send(JSONObject().put("module", "native").put("event", "ready").put("state", playerState(includeQueue = true)))
         readyDispatched = result == CustomTabsService.RESULT_SUCCESS
         Log.d(TAG, "Native bridge ready dispatched: result=$result")
-        if (!readyDispatched) channelReady = false
+        if (!readyDispatched) {
+            channelReady = false
+        } else {
+            mainHandler.removeCallbacks(playerStateTicker)
+            mainHandler.postDelayed(playerStateTicker, PLAYER_STATE_UPDATE_INTERVAL_MS)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,6 +133,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(playerStateTicker)
         controllerFuture?.let(MediaController::releaseFuture)
         worker.shutdown()
         super.onDestroy()
@@ -461,22 +475,20 @@ class MainActivity : ComponentActivity() {
             for (index in 0 until player.mediaItemCount) {
                 val id = player.getMediaItemAt(index).mediaId
                 if (includeQueue) queue.put(id)
-                NativeTransferProgress.snapshot(id)?.let {
+                val snapshot = NativeTransferProgress.snapshot(id)
+                val memoryCached = NativeAudioCache.isMemoryCached(NativeCore.activeRemoteId, id)
+                val cached =
+                    (includeQueue || snapshot != null || memoryCached) &&
+                        NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id)
+                if (snapshot != null || cached || memoryCached) {
                     transfers.put(
                         id,
                         JSONObject()
-                            .put("received", it.receivedBytes)
-                            .put("total", it.totalBytes)
-                            .put("active", it.active)
-                            .put(
-                                "cached",
-                                NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id),
-                            )
-                            .put(
-                                "memoryCached",
-                                !NativeAudioCache.isOfflineCached(NativeCore.activeRemoteId, id) &&
-                                    NativeAudioCache.isMemoryCached(NativeCore.activeRemoteId, id),
-                            ),
+                            .put("received", snapshot?.receivedBytes ?: 0L)
+                            .put("total", snapshot?.totalBytes ?: 0L)
+                            .put("active", snapshot?.active == true)
+                            .put("cached", cached)
+                            .put("memoryCached", memoryCached),
                     )
                 }
             }
@@ -541,6 +553,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "iroh.fm"
+        private const val PLAYER_STATE_UPDATE_INTERVAL_MS = 250L
         private val CHROMIUM_CUSTOM_TABS_PACKAGES = listOf(
             "com.android.chrome",
             "app.vanadium.browser",

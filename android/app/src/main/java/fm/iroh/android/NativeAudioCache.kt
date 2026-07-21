@@ -24,7 +24,15 @@ object NativeAudioCache {
     private lateinit var playbackFactory: CacheDataSource.Factory
     private val memoryLock = Any()
     private val memoryTracks = LinkedHashMap<String, ByteArray>(0, 0.75f, true)
+    private data class MemoryRange(val start: Long, val end: Long)
+    private data class PartialMemoryTrack(
+        val bytes: ByteArray,
+        val ranges: MutableList<MemoryRange> = mutableListOf(),
+        var coveredBytes: Long = 0L,
+    )
+    private val partialMemoryTracks = mutableMapOf<String, PartialMemoryTrack>()
     private var memoryBytes = 0L
+    private var partialMemoryBytes = 0L
     private var memoryCacheBytes = DEFAULT_MEMORY_CACHE_BYTES
 
     fun initialize(context: Context) = synchronized(initializationLock) {
@@ -38,7 +46,7 @@ object NativeAudioCache {
         )
         offlineDownloadFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
-            .setUpstreamDataSourceFactory(IrohDataSource.Factory())
+            .setUpstreamDataSourceFactory(IrohDataSource.Factory(populateMemoryCache = false))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         playbackFactory = CacheDataSource.Factory()
             .setCache(offlineCache)
@@ -67,29 +75,119 @@ object NativeAudioCache {
     }
 
     fun rememberMemoryTrack(remoteId: String, trackId: String, bytes: ByteArray) {
-        if (bytes.isEmpty() || bytes.size.toLong() > memoryCacheBytes) return
         synchronized(memoryLock) {
-            val key = cacheKey(remoteId, trackId)
-            memoryBytes -= memoryTracks.remove(key)?.size?.toLong() ?: 0L
-            while (memoryBytes + bytes.size > memoryCacheBytes) {
-                val oldest = memoryTracks.entries.iterator()
-                if (!oldest.hasNext()) break
-                memoryBytes -= oldest.next().value.size.toLong()
-                oldest.remove()
-            }
-            memoryTracks[key] = bytes
-            memoryBytes += bytes.size
+            insertMemoryTrackLocked(cacheKey(remoteId, trackId), bytes)
         }
+    }
+
+    /** Records a range read by Media3 and promotes it once the complete track is available. */
+    fun recordMemoryBytes(
+        remoteId: String,
+        trackId: String,
+        position: Long,
+        buffer: ByteArray,
+        offset: Int,
+        length: Int,
+        totalBytes: Long,
+    ): Boolean = synchronized(memoryLock) {
+        if (
+            totalBytes <= 0L ||
+            totalBytes > Int.MAX_VALUE.toLong() ||
+            offset < 0 ||
+            length <= 0 ||
+            offset > buffer.size - length
+        ) return false
+        val key = cacheKey(remoteId, trackId)
+        if (memoryTracks.containsKey(key)) return true
+        val total = totalBytes.toInt()
+        var partial = partialMemoryTracks[key]
+        if (partial == null || partial.bytes.size != total) {
+            partial?.let {
+                partialMemoryTracks.remove(key)
+                partialMemoryBytes -= it.bytes.size.toLong()
+            }
+            if (!reservePartialMemoryLocked(total.toLong())) return false
+            val newPartial = PartialMemoryTrack(ByteArray(total))
+            partial = newPartial
+            partialMemoryTracks[key] = newPartial
+            partialMemoryBytes += total.toLong()
+        }
+        val track = partial ?: return false
+        val start = position.coerceIn(0L, totalBytes)
+        val copyLength = minOf(length.toLong(), totalBytes - start).toInt()
+        if (copyLength <= 0) return track.coveredBytes >= totalBytes
+        buffer.copyInto(track.bytes, start.toInt(), offset, offset + copyLength)
+        addMemoryRange(track, start, start + copyLength)
+        if (track.coveredBytes < totalBytes) return false
+
+        partialMemoryTracks.remove(key)
+        partialMemoryBytes -= totalBytes
+        insertMemoryTrackLocked(key, track.bytes)
+        true
     }
 
     fun resizeMemoryCache(bytes: Long) = synchronized(memoryLock) {
         memoryCacheBytes = bytes.coerceIn(MIN_MEMORY_CACHE_BYTES, MAX_MEMORY_CACHE_BYTES)
         while (memoryBytes > memoryCacheBytes) {
-            val oldest = memoryTracks.entries.iterator()
-            if (!oldest.hasNext()) break
-            memoryBytes -= oldest.next().value.size.toLong()
-            oldest.remove()
+            if (!evictOldestMemoryTrackLocked()) break
         }
+        while (memoryBytes + partialMemoryBytes > memoryCacheBytes) {
+            val key = partialMemoryTracks.keys.firstOrNull() ?: break
+            val partial = partialMemoryTracks.remove(key) ?: break
+            partialMemoryBytes -= partial.bytes.size.toLong()
+        }
+    }
+
+    private fun insertMemoryTrackLocked(key: String, bytes: ByteArray) {
+        if (bytes.isEmpty() || bytes.size.toLong() > memoryCacheBytes) return
+        memoryBytes -= memoryTracks.remove(key)?.size?.toLong() ?: 0L
+        while (memoryBytes + partialMemoryBytes + bytes.size > memoryCacheBytes) {
+            if (!evictOldestMemoryTrackLocked()) return
+        }
+        memoryTracks[key] = bytes
+        memoryBytes += bytes.size
+    }
+
+    private fun reservePartialMemoryLocked(bytes: Long): Boolean {
+        if (bytes > memoryCacheBytes) return false
+        while (memoryBytes + partialMemoryBytes + bytes > memoryCacheBytes) {
+            if (evictOldestMemoryTrackLocked()) continue
+            val key = partialMemoryTracks.keys.firstOrNull() ?: return false
+            val partial = partialMemoryTracks.remove(key) ?: continue
+            partialMemoryBytes -= partial.bytes.size.toLong()
+        }
+        return true
+    }
+
+    private fun evictOldestMemoryTrackLocked(): Boolean {
+        val oldest = memoryTracks.entries.iterator()
+        if (!oldest.hasNext()) return false
+        memoryBytes -= oldest.next().value.size.toLong()
+        oldest.remove()
+        return true
+    }
+
+    private fun addMemoryRange(track: PartialMemoryTrack, start: Long, end: Long) {
+        var mergedStart = start
+        var mergedEnd = end
+        var newlyCovered = end - start
+        val remaining = mutableListOf<MemoryRange>()
+        for (range in track.ranges) {
+            if (range.end < mergedStart || range.start > mergedEnd) {
+                remaining += range
+                continue
+            }
+            val overlapStart = maxOf(range.start, start)
+            val overlapEnd = minOf(range.end, end)
+            if (overlapEnd > overlapStart) newlyCovered -= overlapEnd - overlapStart
+            mergedStart = minOf(mergedStart, range.start)
+            mergedEnd = maxOf(mergedEnd, range.end)
+        }
+        remaining += MemoryRange(mergedStart, mergedEnd)
+        remaining.sortBy { it.start }
+        track.ranges.clear()
+        track.ranges.addAll(remaining)
+        track.coveredBytes += newlyCovered.coerceAtLeast(0L)
     }
 
     fun cachedTrackIds(remoteId: String): Set<String> {
