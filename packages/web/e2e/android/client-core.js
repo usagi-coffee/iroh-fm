@@ -4,6 +4,7 @@ const stateListeners = new Set();
 
 class AndroidMusicClient extends NativeFixtureClient {
   native = true;
+  nativePlayback = false;
 
   async bootstrap(...args) {
     if (localStorage.getItem("e2e-slow-native-startup")) await delay(1_400);
