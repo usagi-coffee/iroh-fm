@@ -14,6 +14,8 @@ Apply these rules when creating or modifying Svelte files. Preserve existing pro
 - Use `{const ...}`, `{const ... = $derived(...)}`, and `{let ... = $state(...)}` in markup. Do not use legacy `{@const ...}`.
 - Use `{@attach ...}` over `bind:this`, `onMount`, `onDestroy`, keep in mind reads inside the attachment force re-attachments.
 - Destructure component props from `$props()`.
+- Use `<svelte:boundary>` instead of legacy `{#await` blocks.
+- You can use top-level await e.g `const value = $derived(await fetch())` in the `<script>` block and the markup.
 
 ## SvelteKit
 
