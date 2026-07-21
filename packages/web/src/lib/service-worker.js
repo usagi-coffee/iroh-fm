@@ -165,6 +165,7 @@ async function inspect(registration) {
       activeBuild = metadata.buildVersion;
       log("active:metadata", metadataState(metadata, registration.active));
       applyWorkerMetadata(metadata);
+      if (metadata.updateReady) await useCandidate(registration.active, metadata);
     }
   }
   if (registration.waiting) await useCandidate(registration.waiting);
@@ -184,7 +185,7 @@ async function checkForUpdate() {
       notifyUpdates();
       void install(PAGE_BUILD).catch((error) => logError("update:restore-failed", error));
     }
-    return;
+    return remote.version;
   }
   if (availableBuild !== remote.version) {
     availableBuild = remote.version;
@@ -192,6 +193,7 @@ async function checkForUpdate() {
     notifyUpdates();
   }
   void install(remote.version).catch((error) => logError("update:install-failed", error));
+  return remote.version;
 }
 
 /** @param {string} build @returns {Promise<ServiceWorker | null>} */
@@ -219,8 +221,8 @@ async function installBuild(build) {
   if (!worker) throw new Error("WebKit returned no worker for the requested update.");
 
   let metadata = worker.state === "installing" ? null : await ping(worker).catch(() => null);
-  if (metadata && metadata.buildVersion !== build) {
-    log("update:revalidate", { expected: build, received: metadata.buildVersion });
+  if (metadata && workerBuild(metadata) !== build) {
+    log("update:revalidate", { expected: build, received: workerBuild(metadata) });
     await registration.update();
     worker = registration.installing ?? findWorker(registration, build);
   }
@@ -228,9 +230,10 @@ async function installBuild(build) {
   worker = await waitForInstalled(worker);
   if (!worker) throw new Error("The service worker became redundant during installation.");
   metadata = await ping(worker);
-  if (metadata.buildVersion !== build)
-    throw new Error(`Expected worker ${build.slice(0, 12)}, received ${metadata.buildVersion}.`);
-  if (worker.state === "installed") await useCandidate(worker, metadata);
+  const installedBuild = workerBuild(metadata);
+  if (installedBuild !== build)
+    throw new Error(`Expected worker ${build.slice(0, 12)}, received ${installedBuild}.`);
+  if (worker.state === "installed" || metadata.updateReady) await useCandidate(worker, metadata);
   return worker;
 }
 
@@ -270,12 +273,14 @@ function observeWorker(worker, slot) {
 /** @param {ServiceWorker} worker @param {Record<string, any>} [metadata] */
 async function useCandidate(worker, metadata) {
   const info = metadata ?? (await ping(worker));
-  if (info.buildVersion === activeBuild) {
+  const build = workerBuild(info);
+  if (!build) throw new Error("The service worker did not report its build.");
+  if (build === activeBuild && !info.updateReady) {
     log("update:duplicate", metadataState(info, worker));
     return;
   }
   waitingWorker = worker;
-  if (info.buildVersion !== PAGE_BUILD) availableBuild = info.buildVersion;
+  if (build !== PAGE_BUILD) availableBuild = build;
   applyWorkerMetadata(info);
   log("update:ready", metadataState(info, worker));
   notifyUpdates();
@@ -416,17 +421,25 @@ export function subscribeToServiceWorkerStatus(listener) {
 export async function activateServiceWorkerUpdate() {
   if (DEVELOPMENT || nativeUpgrade) return;
   try {
-    const registration = await getRegistration();
-    let worker = registration.waiting ?? waitingWorker;
-    const waitingMetadata = worker ? await ping(worker).catch(() => null) : null;
-    if (availableBuild && waitingMetadata?.buildVersion !== availableBuild) {
-      await install(availableBuild);
-      worker = registration.waiting ?? waitingWorker;
+    let remoteBuild;
+    try {
+      remoteBuild = await checkForUpdate();
+    } catch (error) {
+      logError("activation:check-unavailable", error);
     }
+    if (remoteBuild === PAGE_BUILD && activeBuild === PAGE_BUILD) return;
+
+    const targetBuild = remoteBuild && remoteBuild !== PAGE_BUILD ? remoteBuild : availableBuild;
+    if (targetBuild) await install(targetBuild);
+    if (nativeUpgrade) return;
+
+    const registration = await getRegistration();
+    let worker = targetBuild ? findWorker(registration, targetBuild) : undefined;
+    worker ??= targetBuild ? waitingWorker : (registration.waiting ?? waitingWorker);
     if (!worker) throw new Error("WebKit did not expose a waiting worker.");
-    if (availableBuild) {
+    if (targetBuild) {
       const metadata = await ping(worker);
-      if (metadata.buildVersion !== availableBuild)
+      if (workerBuild(metadata) !== targetBuild)
         throw new Error("The waiting worker does not match the available web build.");
     }
     log("activation:start", workerState(worker));
@@ -606,12 +619,18 @@ function workerState(worker) {
 function metadataState(metadata, worker) {
   return {
     ...workerState(worker),
-    webBuild: metadata.buildVersion,
+    shellBuild: metadata.buildVersion,
+    workerBuild: workerBuild(metadata),
     desktopEpoch: metadata.nativeEpochs?.Desktop?.minimum,
     desktopCommit: metadata.nativeEpochs?.Desktop?.commit,
     androidEpoch: metadata.nativeEpochs?.Android?.minimum,
     androidCommit: metadata.nativeEpochs?.Android?.commit,
   };
+}
+
+/** @param {Record<string, any>} metadata */
+function workerBuild(metadata) {
+  return String(metadata.workerBuildVersion ?? metadata.buildVersion ?? "");
 }
 
 /** @param {string} event @param {Record<string, any>} [details] */
