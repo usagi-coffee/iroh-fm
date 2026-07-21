@@ -38,6 +38,16 @@
       if (element.open) element.close();
     };
   }
+
+  /** @param {MouseEvent} event */
+  function dismissOnBackdrop(event) {
+    if (event.target === event.currentTarget) dismiss(cancelValue);
+  }
+
+  /** @param {MouseEvent} event */
+  function blockContextMenu(event) {
+    if (preventContextMenu) event.preventDefault();
+  }
 </script>
 
 <dialog
@@ -45,12 +55,8 @@
   class="text-text backdrop:bg-crust/75 fixed inset-0 m-0 size-full max-h-none max-w-none place-items-center overflow-hidden border-0 bg-transparent p-4 backdrop:backdrop-blur-sm open:grid"
   aria-labelledby={labelledBy}
   aria-describedby={describedBy}
-  onclick={(event) => {
-    if (event.target === event.currentTarget) dismiss(cancelValue);
-  }}
-  oncontextmenu={(event) => {
-    if (preventContextMenu) event.preventDefault();
-  }}
+  onclick={dismissOnBackdrop}
+  oncontextmenu={blockContextMenu}
 >
   <div {@attach focusModal} class={className} role="document" tabindex="-1">
     {@render snippet({ dismiss, ...props })}
