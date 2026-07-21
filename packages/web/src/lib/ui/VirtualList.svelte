@@ -322,16 +322,6 @@
         observedItems.set(node, { key, index });
         if (measureItems === "uniform" && uniformMeasurement?.estimate !== estimate)
           updateUniformMeasurement(estimate, node.getBoundingClientRect().height);
-        else if (measureItems === true) {
-          const size = node.getBoundingClientRect().height;
-          const previous = measuredSizes.get(key);
-          if (
-            size > 0 &&
-            (previous?.estimate !== estimate ||
-              Math.abs(previous.size - size) >= MEASUREMENT_EPSILON)
-          )
-            measuredSizes.set(key, { estimate, size });
-        }
         ensureItemObserver().observe(node);
         return () => {
           observedItems.delete(node);
