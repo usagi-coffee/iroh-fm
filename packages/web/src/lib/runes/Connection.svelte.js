@@ -1,3 +1,5 @@
+import { flushSync } from "svelte";
+
 import { albumSort, cleanRelays, friendlyError, trackSort } from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
@@ -376,7 +378,9 @@ export class Connection {
       this.app.library.artists = data.artists;
       this.app.library.replaceTracks(tracks, cachedIds);
       this.app.library.starred = data.starred;
-      this.connectionStep = "Preparing the library indexes…";
+      flushSync(() => {
+        this.connectionStep = "Preparing the library indexes…";
+      });
       this.app.library.prepareIndexes();
       this.client = nextClient;
       if (previousClient && previousClient !== nextClient)

@@ -426,7 +426,7 @@
               {@render errorToast()}
 
               {#snippet pending()}
-                {@render loading({ text: App.connection.connectionStep, step: 6 })}
+                {@render loading({ text: $state.eager(App.connection.connectionStep), step: 6 })}
               {/snippet}
             </svelte:boundary>
             {#snippet pending()}
