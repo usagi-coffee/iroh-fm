@@ -230,6 +230,12 @@ test("allows virtualized track and album lists to reach their bottom edge", asyn
     (element) => (element.scrollTop = element.scrollHeight - element.clientHeight - 1),
   );
   await expect.poll(() => finalVirtualRowOverflow(albumViewport)).toBeLessThanOrEqual(0);
+  await expect.poll(() => uniformVirtualStrideError(albumViewport, 120)).toBeLessThan(0.1);
+  const settledPosition = await albumViewport.evaluate((element) => element.scrollTop);
+  await page.waitForTimeout(1_200);
+  expect(
+    Math.abs((await albumViewport.evaluate((element) => element.scrollTop)) - settledPosition),
+  ).toBeLessThan(1);
 });
 
 test("centers the playing album without shifting after navigation", async ({ page }, testInfo) => {
@@ -402,4 +408,28 @@ async function outwardTouchMovePrevented(viewport) {
     );
     return !accepted;
   });
+}
+
+/**
+ * @param {import('@playwright/test').Locator} viewport
+ * @param {number} albumCount
+ */
+async function uniformVirtualStrideError(viewport, albumCount) {
+  return viewport.evaluate((element, count) => {
+    const rows = element.querySelectorAll("[data-virtual-index]");
+    const first = rows[0];
+    const second = rows[1];
+    const spacer = element.firstElementChild;
+    const group = spacer?.firstElementChild;
+    if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement) || !group || !spacer)
+      return Number.POSITIVE_INFINITY;
+    const columnsLabel = element.closest("section")?.querySelector('[title$="album columns"]');
+    const columns = Number.parseInt(columnsLabel?.getAttribute("title") ?? "", 10);
+    const firstIndex = Number(first.dataset.virtualIndex);
+    const stride = second.getBoundingClientRect().top - first.getBoundingClientRect().top;
+    const transform = new DOMMatrixReadOnly(getComputedStyle(group).transform).m42;
+    const padding = transform - firstIndex * stride;
+    const expectedHeight = padding * 2 + Math.ceil(count / columns) * stride;
+    return Math.abs(spacer.getBoundingClientRect().height - expectedHeight);
+  }, albumCount);
 }

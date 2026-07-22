@@ -265,7 +265,7 @@
       items={rows}
       getKey={albumRowKey}
       estimateSize={rowHeight}
-      measureItems={false}
+      measureItems="uniform"
       overscan={bufferSize}
       overscroll={false}
       paddingStart={gap}
