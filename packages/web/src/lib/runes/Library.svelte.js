@@ -4,44 +4,37 @@ import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
 import { Track } from "$lib/runes/Track.svelte.js";
+import { createTrackListItems } from "$lib/track-list-items.js";
 import { filterTracks, friendlyError } from "$lib/utils.js";
 
 export class Library {
-  /** @type {import('$lib/types').LibrarySummary} */
   summary = $state.raw({ artist_count: 0, album_count: 0, track_count: 0 });
-  /** @type {import('$lib/types').AlbumData[]} */
+  /** @type {import('@iroh-fm/client/types').Album[]} */
   albums = $state.raw([]);
-  /** @type {import('$lib/types').ArtistData[]} */
+  /** @type {import('@iroh-fm/client/types').Artist[]} */
   artists = $state.raw([]);
   /** @type {Track[]} */
   tracks = $state.raw([]);
-  /** @type {import('$lib/types').StarredSet} */
+  /** @type {import('@iroh-fm/client/types').StarredSet} */
   starred = $state({ artists: [], albums: [], tracks: [] });
   offlineOnly = $state(false);
-  /** @type {Set<string>} */
   starredTrackIds = $derived(new Set(this.starred.tracks.map((track) => track.id)));
-  /** @type {Set<string>} */
   starredAlbumIds = $derived(new Set(this.starred.albums.map((album) => album.id)));
-  /** @type {Track[]} */
   cachedTracks = $derived(this.tracks.filter((track) => track.cached));
   /** @type {SvelteSet<string>} */
   cachingTrackIds = new SvelteSet();
   /** @type {SvelteSet<string>} */
   cachingAlbumIds = new SvelteSet();
-  /** @type {Map<string, Track>} */
   tracksById = $derived(new Map(this.tracks.map((track) => [track.id, track])));
-  /** @type {Map<string, import('$lib/types').AlbumData>} */
   albumById = $derived(new Map(this.albums.map((album) => [album.id, album])));
-  /** @type {Map<string, import('$lib/types').AlbumData>} */
   albumByTrackId = $derived.by(() => {
-    /** @type {Map<string, import('$lib/types').AlbumData>} */
+    /** @type {Map<string, import('@iroh-fm/client/types').Album>} */
     const albums = new Map();
     for (const album of this.albums) {
       for (const id of album.track_ids) albums.set(id, album);
     }
     return albums;
   });
-  /** @type {Map<string, Track[]>} */
   tracksByAlbum = $derived.by(() => {
     /** @type {Map<string, Track[]>} */
     const albums = new Map();
@@ -54,7 +47,6 @@ export class Library {
     }
     return albums;
   });
-  /** @type {Map<string, Track[]>} */
   cachedTracksByAlbum = $derived.by(() => {
     /** @type {Map<string, Track[]>} */
     const albums = new Map();
@@ -64,7 +56,6 @@ export class Library {
     }
     return albums;
   });
-  /** @type {Set<string>} */
   allStarredTrackIds = $derived.by(() => {
     const selected = new Set(this.starred.tracks.map((track) => track.id));
     for (const album of this.starred.albums) {
@@ -77,39 +68,26 @@ export class Library {
     }
     return selected;
   });
-  /** @type {Track[]} */
   starredTracks = $derived(this.tracks.filter((track) => this.allStarredTrackIds.has(track.id)));
-  /** @type {Track[]} */
   cachedStarredTracks = $derived(this.starredTracks.filter((track) => track.cached));
-  /** @type {Track[]} */
   availableTracks = $derived(this.offlineOnly ? this.cachedTracks : this.tracks);
-  /** @type {Track[]} */
   availableStarredTracks = $derived(
     this.offlineOnly ? this.cachedStarredTracks : this.starredTracks,
   );
-  /** @type {import('$lib/types').TrackListItem[]} */
   trackListItems = $derived(this.createTrackListItems(this.tracks, false));
-  /** @type {import('$lib/types').TrackListItem[]} */
   cachedTrackListItems = $derived(this.createTrackListItems(this.cachedTracks, true));
-  /** @type {import('$lib/types').TrackListItem[]} */
   starredTrackListItems = $derived(this.createTrackListItems(this.starredTracks, false));
-  /** @type {import('$lib/types').TrackListItem[]} */
   cachedStarredTrackListItems = $derived(this.createTrackListItems(this.cachedStarredTracks, true));
-  /** @type {import('$lib/types').TrackListItem[]} */
   availableTrackListItems = $derived(
     this.offlineOnly ? this.cachedTrackListItems : this.trackListItems,
   );
-  /** @type {import('$lib/types').TrackListItem[]} */
   availableStarredTrackListItems = $derived(
     this.offlineOnly ? this.cachedStarredTrackListItems : this.starredTrackListItems,
   );
-  /** @type {import('$lib/types').AlbumData[]} */
   offlineAlbums = $derived(
     this.albums.filter((album) => (this.cachedTracksByAlbum.get(album.id)?.length ?? 0) > 0),
   );
-  /** @type {import('$lib/types').AlbumData[]} */
   visibleAlbums = $derived(this.offlineOnly ? this.offlineAlbums : this.albums);
-  /** @type {Set<string>} */
   fullyCachedAlbumIds = $derived(
     new Set(
       this.albums
@@ -132,7 +110,10 @@ export class Library {
     this.app = app;
   }
 
-  /** @param {import('$lib/types').TrackData[]} rawTracks @param {Iterable<string>} cachedIds */
+  /**
+   * @param {import('@iroh-fm/client/types').TrackData[]} rawTracks
+   * @param {Iterable<string>} cachedIds
+   */
   replaceTracks(rawTracks, cachedIds) {
     const cached = new Set(cachedIds);
     const previousTracksById = this.tracksById;
@@ -163,7 +144,10 @@ export class Library {
     track.setMemoryCached(true);
   }
 
-  /** @param {boolean} [starredOnly] @param {string} [query] */
+  /**
+   * @param {boolean} [starredOnly]
+   * @param {string} [query]
+   */
   getFilteredTracks(starredOnly = false, query = "") {
     const source = starredOnly ? this.availableStarredTracks : this.availableTracks;
     if (!query.trim()) return source;
@@ -177,36 +161,18 @@ export class Library {
     return this.createTrackListItems(filtered);
   }
 
-  /** @param {Track[]} filtered @param {boolean} [offlineOnly] */
+  /**
+   * @param {Track[]} filtered
+   * @param {boolean} [offlineOnly]
+   */
   createTrackListItems(filtered, offlineOnly = this.offlineOnly) {
-    /** @type {import('$lib/types').TrackListItem[]} */
-    const items = [];
-    let previousAlbumKey;
-    for (const [trackIndex, track] of filtered.entries()) {
-      const album = this.albumByTrackId.get(track.id);
-      const albumKey = album?.id ?? `${track.album}\u0000${track.album_artist ?? track.artist}`;
-      if (albumKey !== previousAlbumKey) {
-        const allAlbumTracks = this.tracksByAlbum.get(albumKey) ?? [track];
-        const albumTracks = offlineOnly
-          ? (this.cachedTracksByAlbum.get(albumKey) ?? [])
-          : allAlbumTracks;
-        items.push({
-          kind: "album",
-          key: `album:${albumKey}:${track.id}`,
-          title: album?.title ?? track.album,
-          artist: album?.album_artist ?? album?.artist ?? track.album_artist ?? track.artist,
-          coverArtId: album?.cover_art_id ?? track.cover_art_id,
-          durationSeconds:
-            (!offlineOnly ? album?.duration_seconds : null) ??
-            albumTracks.reduce((total, item) => total + (item.duration_seconds ?? 0), 0),
-          tracks: albumTracks,
-          album,
-        });
-        previousAlbumKey = albumKey;
-      }
-      items.push({ kind: "track", key: `track:${track.id}`, track, trackIndex });
-    }
-    return items;
+    return createTrackListItems(
+      filtered,
+      offlineOnly,
+      this.albumByTrackId,
+      this.tracksByAlbum,
+      this.cachedTracksByAlbum,
+    );
   }
 
   /** @param {Track | null} track */
@@ -223,18 +189,18 @@ export class Library {
   }
 
   /** Album cache state is derived exclusively from its individual track files. */
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   isAlbumFullyCached(album) {
     return this.fullyCachedAlbumIds.has(album.id);
   }
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   firstAvailableTrackForAlbum(album) {
     const ids = new Set(album.track_ids);
     return this.tracks.find((track) => ids.has(track.id) && (!this.offlineOnly || track.cached));
   }
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   async selectAlbum(album) {
     const first = this.firstAvailableTrackForAlbum(album);
     if (!first) return null;
@@ -242,32 +208,31 @@ export class Library {
     return first;
   }
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   async activateAlbum(album) {
     const first = await this.selectAlbum(album);
     if (first && window.matchMedia("(max-width: 1023px)").matches)
       await this.app.player.playAlbum(album);
   }
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   async playAndSelectAlbum(album) {
     const first = await this.selectAlbum(album);
     if (!first) return;
     await this.app.player.playAlbum(album);
   }
 
-  /** @param {Track} track @param {{ stopPropagation(): void } | undefined} [event] */
+  /**
+   * @param {Track} track
+   * @param {{ stopPropagation(): void } | undefined} [event]
+   */
   async toggleStar(track, event) {
     event?.stopPropagation();
     const client = this.app.connection.client;
     if (!client) return;
     const starred = !this.starredTrackIds.has(track.id);
     try {
-      await client.request(
-        this.app.starredKey
-          ? { SetStarredWithKey: { id: track.id, starred, key: this.app.starredKey } }
-          : { SetStarred: { id: track.id, starred } },
-      );
+      await client.setStarred(track.id, starred, this.app.starredKey);
       if (this.app.connection.client !== client) return;
       this.starred.tracks = starred
         ? [track, ...this.starred.tracks.filter((item) => item.id !== track.id)]
@@ -329,13 +294,16 @@ export class Library {
     }
   }
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   tracksForAlbum(album) {
     const tracks = this.tracksByAlbum.get(album.id) ?? [];
     return this.offlineOnly ? (this.cachedTracksByAlbum.get(album.id) ?? []) : tracks;
   }
 
-  /** @param {Track[]} tracks @param {string} cacheKey */
+  /**
+   * @param {Track[]} tracks
+   * @param {string} cacheKey
+   */
   async cacheAlbum(tracks, cacheKey) {
     if (this.offlineOnly || this.cachingAlbumIds.has(cacheKey)) return;
     const client = this.app.connection.client;
@@ -373,18 +341,14 @@ export class Library {
     }
   }
 
-  /** @param {import('$lib/types').AlbumData | null | undefined} album */
+  /** @param {import('@iroh-fm/client/types').Album | null | undefined} album */
   async toggleStarAlbum(album) {
     if (!album) return;
     const client = this.app.connection.client;
     if (!client) return;
     const starred = !this.starredAlbumIds.has(album.id);
     try {
-      await client.request(
-        this.app.starredKey
-          ? { SetStarredWithKey: { id: album.id, starred, key: this.app.starredKey } }
-          : { SetStarred: { id: album.id, starred } },
-      );
+      await client.setStarred(album.id, starred, this.app.starredKey);
       if (this.app.connection.client !== client) return;
       this.starred.albums = starred
         ? [album, ...this.starred.albums.filter((item) => item.id !== album.id)]

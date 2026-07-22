@@ -119,7 +119,9 @@ test("filters tracks by title", async ({ page }) => {
   await expect(page.getByRole("row")).toHaveCount(1);
 });
 
-test("edits client settings through the settings model", async ({ page }) => {
+test("edits client settings through the settings model", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "web", "Native clients use platform-owned settings.");
+
   await page.getByRole("link", { name: "Connection settings" }).click();
   await expect(page.getByRole("heading", { name: "Client settings" })).toBeVisible();
 

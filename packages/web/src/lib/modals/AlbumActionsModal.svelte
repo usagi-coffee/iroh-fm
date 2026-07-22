@@ -11,7 +11,7 @@
   /**
    * @typedef {Object} Props
    * @property {(result?: unknown) => void} dismiss
-   * @property {import('$lib/types').AlbumData | null | undefined} album
+   * @property {import('@iroh-fm/client/types').Album | null | undefined} album
    * @property {import('$lib/runes/Track.svelte.js').Track[]} tracks
    * @property {string} title
    * @property {string} cacheKey

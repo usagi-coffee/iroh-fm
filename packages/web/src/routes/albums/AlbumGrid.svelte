@@ -17,7 +17,7 @@
 
   import Cover from "../Cover.svelte";
 
-  /** @typedef {{ albums: import('$lib/types').AlbumData[], followPlayingTrack?: boolean }} Props */
+  /** @typedef {{ albums: import('@iroh-fm/client/types').Album[], followPlayingTrack?: boolean }} Props */
   /** @type {Props} */
   const { albums, followPlayingTrack = false } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
@@ -48,7 +48,7 @@
   const columns = $derived(Math.max(1, Math.min(maxColumns, autoColumns + columnAdjustment)));
   const bufferSize = $derived(25 * rootFontSize);
   const rows = $derived.by(() => {
-    /** @type {import('$lib/types').AlbumData[][]} */
+    /** @type {import('@iroh-fm/client/types').Album[][]} */
     const grouped = [];
     for (let index = 0; index < albums.length; index += columns)
       grouped.push(albums.slice(index, index + columns));
@@ -64,7 +64,7 @@
     playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
   );
 
-  /** @param {import('$lib/types').AlbumData[]} row */
+  /** @param {import('@iroh-fm/client/types').Album[]} row */
   function albumRowKey(row) {
     return `${columns}:${row[0]?.id ?? "empty"}`;
   }
@@ -141,7 +141,10 @@
     localStorage.setItem(COLUMN_ADJUSTMENT_KEY, String(columnAdjustment));
   }
 
-  /** @param {import('$lib/types').AlbumData} album @param {MouseEvent} [event] */
+  /**
+   * @param {import('@iroh-fm/client/types').Album} album
+   * @param {MouseEvent} [event]
+   */
   function openActions(album, event) {
     event?.preventDefault();
     event?.stopPropagation();
@@ -155,13 +158,19 @@
     );
   }
 
-  /** @param {import('$lib/types').AlbumData} album @param {MouseEvent} event */
+  /**
+   * @param {import('@iroh-fm/client/types').Album} album
+   * @param {MouseEvent} event
+   */
   function cacheAlbum(album, event) {
     event.stopPropagation();
     void App.library.cacheAlbum(App.library.tracksForAlbum(album), album.id);
   }
 
-  /** @param {import('$lib/types').AlbumData} album @param {MouseEvent} event */
+  /**
+   * @param {import('@iroh-fm/client/types').Album} album
+   * @param {MouseEvent} event
+   */
   function starAlbum(album, event) {
     event.stopPropagation();
     void App.library.toggleStarAlbum(album);

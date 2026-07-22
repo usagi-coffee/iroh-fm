@@ -7,7 +7,11 @@ export function isDesktop() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** @param {string} command @param {Record<string, any>} [payload] @returns {Promise<any>} */
+/**
+ * @param {string} command
+ * @param {Record<string, any>} [payload]
+ * @returns {Promise<any>}
+ */
 async function invoke(command, payload = {}) {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke(command, payload);
@@ -98,7 +102,10 @@ class DesktopInner {
     return JSON.stringify(this.info);
   }
 
-  /** @param {string} id @param {boolean} fullQuality */
+  /**
+   * @param {string} id
+   * @param {boolean} fullQuality
+   */
   async fetchCover(id, fullQuality) {
     const data = bytes(
       await invoke("desktop_cover_art", {
@@ -137,7 +144,10 @@ class DesktopInner {
     };
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string}>} queue */
+  /**
+   * @param {{id: string}} track
+   * @param {Array<{id: string}>} queue
+   */
   playNative(track, queue) {
     return invoke("desktop_play", {
       handle: this.handle,
@@ -146,7 +156,10 @@ class DesktopInner {
     });
   }
 
-  /** @param {string} command @param {Record<string, any>} [payload] */
+  /**
+   * @param {string} command
+   * @param {Record<string, any>} [payload]
+   */
   playerCommand(command, payload = {}) {
     return invoke("desktop_player_command", { handle: this.handle, command, payload });
   }
@@ -161,7 +174,10 @@ class DesktopInner {
   }
 
   /** Explicitly download a track into the persistent Desktop cache. */
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async cacheTrack(id, onProgress = () => {}) {
     let polling = false;
     const report = async () => {
@@ -185,7 +201,10 @@ class DesktopInner {
     }
   }
 
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   prefetchTrack(id, onProgress = () => {}) {
     return this.cacheTrack(id, onProgress);
   }

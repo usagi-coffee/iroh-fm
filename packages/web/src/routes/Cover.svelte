@@ -7,19 +7,30 @@
   /** @type {WeakMap<object, Map<string, string>>} */
   const resolvedCoverUrls = new WeakMap();
 
-  /** @param {string} id @param {boolean} fullQuality */
+  /**
+   * @param {string} id
+   * @param {boolean} fullQuality
+   */
   function coverKey(id, fullQuality) {
     return `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
   }
 
-  /** @param {object | null} client @param {string | null} id @param {boolean} fullQuality */
+  /**
+   * @param {object | null} client
+   * @param {string | null} id
+   * @param {boolean} fullQuality
+   */
   function resolvedCoverUrl(client, id, fullQuality) {
     return client && id
       ? (resolvedCoverUrls.get(client)?.get(coverKey(id, fullQuality)) ?? null)
       : null;
   }
 
-  /** @param {import('@iroh-fm/client').MusicClient} client @param {string} id @param {boolean} fullQuality */
+  /**
+   * @param {Awaited<ReturnType<typeof import('@iroh-fm/client/core').ClientCore.connect>>} client
+   * @param {string} id
+   * @param {boolean} fullQuality
+   */
   function loadCoverUrl(client, id, fullQuality) {
     const resolved = resolvedCoverUrl(client, id, fullQuality);
     if (resolved) return resolved;
@@ -36,7 +47,11 @@
     });
   }
 
-  /** @param {object | null} client @param {string | null} id @param {boolean} fullQuality */
+  /**
+   * @param {object | null} client
+   * @param {string | null} id
+   * @param {boolean} fullQuality
+   */
   function forgetCoverUrl(client, id, fullQuality) {
     if (client && id) resolvedCoverUrls.get(client)?.delete(coverKey(id, fullQuality));
   }
@@ -52,7 +67,11 @@
     return null;
   }
 
-  /** @param {HTMLElement} node @param {string} rootMargin @param {(visible: boolean) => void} listener */
+  /**
+   * @param {HTMLElement} node
+   * @param {string} rootMargin
+   * @param {(visible: boolean) => void} listener
+   */
   function observeVisibility(node, rootMargin, listener) {
     const root = findScrollRoot(node);
     let registry;
@@ -97,14 +116,14 @@
 <script>
   /**
    * @typedef {Object} Props
-   * @property {import('@iroh-fm/client').MusicClient | null} client
+   * @property {Awaited<ReturnType<typeof import('@iroh-fm/client/core').ClientCore.connect>> | null} client
    * @property {string | null} [id]
    * @property {string} [title]
    * @property {string} [class]
    * @property {string} [rootMargin]
    * @property {boolean} [fullQuality]
    */
-  /** @typedef {{ client: import('@iroh-fm/client').MusicClient | null, id: string | null, fullQuality: boolean }} FailedRequest */
+  /** @typedef {{ client: Awaited<ReturnType<typeof import('@iroh-fm/client/core').ClientCore.connect>> | null, id: string | null, fullQuality: boolean }} FailedRequest */
   /** @type {Props} */
   const {
     client,

@@ -2,29 +2,30 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub const IROH_ALPN: &[u8] = b"irohifi/1";
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub struct ArtistId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub struct AlbumId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub struct TrackId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub struct CoverArtId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Artist {
     pub id: ArtistId,
     pub name: String,
     pub album_ids: Vec<AlbumId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Album {
     pub id: AlbumId,
     pub title: String,
@@ -46,7 +47,7 @@ pub struct Album {
     pub cover_art_id: Option<CoverArtId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Track {
     pub id: TrackId,
     pub title: String,
@@ -67,53 +68,55 @@ pub struct Track {
     pub musicbrainz_album_id: Option<String>,
     pub musicbrainz_release_group_id: Option<String>,
     pub cover_art_id: Option<CoverArtId>,
-    #[serde(skip_serializing, skip_deserializing, default)]
+    #[serde(skip, default)]
     pub has_embedded_cover: bool,
     pub suffix: Option<String>,
-    #[serde(skip_serializing, skip_deserializing, default)]
+    #[serde(skip, default)]
     pub relative_path: PathBuf,
     pub file_size: u64,
+    #[ts(type = "{ secs_since_epoch: number; nanos_since_epoch: number }")]
     pub modified_at: SystemTime,
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SearchQuery {
     pub term: String,
     pub limit: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StarredSet {
     pub artists: Vec<Artist>,
     pub albums: Vec<Album>,
     pub tracks: Vec<Track>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StreamDescriptor {
     pub track_id: TrackId,
-    #[serde(skip_serializing, skip_deserializing, default)]
+    #[serde(skip, default)]
     pub path: PathBuf,
     pub content_type: String,
     pub file_size: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CoverArtBytes {
     pub cover_art_id: CoverArtId,
     pub content_type: String,
     pub bytes: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub enum ResolvedId {
     Artist(Artist),
     Album(Album),
     Track(Track),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum BackendRequest {
     GetLibrarySummary,
     ListArtists,
@@ -160,16 +163,20 @@ pub enum BackendRequest {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct LibrarySummary {
+    pub artist_count: usize,
+    pub album_count: usize,
+    pub track_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum BackendResponse {
     Error {
         message: String,
     },
-    LibrarySummary {
-        artist_count: usize,
-        album_count: usize,
-        track_count: usize,
-    },
+    LibrarySummary(LibrarySummary),
     Empty,
     Artists(Vec<Artist>),
     Albums(Vec<Album>),
@@ -206,5 +213,25 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn library_summary_keeps_its_wire_shape() {
+        let response = BackendResponse::LibrarySummary(LibrarySummary {
+            artist_count: 1,
+            album_count: 2,
+            track_count: 3,
+        });
+
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "LibrarySummary": {
+                    "artist_count": 1,
+                    "album_count": 2,
+                    "track_count": 3
+                }
+            })
+        );
     }
 }

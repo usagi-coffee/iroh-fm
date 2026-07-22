@@ -1,3 +1,9 @@
+import {
+  bootstrap as bootstrapProtocol,
+  protocolResponse,
+  setStarred as setStarredProtocol,
+} from "./protocol.js";
+
 const NATIVE_TIMEOUT_MS = 30_000;
 const NATIVE_CACHE_TIMEOUT_MS = 60 * 60 * 1_000;
 const NATIVE_CACHE_PROGRESS_MS = 250;
@@ -7,15 +13,18 @@ const NATIVE_QUEUE_DURATION_SECONDS = 4 * 60 * 60;
 const NATIVE_QUEUE_LOOKBEHIND_SECONDS = 30 * 60;
 const NATIVE_QUEUE_MAX_TRACKS = 256;
 const NATIVE_QUEUE_MAX_LOOKBEHIND_TRACKS = 32;
-/** @typedef {{id: string, title: string, artist: string, album: string, duration_seconds?: number}} NativeQueueTrack */
+/** @typedef {{id: string, title: string, artist: string, album: string, duration_seconds?: number | null}} NativeQueueTrack */
 
-/** @param {{duration_seconds?: number}} track */
+/** @param {{duration_seconds?: number | null}} track */
 function trackDuration(track) {
   const duration = Number(track.duration_seconds);
   return Number.isFinite(duration) && duration > 0 ? duration : 3 * 60;
 }
 
-/** @param {NativeQueueTrack} selected @param {NativeQueueTrack[]} queue */
+/**
+ * @param {NativeQueueTrack} selected
+ * @param {NativeQueueTrack[]} queue
+ */
 function nativeQueueWindow(selected, queue) {
   const selectedIndex = queue.findIndex((track) => track.id === selected.id);
   if (selectedIndex < 0 || queue.length < 2) return [selected];
@@ -182,7 +191,11 @@ export function isNative() {
   return Boolean(port);
 }
 
-/** @param {string} action @param {Record<string, any>} [payload] @param {number} [timeout] */
+/**
+ * @param {string} action
+ * @param {Record<string, any>} [payload]
+ * @param {number} [timeout]
+ */
 export function nativeRequest(action, payload = {}, timeout = NATIVE_TIMEOUT_MS) {
   const target = port;
   if (!target) {
@@ -269,22 +282,22 @@ export class NativeMusicClient {
     return new NativeMusicClient(connection);
   }
 
-  /** @param {any} request */
+  /** @param {import('./types.ts').BackendRequest} request */
   async request(request) {
-    return nativeRequest("request", { handle: this.handle, request });
+    return protocolResponse(await nativeRequest("request", { handle: this.handle, request }));
   }
 
   async bootstrap(starredKey = "") {
-    const [summary, albums, artists, tracks, starred] = await Promise.all([
-      this.request("GetLibrarySummary"),
-      this.request("ListAlbums"),
-      this.request("ListArtists"),
-      this.request("ListTracks"),
-      this.request(
-        starredKey.trim() ? { GetStarredWithKey: { key: starredKey.trim() } } : "GetStarred",
-      ),
-    ]);
-    return { summary, albums, artists, tracks, starred };
+    return bootstrapProtocol(this.request.bind(this), starredKey);
+  }
+
+  /**
+   * @param {string} id
+   * @param {boolean} starred
+   * @param {string} [key]
+   */
+  setStarred(id, starred, key = "") {
+    return setStarredProtocol(this.request.bind(this), id, starred, key);
   }
 
   connectionInfo() {
@@ -322,20 +335,30 @@ export class NativeMusicClient {
   }
 
   /** Explicitly download a track into the persistent Android cache. */
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async cacheTrack(id, onProgress = () => {}) {
     const result = await this.transferTrack("cacheTrack", id, onProgress);
     return Boolean(result.cached);
   }
 
   /** Download a track into Android's in-memory LRU without writing to disk. */
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async prefetchTrack(id, onProgress = () => {}) {
     const result = await this.transferTrack("prefetchTrack", id, onProgress);
     return { cached: Boolean(result.cached), persistent: false };
   }
 
-  /** @param {"cacheTrack" | "prefetchTrack"} action @param {string} id @param {(received: number, total: number) => void} onProgress */
+  /**
+   * @param {"cacheTrack" | "prefetchTrack"} action
+   * @param {string} id
+   * @param {(received: number, total: number) => void} onProgress
+   */
   async transferTrack(action, id, onProgress) {
     if (this.offlineOnly) throw new Error("track is not available offline");
     let polling = false;
@@ -366,7 +389,10 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
+  /**
+   * @param {string} id
+   * @param {{ fullQuality?: boolean }} [options]
+   */
   async coverUrl(id, { fullQuality = false } = {}) {
     if (!id) return "";
     const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
@@ -404,8 +430,12 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {NativeQueueTrack} track @param {NativeQueueTrack[]} queue */
-  async playNative(track, queue) {
+  /**
+   * @param {NativeQueueTrack} track
+   * @param {NativeQueueTrack[]} queue
+   * @param {(received: number, total: number) => void} [_onProgress]
+   */
+  async playNative(track, queue, _onProgress = () => {}) {
     const reuseQueue = queue === this.nativeQueueSource && this.nativeQueueIds.includes(track.id);
     const nativeQueue = reuseQueue ? [] : nativeQueueWindow(track, queue);
     const queueIds = reuseQueue ? this.nativeQueueIds : nativeQueue.map(({ id }) => id);
@@ -445,7 +475,10 @@ export class NativeMusicClient {
     }
   }
 
-  /** @param {string} command @param {Record<string, any>} [payload] */
+  /**
+   * @param {string} command
+   * @param {Record<string, any>} [payload]
+   */
   playerCommand(command, payload = {}) {
     if (command === "stop") {
       this.nativeQueueIds = [];

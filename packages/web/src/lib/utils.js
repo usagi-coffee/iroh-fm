@@ -3,7 +3,7 @@ import { toHiragana, toKatakana } from "wanakana";
 /** @type {WeakMap<object, { source: string, variants: string[] }>} */
 const trackSearchMetadata = new WeakMap();
 
-/** @param {import('./types').TrackData} track */
+/** @param {import('@iroh-fm/client/types').TrackData} track */
 function trackMetadataVariants(track) {
   const source = `${track.artist}\n${track.title}\n${track.album}`;
   const cached = trackSearchMetadata.get(track);
@@ -20,17 +20,17 @@ function trackMetadataVariants(track) {
   return variants;
 }
 
-/** @template T @param {Record<string, unknown> | null | undefined} response @param {string} key @param {T} fallback @returns {T} */
-export function variant(response, key, fallback) {
-  return response && key in response ? /** @type {T} */ (response[key]) : fallback;
-}
-
 /** @param {string[]} values */
 export function cleanRelays(values) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-/** @template {import('./types').TrackData} T @param {T[]} list @param {string} term @returns {T[]} */
+/**
+ * @template {import('@iroh-fm/client/types').TrackData} T
+ * @param {T[]} list
+ * @param {string} term
+ * @returns {T[]}
+ */
 export function filterTracks(list, term) {
   const needle = term.trim().toLocaleLowerCase();
   const needles = [
@@ -48,7 +48,10 @@ export function filterTracks(list, term) {
   });
 }
 
-/** @param {import('./types').TrackData} left @param {import('./types').TrackData} right */
+/**
+ * @param {import('@iroh-fm/client/types').TrackData} left
+ * @param {import('@iroh-fm/client/types').TrackData} right
+ */
 export function trackSort(left, right) {
   return (
     left.album.localeCompare(right.album, undefined, { numeric: true }) ||
@@ -59,7 +62,10 @@ export function trackSort(left, right) {
   );
 }
 
-/** @param {import('./types').AlbumData} left @param {import('./types').AlbumData} right */
+/**
+ * @param {import('@iroh-fm/client/types').Album} left
+ * @param {import('@iroh-fm/client/types').Album} right
+ */
 export function albumSort(left, right) {
   return (
     left.title.localeCompare(right.title, undefined, { numeric: true }) ||
@@ -88,13 +94,16 @@ export function formatBytes(bytes) {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
-/** @param {unknown} error @param {string} fallback */
+/**
+ * @param {unknown} error
+ * @param {string} fallback
+ */
 export function friendlyError(error, fallback) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   return message.replace(/^Error:\s*/i, "") || fallback;
 }
 
-/** @param {import('./types').ConnectionInfo} info */
+/** @param {import('@iroh-fm/client/types').ConnectionInfo} info */
 export function connectionAddressLabel(info) {
   if (!info.address) return "CONNECTING";
   if (info.path_type !== "relay") return info.path_type.toUpperCase();

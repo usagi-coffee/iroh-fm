@@ -47,7 +47,10 @@ const observedWorkers = new WeakSet();
 const noUpdate = () => ({ updateReady: false, nativeUpgrade: null, nativeNewerThanWeb: false });
 const updateReady = () => Boolean(availableBuild || waitingWorker);
 
-/** @param {any} build @param {Record<string, {minimum?: number, commit?: string}> | undefined} epochs */
+/**
+ * @param {any} build
+ * @param {Record<string, {minimum?: number, commit?: string}> | undefined} epochs
+ */
 function nativeRequirement(build, epochs) {
   const platform = build?.platform;
   const required = platform ? epochs?.[platform] : null;
@@ -261,7 +264,10 @@ function observe(registration) {
   });
 }
 
-/** @param {ServiceWorker | null} worker @param {string} slot */
+/**
+ * @param {ServiceWorker | null} worker
+ * @param {string} slot
+ */
 function observeWorker(worker, slot) {
   if (!worker || observedWorkers.has(worker)) return;
   observedWorkers.add(worker);
@@ -270,7 +276,10 @@ function observeWorker(worker, slot) {
   report();
 }
 
-/** @param {ServiceWorker} worker @param {Record<string, any>} [metadata] */
+/**
+ * @param {ServiceWorker} worker
+ * @param {Record<string, any>} [metadata]
+ */
 async function useCandidate(worker, metadata) {
   const info = metadata ?? (await ping(worker));
   const build = workerBuild(info);
@@ -286,7 +295,10 @@ async function useCandidate(worker, metadata) {
   notifyUpdates();
 }
 
-/** @param {ServiceWorkerRegistration} registration @param {string} build */
+/**
+ * @param {ServiceWorkerRegistration} registration
+ * @param {string} build
+ */
 function findWorker(registration, build) {
   const url = workerUrl(build).href;
   return [registration.installing, registration.waiting, registration.active].find(
@@ -396,7 +408,12 @@ export async function getServiceWorkerStatus() {
   }
 }
 
-/** @param {ServiceWorkerStatus["kind"]} kind @param {string} label @param {string} detail @param {string} [hash] */
+/**
+ * @param {ServiceWorkerStatus["kind"]} kind
+ * @param {string} label
+ * @param {string} detail
+ * @param {string} [hash]
+ */
 function status(kind, label, detail, hash = "—") {
   return { kind, label, detail, hash };
 }
@@ -557,7 +574,12 @@ function waitForInstalled(worker) {
   );
 }
 
-/** @param {ServiceWorker} worker @param {string[]} accepted @param {string} message @param {number} timeoutMs */
+/**
+ * @param {ServiceWorker} worker
+ * @param {string[]} accepted
+ * @param {string} message
+ * @param {number} timeoutMs
+ */
 function waitForState(worker, accepted, message, timeoutMs) {
   return withTimeout(
     new Promise((resolve, reject) => {
@@ -575,7 +597,12 @@ function waitForState(worker, accepted, message, timeoutMs) {
   );
 }
 
-/** @template T @param {Promise<T>} promise @param {string} message @param {number} [timeoutMs] */
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {string} message
+ * @param {number} [timeoutMs]
+ */
 function withTimeout(promise, message, timeoutMs = TIMEOUT_MS) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timeout;
@@ -619,7 +646,10 @@ function workerState(worker) {
     : { state: null, scriptUrl: null };
 }
 
-/** @param {Record<string, any>} metadata @param {ServiceWorker | MessageEventSource | null | undefined} worker */
+/**
+ * @param {Record<string, any>} metadata
+ * @param {ServiceWorker | MessageEventSource | null | undefined} worker
+ */
 function metadataState(metadata, worker) {
   return {
     ...workerState(worker),
@@ -637,12 +667,19 @@ function workerBuild(metadata) {
   return String(metadata.workerBuildVersion ?? metadata.buildVersion ?? "");
 }
 
-/** @param {string} event @param {Record<string, any>} [details] */
+/**
+ * @param {string} event
+ * @param {Record<string, any>} [details]
+ */
 function log(event, details = {}) {
   console.info(`[sw client ${PAGE_BUILD.slice(0, 12)}]`, event, details);
 }
 
-/** @param {string} event @param {unknown} error @param {Record<string, any>} [details] */
+/**
+ * @param {string} event
+ * @param {unknown} error
+ * @param {Record<string, any>} [details]
+ */
 function logError(event, error, details = {}) {
   console.error(`[sw client ${PAGE_BUILD.slice(0, 12)}]`, event, {
     ...details,

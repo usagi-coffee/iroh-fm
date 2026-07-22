@@ -43,7 +43,9 @@ export class Player {
   }
 
   nativePlayback(client = this.app.connection.client) {
-    return Boolean(client?.native || client?.nativePlayback);
+    return Boolean(
+      client?.native || (client && "nativePlayback" in client && client.nativePlayback),
+    );
   }
 
   /** @param {HTMLAudioElement} element */
@@ -55,7 +57,7 @@ export class Player {
     };
   };
 
-  /** @param {import('$lib/types').AlbumData} album */
+  /** @param {import('@iroh-fm/client/types').Album} album */
   async playAlbum(album) {
     await this.playAlbumTracks(
       this.app.library.tracksForAlbum(album),
@@ -63,14 +65,21 @@ export class Player {
     );
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks @param {import('$lib/runes/Track.svelte.js').Track[]} sourceQueue */
+  /**
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} sourceQueue
+   */
   async playAlbumTracks(albumTracks, sourceQueue) {
     const albumTrackIds = new Set(albumTracks.map((track) => track.id));
     const first = sourceQueue.find((track) => albumTrackIds.has(track.id));
     if (first) await this.play(first, sourceQueue);
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} queue @param {number} generation */
+  /**
+   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} queue
+   * @param {number} generation
+   */
   prefetchNext(track, queue, generation) {
     if (generation !== this.generation || this.shuffle || this.repeat || queue.length < 2) return;
     const client = this.app.connection.client;
@@ -98,7 +107,10 @@ export class Player {
       });
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} [sourceQueue] */
+  /**
+   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} [sourceQueue]
+   */
   async play(track, sourceQueue = this.app.library.tracks) {
     const client = this.app.connection.client;
     if (!client) {
@@ -161,7 +173,7 @@ export class Player {
         if (generation === this.generation) {
           this.nativePlayPendingTrackId = null;
           this.applyNativeState(state, false, client);
-          if (client.nativePlayback && !client.native)
+          if ("nativePlayback" in client && client.nativePlayback && !client.native)
             this.prefetchNext(track, sourceQueue, generation);
         }
       } catch (error) {
@@ -180,6 +192,7 @@ export class Player {
       }
       return;
     }
+    if (!("trackSource" in client)) throw new Error("browser playback is unavailable");
     const downloadGeneration = track.cached || track.memoryCached ? null : track.startDownload();
     this.audioDownloadGeneration = downloadGeneration;
     try {
@@ -234,7 +247,10 @@ export class Player {
     }
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} queue */
+  /**
+   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} queue
+   */
   async playFromTrackList(track, queue) {
     this.app.library.selectedTrackId = track.id;
     if (
@@ -251,8 +267,8 @@ export class Player {
     this.nativePlayPendingTrackId = null;
     const track = this.currentTrack;
     const downloadGeneration = this.audioDownloadGeneration;
-    if (this.nativePlayback())
-      void this.app.connection.client.playerCommand("stop").catch(() => {});
+    const client = this.app.connection.client;
+    if (client && this.nativePlayback(client)) void client.playerCommand("stop").catch(() => {});
     this.audio?.pause();
     this.audioSource?.dispose();
     if (track && !track.cached && downloadGeneration !== null)
@@ -271,7 +287,7 @@ export class Player {
 
   async toggle() {
     const client = this.app.connection.client;
-    if (this.nativePlayback(client)) {
+    if (client && this.nativePlayback(client)) {
       if (!this.currentTrack) return;
       this.applyNativeState(await client.playerCommand("toggle"), false, client);
       return;
@@ -299,7 +315,7 @@ export class Player {
   /** @param {number} direction */
   async skip(direction) {
     const client = this.app.connection.client;
-    if (this.nativePlayback(client)) {
+    if (client && this.nativePlayback(client)) {
       this.applyNativeState(
         await client.playerCommand(direction < 0 ? "previous" : "next"),
         false,
@@ -323,7 +339,7 @@ export class Player {
   /** @param {string | number} value */
   seek(value) {
     const client = this.app.connection.client;
-    if (this.nativePlayback(client)) {
+    if (client && this.nativePlayback(client)) {
       const generation = ++this.nativeSeekGeneration;
       this.nativeSeekPending = true;
       void client
@@ -370,8 +386,9 @@ export class Player {
   changeVolume(value) {
     this.volume = Math.min(1, Math.max(0, Number(value)));
     localStorage.setItem("iroh-fm-volume", String(this.volume));
-    if (this.nativePlayback()) {
-      void this.app.connection.client.playerCommand("volume", { value: this.volume });
+    const client = this.app.connection.client;
+    if (client && this.nativePlayback(client)) {
+      void client.playerCommand("volume", { value: this.volume });
       return;
     }
     if (this.audio) this.audio.volume = this.volume;
@@ -388,18 +405,20 @@ export class Player {
 
   toggleRepeat() {
     this.repeat = !this.repeat;
-    if (this.nativePlayback())
-      void this.app.connection.client.playerCommand("repeat", { enabled: this.repeat });
+    const client = this.app.connection.client;
+    if (client && this.nativePlayback(client))
+      void client.playerCommand("repeat", { enabled: this.repeat });
   }
 
   toggleShuffle() {
     this.shuffle = !this.shuffle;
-    if (this.nativePlayback())
-      void this.app.connection.client.playerCommand("shuffle", { enabled: this.shuffle });
+    const client = this.app.connection.client;
+    if (client && this.nativePlayback(client))
+      void client.playerCommand("shuffle", { enabled: this.shuffle });
   }
 
   async refreshNativeState(client = this.app.connection.client) {
-    if (!this.nativePlayback(client) || this.nativeStatePending) return;
+    if (!client || !this.nativePlayback(client) || this.nativeStatePending) return;
     const generation = this.generation;
     const pendingTrackId = this.nativePlayPendingTrackId;
     this.nativeStatePending = true;
@@ -421,7 +440,11 @@ export class Player {
     }
   }
 
-  /** @param {any} state @param {boolean} [applySeekPosition] @param {any} [client] */
+  /**
+   * @param {any} state
+   * @param {boolean} [applySeekPosition]
+   * @param {any} [client]
+   */
   applyNativeState(state, applySeekPosition = false, client = this.app.connection.client) {
     if (!state || !this.nativePlayback(client)) return;
     const nativeGeneration = Number(state.generation);

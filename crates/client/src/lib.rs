@@ -18,6 +18,7 @@ pub use protocol::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
+use ts_rs::TS;
 
 pub use crate::error::{Error, Result};
 
@@ -313,7 +314,8 @@ impl Client {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub struct ConnectionInfo {
     pub path_type: String,
     pub address: String,

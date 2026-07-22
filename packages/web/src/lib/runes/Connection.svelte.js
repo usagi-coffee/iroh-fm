@@ -1,4 +1,4 @@
-import { albumSort, cleanRelays, friendlyError, trackSort, variant } from "$lib/utils.js";
+import { albumSort, cleanRelays, friendlyError, trackSort } from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
@@ -13,11 +13,10 @@ export class Connection {
   connecting = $state(false);
   connectionStep = $state("Connecting to the iroh server…");
   error = $state("");
-  /** @type {any} */
+  /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | null} */
   client = $state(null);
-  /** @type {any} */
+  /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | null} */
   loadingClient = $state(null);
-  /** @type {import('$lib/types').ConnectionInfo} */
   info = $state.raw({ path_type: "unknown", address: "", received_bytes: 0 });
   receivedBytesPerSecond = $state(0);
   connectionSamples = new WeakMap();
@@ -50,7 +49,10 @@ export class Connection {
     return () => window.removeEventListener("hashchange", importConnection);
   };
 
-  /** @param {any} client @param {number} [intervalMs] */
+  /**
+   * @param {any} client
+   * @param {number} [intervalMs]
+   */
   monitor(client, intervalMs = 1000) {
     return () => {
       if (!client) {
@@ -176,7 +178,10 @@ export class Connection {
     }
   }
 
-  /** @param {string} value @param {boolean} [parseAddress] */
+  /**
+   * @param {string} value
+   * @param {boolean} [parseAddress]
+   */
   updateLoginTicket(value, parseAddress = false) {
     this.ticket = value;
     if (!parseAddress) return;
@@ -298,7 +303,11 @@ export class Connection {
     return this.endpoint.trim() ? cleanRelays(this.relays).length > 0 : Boolean(this.ticket.trim());
   }
 
-  /** @param {boolean} [forceTicket] @param {() => void} [onConnected] @returns {Promise<boolean>} */
+  /**
+   * @param {boolean} [forceTicket]
+   * @param {() => void} [onConnected]
+   * @returns {Promise<boolean>}
+   */
   async connect(forceTicket = false, onConnected) {
     if (!this.canConnect(forceTicket) || this.connecting) {
       onConnected?.();
@@ -315,7 +324,7 @@ export class Connection {
     this.error = "";
     this.connectionStep = "Connecting to the iroh server…";
     const previousClient = this.client;
-    /** @type {any} */
+    /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | undefined} */
     let nextClient;
     try {
       if (!this.secret.trim()) {
@@ -350,30 +359,24 @@ export class Connection {
       this.app.player.stop();
       await nextClient.setOfflineOnly(this.app.library.offlineOnly);
       this.client = nextClient;
-      /** @type {import('$lib/types').AlbumData[]} */
-      const albums = /** @type {import('$lib/types').AlbumData[]} */ (
-        variant(data.albums, "Albums", [])
-      ).sort(albumSort);
+      const albums = data.albums.sort(albumSort);
       /** @type {Map<string, number>} */
       const albumOrderByTrackId = new Map();
       for (const [albumIndex, album] of albums.entries()) {
         for (const trackId of album.track_ids) albumOrderByTrackId.set(trackId, albumIndex);
       }
-      /** @type {import('$lib/types').TrackData[]} */
-      const tracks = /** @type {import('$lib/types').TrackData[]} */ (
-        variant(data.tracks, "Tracks", [])
-      );
+      const tracks = data.tracks;
       tracks.sort(
         (left, right) =>
           (albumOrderByTrackId.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
             (albumOrderByTrackId.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
           trackSort(left, right),
       );
-      this.app.library.summary = variant(data.summary, "LibrarySummary", this.app.library.summary);
+      this.app.library.summary = data.summary;
       this.app.library.albums = albums;
-      this.app.library.artists = variant(data.artists, "Artists", []);
+      this.app.library.artists = data.artists;
       this.app.library.replaceTracks(tracks, cachedIds);
-      this.app.library.starred = variant(data.starred, "Starred", this.app.library.starred);
+      this.app.library.starred = data.starred;
       if (previousClient && previousClient !== nextClient)
         await previousClient.close().catch(() => {});
       return true;

@@ -33,13 +33,10 @@ export class Track {
   musicbrainz_release_group_id = $state(null);
   /** @type {string | null} */
   cover_art_id = $state(null);
-  has_embedded_cover = $state(false);
   /** @type {string | null} */
   suffix = $state(null);
-  relative_path = $state("");
   file_size = $state(0);
-  /** @type {unknown} */
-  modified_at = $state(null);
+  modified_at = $state({ secs_since_epoch: 0, nanos_since_epoch: 0 });
   content_type = $state("");
   cached = $state(false);
   memoryCached = $state(false);
@@ -49,13 +46,16 @@ export class Track {
   total = $state(0);
   downloadGeneration = 0;
 
-  /** @param {import('$lib/types').TrackData} data @param {boolean} [cached] */
+  /**
+   * @param {import('@iroh-fm/client/types').TrackData} data
+   * @param {boolean} [cached]
+   */
   constructor(data, cached = false) {
     this.updateMetadata(data);
     this.setCached(cached);
   }
 
-  /** @param {import('$lib/types').TrackData} data */
+  /** @param {import('@iroh-fm/client/types').TrackData} data */
   updateMetadata(data) {
     this.id = data.id;
     this.title = data.title;
@@ -80,9 +80,7 @@ export class Track {
     this.musicbrainz_album_id = data.musicbrainz_album_id;
     this.musicbrainz_release_group_id = data.musicbrainz_release_group_id;
     this.cover_art_id = data.cover_art_id;
-    this.has_embedded_cover = data.has_embedded_cover ?? false;
     this.suffix = data.suffix;
-    this.relative_path = data.relative_path ?? "";
     this.file_size = data.file_size;
     this.modified_at = data.modified_at;
     this.content_type = data.content_type;
@@ -97,7 +95,11 @@ export class Track {
     return generation;
   }
 
-  /** @param {number} received @param {number} total @param {number} [generation] */
+  /**
+   * @param {number} received
+   * @param {number} total
+   * @param {number} [generation]
+   */
   updateProgress(received, total, generation = this.downloadGeneration) {
     if (generation !== this.downloadGeneration) return;
     const knownTotal = Number(total) > 0 ? Number(total) : Number(this.file_size) || 0;

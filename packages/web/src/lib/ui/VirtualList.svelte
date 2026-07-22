@@ -52,7 +52,10 @@
   /** @type {WeakMap<Element, { key: string | number, index: number }>} */
   const observedItems = new WeakMap();
 
-  /** @param {any} item @param {number} index */
+  /**
+   * @param {any} item
+   * @param {number} index
+   */
   function estimatedSize(item, index) {
     const value = typeof estimateSize === "function" ? estimateSize(item, index) : estimateSize;
     return Math.max(1, Number.isFinite(value) ? value : 1);
@@ -92,7 +95,10 @@
     return borderSize?.blockSize ?? entry.contentRect.height;
   }
 
-  /** @param {number} estimate @param {number} size */
+  /**
+   * @param {number} estimate
+   * @param {number} size
+   */
   function updateUniformMeasurement(estimate, size) {
     if (
       size <= 0 ||
@@ -252,7 +258,10 @@
     pinnedToEnd = isAtEnd(node);
   }
 
-  /** @param {number} index @param {ScrollOptions} [options] */
+  /**
+   * @param {number} index
+   * @param {ScrollOptions} [options]
+   */
   function scrollToIndex(index, options = {}) {
     if (!viewport || !items.length) return;
     const target = Math.max(0, Math.min(items.length - 1, index));
@@ -323,7 +332,10 @@
     });
   }
 
-  /** @param {string | number} key @param {number} index */
+  /**
+   * @param {string | number} key
+   * @param {number} index
+   */
   function measureItem(key, index) {
     /** @param {HTMLElement} node */
     return (node) => {

@@ -143,24 +143,20 @@ export class FixtureClient {
     const library = fixtureLibrary();
     return Promise.resolve({
       summary: {
-        LibrarySummary: {
-          artist_count: 1,
-          album_count: library.albums.length,
-          track_count: library.tracks.length,
+        artist_count: 1,
+        album_count: library.albums.length,
+        track_count: library.tracks.length,
+      },
+      albums: library.albums,
+      artists: [
+        {
+          id: "artist-1",
+          name: "Fixture Artist",
+          album_ids: library.albums.map(({ id }) => id),
         },
-      },
-      albums: { Albums: library.albums },
-      artists: {
-        Artists: [
-          {
-            id: "artist-1",
-            name: "Fixture Artist",
-            album_ids: library.albums.map(({ id }) => id),
-          },
-        ],
-      },
-      tracks: { Tracks: library.tracks },
-      starred: { Starred: { artists: [], albums: [], tracks: [] } },
+      ],
+      tracks: library.tracks,
+      starred: { artists: [], albums: [], tracks: [] },
     });
   }
 
@@ -197,6 +193,10 @@ export class FixtureClient {
 
   request() {
     return Promise.resolve({});
+  }
+
+  setStarred() {
+    return Promise.resolve();
   }
 
   async coverUrl() {

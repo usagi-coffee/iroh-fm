@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [".agents/**", "packages/client/src/generated/**"],
   "printWidth": 100,
   "svelte": true,
   "sortImports": {

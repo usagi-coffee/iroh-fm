@@ -1,0 +1,16 @@
+export type { Album } from "./generated/Album.js";
+export type { AlbumId } from "./generated/AlbumId.js";
+export type { Artist } from "./generated/Artist.js";
+export type { ArtistId } from "./generated/ArtistId.js";
+export type { BackendRequest } from "./generated/BackendRequest.js";
+export type { BackendResponse } from "./generated/BackendResponse.js";
+export type { CoverArtBytes } from "./generated/CoverArtBytes.js";
+export type { CoverArtId } from "./generated/CoverArtId.js";
+export type { ConnectionInfo } from "./generated/ConnectionInfo.js";
+export type { LibrarySummary } from "./generated/LibrarySummary.js";
+export type { ResolvedId } from "./generated/ResolvedId.js";
+export type { SearchQuery } from "./generated/SearchQuery.js";
+export type { StarredSet } from "./generated/StarredSet.js";
+export type { StreamDescriptor } from "./generated/StreamDescriptor.js";
+export type { Track as TrackData } from "./generated/Track.js";
+export type { TrackId } from "./generated/TrackId.js";

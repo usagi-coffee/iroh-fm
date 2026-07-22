@@ -1,3 +1,10 @@
+import {
+  bootstrap as bootstrapProtocol,
+  decodeResponse,
+  encodeRequest,
+  setStarred as setStarredProtocol,
+} from "./protocol.js";
+
 let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v2";
 const COVER_CACHE_ORIGIN = "https://cover-cache.iroh-fm.invalid";
@@ -17,7 +24,10 @@ const MAX_MEDIA_BUFFER_AHEAD_SECONDS = 90;
 const RETAIN_MEDIA_BUFFER_BEHIND_SECONDS = 15;
 const MEDIA_BUFFER_RETRY_MS = 250;
 
-/** @param {string} remoteId @param {string} coverId */
+/**
+ * @param {string} remoteId
+ * @param {string} coverId
+ */
 function coverCacheRequest(remoteId, coverId) {
   const url = new URL("/cover", COVER_CACHE_ORIGIN);
   url.searchParams.set("server", String(remoteId));
@@ -25,7 +35,10 @@ function coverCacheRequest(remoteId, coverId) {
   return new Request(url);
 }
 
-/** @param {string} remoteId @param {string} trackId */
+/**
+ * @param {string} remoteId
+ * @param {string} trackId
+ */
 function trackCacheRequest(remoteId, trackId) {
   const url = new URL("/track", TRACK_CACHE_ORIGIN);
   url.searchParams.set("server", String(remoteId));
@@ -68,7 +81,10 @@ export class TrackMemoryCache {
     return blob;
   }
 
-  /** @param {string} id @param {Blob} blob */
+  /**
+   * @param {string} id
+   * @param {Blob} blob
+   */
   set(id, blob) {
     if (blob.size <= 0 || blob.size > this.maxBytes) return false;
     const previous = this.entries.get(id);
@@ -104,7 +120,11 @@ export class TrackMemoryCache {
   }
 }
 
-/** @param {number} bytes @param {number} defaultBytes @param {number} maxBytes */
+/**
+ * @param {number} bytes
+ * @param {number} defaultBytes
+ * @param {number} maxBytes
+ */
 function normalizeMemoryCacheBytes(bytes, defaultBytes, maxBytes) {
   if (!Number.isFinite(bytes)) return defaultBytes;
   return Math.min(maxBytes, Math.max(MIN_MEMORY_CACHE_BYTES, Math.round(bytes)));
@@ -184,7 +204,11 @@ export class MusicClient {
     return normalizeMemoryCacheBytes(Number(configured) * 1024 * 1024, defaultBytes, maxBytes);
   }
 
-  /** @param {number} megabytes @param {number} [maxBytes] @param {number} [defaultBytes] */
+  /**
+   * @param {number} megabytes
+   * @param {number} [maxBytes]
+   * @param {number} [defaultBytes]
+   */
   static setMemoryCacheSize(
     megabytes,
     maxBytes = MAX_MEMORY_CACHE_BYTES,
@@ -280,7 +304,11 @@ export class MusicClient {
     return Boolean(this.inner.native);
   }
 
-  /** @param {{id: string}} track @param {Array<{id: string}>} queue @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {{id: string}} track
+   * @param {Array<{id: string}>} queue
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async playNative(track, queue, onProgress = () => {}) {
     if (typeof this.inner.playNativeBytes !== "function")
       return this.inner.playNative(track, queue);
@@ -306,7 +334,10 @@ export class MusicClient {
     return state;
   }
 
-  /** @param {string} command @param {Record<string, any>} [payload] */
+  /**
+   * @param {string} command
+   * @param {Record<string, any>} [payload]
+   */
   playerCommand(command, payload = {}) {
     return this.inner.playerCommand(command, payload);
   }
@@ -344,7 +375,10 @@ export class MusicClient {
   }
 
   /** Explicitly download a track into persistent storage. */
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async cacheTrack(id, onProgress = () => {}) {
     if (typeof this.inner.cacheTrack === "function")
       return Boolean(await this.inner.cacheTrack(id, onProgress));
@@ -390,25 +424,28 @@ export class MusicClient {
     return Promise.resolve();
   }
 
-  /** @param {unknown} request */
+  /** @param {import('./types.ts').BackendRequest} request */
   async request(request) {
-    return JSON.parse(await this.inner.request(JSON.stringify(request)));
+    return decodeResponse(await this.inner.request(encodeRequest(request)));
   }
 
   async bootstrap(starredKey = "") {
-    const [summary, albums, artists, tracks, starred] = await Promise.all([
-      this.request("GetLibrarySummary"),
-      this.request("ListAlbums"),
-      this.request("ListArtists"),
-      this.request("ListTracks"),
-      starredKey.trim()
-        ? this.request({ GetStarredWithKey: { key: starredKey.trim() } })
-        : this.request("GetStarred"),
-    ]);
-    return { summary, albums, artists, tracks, starred };
+    return bootstrapProtocol(this.request.bind(this), starredKey);
   }
 
-  /** @param {string} id @param {{ fullQuality?: boolean }} [options] */
+  /**
+   * @param {string} id
+   * @param {boolean} starred
+   * @param {string} [key]
+   */
+  setStarred(id, starred, key = "") {
+    return setStarredProtocol(this.request.bind(this), id, starred, key);
+  }
+
+  /**
+   * @param {string} id
+   * @param {{ fullQuality?: boolean }} [options]
+   */
   coverUrl(id, { fullQuality = false } = {}) {
     const key = `${id}\u0000${fullQuality ? "full" : "thumbnail"}`;
     let pending = this.coverCache.get(key);
@@ -423,7 +460,10 @@ export class MusicClient {
     return pending;
   }
 
-  /** @param {string} id @param {boolean} fullQuality */
+  /**
+   * @param {string} id
+   * @param {boolean} fullQuality
+   */
   async loadCoverUrl(id, fullQuality) {
     let cache;
     let request;
@@ -472,7 +512,11 @@ export class MusicClient {
     return URL.createObjectURL(blob);
   }
 
-  /** @param {string} id @param {boolean} fullQuality @returns {Promise<any>} */
+  /**
+   * @param {string} id
+   * @param {boolean} fullQuality
+   * @returns {Promise<any>}
+   */
   enqueueCoverFetch(id, fullQuality) {
     if (this.closed) return Promise.reject(new Error("music client is closed"));
     if (this.offlineOnly) return Promise.reject(new Error("cover is not available offline"));
@@ -508,7 +552,10 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async trackSource(id, onProgress = () => {}) {
     const active = this.activeTrackRequests.get(id);
     const unsubscribe = active ? this.subscribeTrackProgress(id, onProgress) : () => {};
@@ -548,7 +595,10 @@ export class MusicClient {
       };
 
       try {
-        /** @param {number} received @param {number} total */
+        /**
+         * @param {number} received
+         * @param {number} total
+         */
         const reportProgress = (received, total) => {
           onProgress(received, total);
           this.notifyTrackProgress(id, received, total);
@@ -582,7 +632,10 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   prefetchTrack(id, onProgress = () => {}) {
     const unsubscribe = this.subscribeTrackProgress(id, onProgress);
     const known = this.cachedTrack(id);
@@ -617,7 +670,11 @@ export class MusicClient {
     });
   }
 
-  /** Native playback queueing is independent from the persistent-cache result. @param {string} id @param {Blob} blob */
+  /**
+   * Native playback queueing is independent from the persistent-cache result.
+   * @param {string} id
+   * @param {Blob} blob
+   */
   queueNativeTrack(id, blob) {
     if (typeof this.inner.queueNativeBytes !== "function") return;
     void blob
@@ -626,7 +683,10 @@ export class MusicClient {
       .catch((error) => console.warn("[player] native queue upload failed", error));
   }
 
-  /** @param {string} id @param {(received: number, total: number) => void} listener */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} listener
+   */
   subscribeTrackProgress(id, listener) {
     let state = this.trackProgress.get(id);
     if (!state) {
@@ -638,7 +698,11 @@ export class MusicClient {
     return () => state.listeners.delete(listener);
   }
 
-  /** @param {string} id @param {number} received @param {number} total */
+  /**
+   * @param {string} id
+   * @param {number} received
+   * @param {number} total
+   */
   notifyTrackProgress(id, received, total) {
     let state = this.trackProgress.get(id);
     if (!state) {
@@ -701,12 +765,19 @@ export class MusicClient {
     return null;
   }
 
-  /** @param {string} id @param {Blob} blob @returns {Promise<string | false>} */
+  /**
+   * @param {string} id
+   * @param {Blob} blob
+   * @returns {Promise<string | false>}
+   */
   rememberTrackBlob(id, blob) {
     return Promise.resolve(this.memoryTrackCache.set(id, blob) ? "memory" : false);
   }
 
-  /** @param {string} id @param {Blob} blob */
+  /**
+   * @param {string} id
+   * @param {Blob} blob
+   */
   async persistTrackBlob(id, blob) {
     if (!("caches" in globalThis) || blob.size === 0) return false;
     try {
@@ -728,7 +799,10 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id @param {(received: number, total: number) => void} [onProgress] */
+  /**
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   */
   async downloadTrackBlob(id, onProgress = () => {}) {
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
@@ -782,7 +856,11 @@ export class MusicClient {
 }
 
 class BlobTrackSource {
-  /** @param {Blob} blob @param {() => void} releaseAudioPriority @param {Promise<string | false>} cacheReady */
+  /**
+   * @param {Blob} blob
+   * @param {() => void} releaseAudioPriority
+   * @param {Promise<string | false>} cacheReady
+   */
   constructor(blob, releaseAudioPriority, cacheReady) {
     this.url = URL.createObjectURL(blob);
     this.done = cacheReady;
@@ -802,7 +880,14 @@ class BlobTrackSource {
 }
 
 class ProgressiveTrackSource {
-  /** @param {ReadableStream<Uint8Array>} stream @param {string} contentType @param {number} fileSize @param {(received: number, total: number) => void} onProgress @param {() => void} releaseAudioPriority @param {(blob: Blob) => Promise<string | false>} onComplete */
+  /**
+   * @param {ReadableStream<Uint8Array>} stream
+   * @param {string} contentType
+   * @param {number} fileSize
+   * @param {(received: number, total: number) => void} onProgress
+   * @param {() => void} releaseAudioPriority
+   * @param {(blob: Blob) => Promise<string | false>} onComplete
+   */
   constructor(stream, contentType, fileSize, onProgress, releaseAudioPriority, onComplete) {
     this.stream = stream;
     this.contentType = contentType;
@@ -841,7 +926,10 @@ class ProgressiveTrackSource {
     this.done = this.pump(sourceBuffer, mediaElement);
   }
 
-  /** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+  /**
+   * @param {SourceBuffer} sourceBuffer
+   * @param {HTMLMediaElement} mediaElement
+   */
   async pump(sourceBuffer, mediaElement) {
     try {
       while (!this.disposed) {
@@ -927,7 +1015,11 @@ class ProgressiveTrackSource {
   }
 }
 
-/** @param {ReadableStream<Uint8Array>} stream @param {number} total @param {(received: number, total: number) => void} onProgress */
+/**
+ * @param {ReadableStream<Uint8Array>} stream
+ * @param {number} total
+ * @param {(received: number, total: number) => void} onProgress
+ */
 function trackDownload(stream, total, onProgress) {
   const reader = stream.getReader();
   let received = 0;
@@ -958,7 +1050,12 @@ function canUseMediaSource(contentType) {
   );
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {Uint8Array} chunk @param {HTMLMediaElement} mediaElement @param {() => boolean} disposed */
+/**
+ * @param {SourceBuffer} sourceBuffer
+ * @param {Uint8Array} chunk
+ * @param {HTMLMediaElement} mediaElement
+ * @param {() => boolean} disposed
+ */
 async function appendMediaBuffer(sourceBuffer, chunk, mediaElement, disposed) {
   while (!disposed()) {
     await waitForMediaBufferRoom(sourceBuffer, mediaElement, disposed);
@@ -978,7 +1075,11 @@ async function appendMediaBuffer(sourceBuffer, chunk, mediaElement, disposed) {
   throw new DOMException("Track was cancelled", "AbortError");
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement @param {() => boolean} disposed */
+/**
+ * @param {SourceBuffer} sourceBuffer
+ * @param {HTMLMediaElement} mediaElement
+ * @param {() => boolean} disposed
+ */
 async function waitForMediaBufferRoom(sourceBuffer, mediaElement, disposed) {
   while (
     !disposed() &&
@@ -988,7 +1089,10 @@ async function waitForMediaBufferRoom(sourceBuffer, mediaElement, disposed) {
   }
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+/**
+ * @param {SourceBuffer} sourceBuffer
+ * @param {HTMLMediaElement} mediaElement
+ */
 function mediaBufferAhead(sourceBuffer, mediaElement) {
   try {
     const ranges = sourceBuffer.buffered;
@@ -1014,7 +1118,10 @@ function waitForMediaProgress(mediaElement) {
   });
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {HTMLMediaElement} mediaElement */
+/**
+ * @param {SourceBuffer} sourceBuffer
+ * @param {HTMLMediaElement} mediaElement
+ */
 async function evictPlayedMediaBuffer(sourceBuffer, mediaElement) {
   const cutoff = mediaElement.currentTime - RETAIN_MEDIA_BUFFER_BEHIND_SECONDS;
   if (!Number.isFinite(cutoff) || cutoff <= 0) return false;
@@ -1036,7 +1143,11 @@ function isSourceBufferQuotaError(error) {
   );
 }
 
-/** @param {SourceBuffer} sourceBuffer @param {() => void} update @returns {Promise<void>} */
+/**
+ * @param {SourceBuffer} sourceBuffer
+ * @param {() => void} update
+ * @returns {Promise<void>}
+ */
 function updateSourceBuffer(sourceBuffer, update) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {

@@ -159,11 +159,13 @@ impl MusicServer {
         let library = self.library.read().expect("library lock poisoned");
 
         match request {
-            BackendRequest::GetLibrarySummary => Ok(BackendResponse::LibrarySummary {
-                artist_count: library.artist_count(),
-                album_count: library.album_count(),
-                track_count: library.track_count(),
-            }),
+            BackendRequest::GetLibrarySummary => {
+                Ok(BackendResponse::LibrarySummary(protocol::LibrarySummary {
+                    artist_count: library.artist_count(),
+                    album_count: library.album_count(),
+                    track_count: library.track_count(),
+                }))
+            }
             BackendRequest::ListArtists => Ok(BackendResponse::Artists(
                 library.artists.values().cloned().collect(),
             )),

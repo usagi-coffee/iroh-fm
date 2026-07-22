@@ -23,7 +23,7 @@
   /**
    * @typedef {Object} Props
    * @property {import('$lib/runes/Track.svelte.js').Track[]} tracks
-   * @property {import('$lib/types').TrackListItem[]} items
+   * @property {ReturnType<import('$lib/runes/Library.svelte.js').Library['getTrackListItems']>} items
    * @property {string} query
    * @property {(value: string) => void} onquery
    */
@@ -47,7 +47,7 @@
   );
   const COVER_MARGIN = "150%";
 
-  /** @param {import('$lib/types').TrackListItem} item */
+  /** @param {Props['items'][number]} item */
   function trackItemKey(item) {
     return item.key;
   }
@@ -160,7 +160,10 @@
     void App.player.playFromTrackList(track, queue);
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {MouseEvent} [event] */
+  /**
+   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {MouseEvent} [event]
+   */
   function openTrackActions(track, event) {
     event?.preventDefault();
     event?.stopPropagation();
@@ -175,7 +178,13 @@
     );
   }
 
-  /** @param {import('$lib/types').AlbumData | undefined} album @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks @param {string} title @param {string} cacheKey @param {MouseEvent} [event] */
+  /**
+   * @param {import('@iroh-fm/client/types').Album | undefined} album
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks
+   * @param {string} title
+   * @param {string} cacheKey
+   * @param {MouseEvent} [event]
+   */
   function openAlbumActions(album, albumTracks, title, cacheKey, event) {
     event?.preventDefault();
     event?.stopPropagation();

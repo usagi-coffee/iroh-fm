@@ -1,2 +1,7 @@
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/client/src/generated", relative = true }
+TS_RS_IMPORT_EXTENSION = "js"
+TS_RS_LARGE_INT = "number"
