@@ -20,6 +20,11 @@ function trackMetadataVariants(track) {
   return variants;
 }
 
+/** @param {import('@iroh-fm/client/types').TrackData[]} tracks */
+export function indexTracksForSearch(tracks) {
+  for (const track of tracks) trackMetadataVariants(track);
+}
+
 /** @param {string[]} values */
 export function cleanRelays(values) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];

@@ -5,7 +5,7 @@ import { resolve } from "$app/paths";
 
 import { Track } from "$lib/runes/Track.svelte.js";
 import { createTrackListItems } from "$lib/track-list-items.js";
-import { filterTracks, friendlyError } from "$lib/utils.js";
+import { filterTracks, friendlyError, indexTracksForSearch } from "$lib/utils.js";
 
 export class Library {
   summary = $state.raw({ artist_count: 0, album_count: 0, track_count: 0 });
@@ -126,6 +126,18 @@ export class Library {
       return track;
     });
     this.tracks = next;
+  }
+
+  prepareIndexes() {
+    indexTracksForSearch(this.tracks);
+    void this.starredTrackIds.size;
+    void this.starredAlbumIds.size;
+    void this.trackListItems.length;
+    void this.cachedTrackListItems.length;
+    void this.starredTrackListItems.length;
+    void this.cachedStarredTrackListItems.length;
+    void this.visibleAlbums.length;
+    void this.fullyCachedAlbumIds.size;
   }
 
   /** @param {Iterable<string>} ids */

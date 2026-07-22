@@ -358,7 +358,6 @@ export class Connection {
       this.connectionStep = "Preparing the music player…";
       this.app.player.stop();
       await nextClient.setOfflineOnly(this.app.library.offlineOnly);
-      this.client = nextClient;
       const albums = data.albums.sort(albumSort);
       /** @type {Map<string, number>} */
       const albumOrderByTrackId = new Map();
@@ -377,6 +376,9 @@ export class Connection {
       this.app.library.artists = data.artists;
       this.app.library.replaceTracks(tracks, cachedIds);
       this.app.library.starred = data.starred;
+      this.connectionStep = "Preparing the library indexes…";
+      this.app.library.prepareIndexes();
+      this.client = nextClient;
       if (previousClient && previousClient !== nextClient)
         await previousClient.close().catch(() => {});
       return true;
