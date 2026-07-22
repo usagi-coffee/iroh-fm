@@ -225,6 +225,7 @@ test("allows virtualized track and album lists to reach their bottom edge", asyn
   await page.mouse.wheel(0, 100_000);
   await expect(page.locator('[data-album-id="album-120"]')).toBeVisible();
   await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
+  expect(await outwardTouchMovePrevented(albumViewport)).toBe(true);
   await albumViewport.evaluate(
     (element) => (element.scrollTop = element.scrollHeight - element.clientHeight - 1),
   );
@@ -365,5 +366,40 @@ async function finalVirtualRowOverflow(viewport) {
     const finalRow = renderedRows?.lastElementChild;
     if (!(finalRow instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
     return finalRow.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom;
+  });
+}
+
+/** @param {import('@playwright/test').Locator} viewport */
+async function outwardTouchMovePrevented(viewport) {
+  return viewport.evaluate((element) => {
+    const touch = (identifier, clientY) =>
+      new Touch({ identifier, target: element, clientX: 20, clientY });
+    const start = touch(1, 200);
+    element.dispatchEvent(
+      new TouchEvent("touchstart", {
+        bubbles: true,
+        cancelable: true,
+        touches: [start],
+        changedTouches: [start],
+      }),
+    );
+    const moved = touch(1, 100);
+    const accepted = element.dispatchEvent(
+      new TouchEvent("touchmove", {
+        bubbles: true,
+        cancelable: true,
+        touches: [moved],
+        changedTouches: [moved],
+      }),
+    );
+    element.dispatchEvent(
+      new TouchEvent("touchend", {
+        bubbles: true,
+        cancelable: true,
+        touches: [],
+        changedTouches: [moved],
+      }),
+    );
+    return !accepted;
   });
 }

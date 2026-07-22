@@ -258,6 +258,42 @@
     pinnedToEnd = isAtEnd(node);
   }
 
+  /** Prevent Chromium's Android edge stretch when CSS overscroll containment is ignored. */
+  /** @param {HTMLElement} node */
+  function disableTouchOverscroll(node) {
+    /** @type {number | undefined} */
+    let previousY;
+    /** @param {TouchEvent} event */
+    const start = (event) => {
+      previousY = event.touches.length === 1 ? event.touches[0].clientY : undefined;
+    };
+    /** @param {TouchEvent} event */
+    const move = (event) => {
+      const touch = event.touches.length === 1 ? event.touches[0] : null;
+      if (!touch || previousY === undefined) return;
+      const delta = touch.clientY - previousY;
+      previousY = touch.clientY;
+      const maximum = maximumScrollOffset(node);
+      const beyondStart = delta > 0 && node.scrollTop <= 0;
+      const beyondEnd = delta < 0 && maximum - node.scrollTop <= 1;
+      if (event.cancelable && (beyondStart || beyondEnd)) event.preventDefault();
+    };
+    const end = () => {
+      previousY = undefined;
+    };
+
+    node.addEventListener("touchstart", start, { passive: true });
+    node.addEventListener("touchmove", move, { passive: false });
+    node.addEventListener("touchend", end, { passive: true });
+    node.addEventListener("touchcancel", end, { passive: true });
+    return () => {
+      node.removeEventListener("touchstart", start);
+      node.removeEventListener("touchmove", move);
+      node.removeEventListener("touchend", end);
+      node.removeEventListener("touchcancel", end);
+    };
+  }
+
   /**
    * @param {number} index
    * @param {ScrollOptions} [options]
@@ -351,6 +387,7 @@
 
 <div
   {@attach setupViewport}
+  {@attach disableTouchOverscroll}
   data-virtual-viewport
   onscroll={(event) => updateViewportPosition(event.currentTarget)}
   class="h-full overflow-y-auto"
