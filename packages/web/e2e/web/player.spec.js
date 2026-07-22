@@ -201,3 +201,47 @@ test("keeps album scrolling stable and centers a selected album track", async ({
     )
     .toBeLessThan(2);
 });
+
+test("centers the playing album without shifting after navigation", async ({ page }, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "web",
+    "The large-library fixture belongs to the Web client.",
+  );
+  await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "120"));
+  await page.reload();
+  await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();
+
+  const albumViewport = page.locator("[data-virtual-viewport]").last();
+  await albumViewport.evaluate((viewport) => (viewport.scrollTop = viewport.scrollHeight / 2));
+  await expect
+    .poll(() => albumViewport.evaluate((viewport) => viewport.scrollTop))
+    .toBeGreaterThan(100);
+  const albumCard = page.locator("[data-album-id]").nth(2);
+  await expect(albumCard).toBeVisible();
+  const albumId = await albumCard.getAttribute("data-album-id");
+  await albumCard.locator("button.bg-mauve").click({ force: true });
+  const trackNumber = albumId?.replace("album-", "").padStart(3, "0");
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText(`Track ${trackNumber}`);
+
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  const playingAlbum = page.locator(`[data-album-id="${albumId}"]`);
+  await expect(playingAlbum).toBeVisible();
+  const offsets = await playingAlbum.evaluate(async (album) => {
+    const values = [];
+    for (let sample = 0; sample < 10; sample += 1) {
+      const viewport = album.closest("[data-virtual-viewport]");
+      if (!(viewport instanceof HTMLElement)) throw new Error("Album viewport not found");
+      const viewportRect = viewport.getBoundingClientRect();
+      const albumRect = album.getBoundingClientRect();
+      values.push(
+        albumRect.top + albumRect.height / 2 - (viewportRect.top + viewportRect.height / 2),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return values;
+  });
+  expect(Math.abs(offsets.at(-1))).toBeLessThan(15);
+  expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1);
+});

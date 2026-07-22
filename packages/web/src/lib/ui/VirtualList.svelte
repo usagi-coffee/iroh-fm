@@ -311,11 +311,13 @@
         node.style.visibility = "visible";
       } else {
         scrollToIndex(initialIndex, { align: initialAlign });
-        revealFrame = requestAnimationFrame(() => {
-          if (viewport !== node) return;
-          scrollToIndex(initialIndex, { align: initialAlign });
-          node.style.visibility = "visible";
-        });
+        if (!measureItems) node.style.visibility = "visible";
+        else
+          revealFrame = requestAnimationFrame(() => {
+            if (viewport !== node) return;
+            scrollToIndex(initialIndex, { align: initialAlign });
+            node.style.visibility = "visible";
+          });
       }
 
       return () => {

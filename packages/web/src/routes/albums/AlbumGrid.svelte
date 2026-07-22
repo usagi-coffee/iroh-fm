@@ -1,4 +1,6 @@
 <script>
+  import { untrack } from "svelte";
+
   import AlbumActionsModal from "$lib/modals/AlbumActionsModal.svelte";
   import { modal } from "$lib/modals/index.js";
   import { App } from "$lib/runes/App.svelte.js";
@@ -17,22 +19,29 @@
 
   import Cover from "../Cover.svelte";
 
-  /** @typedef {{ albums: import('@iroh-fm/client/types').Album[], followPlayingTrack?: boolean }} Props */
+  /** @typedef {{ albums: import('@iroh-fm/client/types').Album[], followPlayingTrack?: boolean, initialWidth?: number }} Props */
   /** @type {Props} */
-  const { albums, followPlayingTrack = false } = $props();
+  const { albums, followPlayingTrack = false, initialWidth = 0 } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
   const ALBUM_ACTIONS_MIN_WIDTH_REM = 7;
   const ALBUM_GAP_REM = 0.75;
   const ALBUM_HORIZONTAL_PADDING_REM = 1.5;
   const MAX_COLUMNS = 16;
   const COLUMN_ADJUSTMENT_KEY = "iroh-fm-album-column-adjustment";
-  let gridWidth = $state(0);
-  let rootFontSize = $state(16);
+  let gridWidth = $state(untrack(() => initialWidth));
+  let rootFontSize = $state(
+    Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16,
+  );
   let columnAdjustment = $state(0);
   /** @type {{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | undefined} */
   let albumList = $state();
-  /** @type {string | null} */
-  let focusedAlbumId = null;
+  const initialPlayingTrackId = untrack(() =>
+    followPlayingTrack ? App.player.currentTrack?.id : null,
+  );
+  const initialPlayingAlbumId = initialPlayingTrackId
+    ? (App.library.albumByTrackId.get(initialPlayingTrackId)?.id ?? null)
+    : null;
+  let focusedAlbumId = initialPlayingAlbumId;
   const gap = $derived(ALBUM_GAP_REM * rootFontSize);
   const availableWidth = $derived(
     Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize),
@@ -55,13 +64,15 @@
     return grouped;
   });
   const coverWidth = $derived((availableWidth - Math.max(0, columns - 1) * gap) / columns);
-  const estimatedRowHeight = $derived(Math.max(rootFontSize * 8, coverWidth + rootFontSize * 3.75));
+  const rowHeight = $derived(Math.max(rootFontSize * 8, coverWidth + rootFontSize * 4.25));
   const playingTrackId = $derived(App.player.currentTrack?.id ?? null);
   const playingAlbumId = $derived(
     playingTrackId ? (App.library.albumByTrackId.get(playingTrackId)?.id ?? null) : null,
   );
   const initialPlayingRowIndex = $derived(
-    playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
+    initialPlayingAlbumId
+      ? rows.findIndex((row) => row.some((album) => album.id === initialPlayingAlbumId))
+      : -1,
   );
 
   /** @param {import('@iroh-fm/client/types').Album[]} row */
@@ -218,14 +229,17 @@
       bind:api={() => albumList, (value) => (albumList = value)}
       items={rows}
       getKey={albumRowKey}
-      estimateSize={estimatedRowHeight}
+      estimateSize={rowHeight}
+      measureItems={false}
       overscan={bufferSize}
-      initialIndex={initialPlayingRowIndex >= 0 ? initialPlayingRowIndex : null}
+      paddingStart={gap}
+      initialIndex={followPlayingTrack && initialPlayingRowIndex >= 0
+        ? initialPlayingRowIndex
+        : null}
     >
-      {#snippet children(row, rowIndex)}
+      {#snippet children(row)}
         <div
           class="grid gap-3 px-3 pb-5"
-          class:pt-3={rowIndex === 0}
           style={`grid-template-columns:repeat(${columns},minmax(0,1fr))`}
         >
           {#each row as album (album.id)}
@@ -293,7 +307,7 @@
                 type="button"
                 onclick={() => App.library.activateAlbum(album)}
                 ondblclick={() => App.player.playAlbum(album)}
-                class="mt-2 block w-full text-left"
+                class="mt-2 block h-10 w-full text-left"
                 ><h3 class="text-2xs text-text truncate font-semibold">{album.title}</h3>
                 <p class="text-3xs text-overlay1 mt-0.5 truncate">
                   {album.album_artist || album.artist}

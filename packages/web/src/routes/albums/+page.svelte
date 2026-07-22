@@ -5,5 +5,9 @@
 </script>
 
 <div class="contents">
-  <AlbumGrid albums={App.library.visibleAlbums} followPlayingTrack />
+  <AlbumGrid
+    albums={App.library.visibleAlbums}
+    followPlayingTrack
+    initialWidth={document.documentElement.clientWidth}
+  />
 </div>
