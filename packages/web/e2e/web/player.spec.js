@@ -245,3 +245,56 @@ test("centers the playing album without shifting after navigation", async ({ pag
   expect(Math.abs(offsets.at(-1))).toBeLessThan(15);
   expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1);
 });
+
+test("centers album navigation and later playback changes on mobile", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "android", "This exercises the mobile native player.");
+  await page.evaluate(() => {
+    localStorage.setItem("iroh-fm-e2e-album-count", "120");
+    localStorage.setItem("iroh-fm-album-column-adjustment", "-1");
+  });
+  await page.reload();
+  await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();
+
+  const trackViewport = page.locator("section.bg-base [data-virtual-viewport]");
+  await trackViewport.evaluate((viewport) => (viewport.scrollTop = viewport.scrollHeight * 0.6));
+  await expect
+    .poll(() => trackViewport.evaluate((viewport) => viewport.scrollTop))
+    .toBeGreaterThan(1_000);
+  const visibleTrack = trackViewport.locator("[data-track-id]").nth(2);
+  await expect(visibleTrack).toBeVisible();
+  const trackId = await visibleTrack.getAttribute("data-track-id");
+  const trackNumber = trackId?.replace("track-", "").padStart(3, "0");
+  await visibleTrack.getByRole("button", { name: /^Play / }).click();
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText(`Track ${trackNumber}`);
+
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  const playingAlbum = page.locator(`[data-album-id="${trackId?.replace("track-", "album-")}"]`);
+  await expect(playingAlbum).toBeVisible();
+  await expect.poll(() => albumCenterOffset(playingAlbum)).toBeLessThan(15);
+
+  const nextNumber = Number(trackId?.replace("track-", "")) + 1;
+  await page.getByRole("button", { name: "Next track" }).click();
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText(`Track ${String(nextNumber).padStart(3, "0")}`);
+  const nextAlbum = page.locator(`[data-album-id="album-${nextNumber}"]`);
+  await expect(nextAlbum).toBeVisible();
+  await expect.poll(() => albumCenterOffset(nextAlbum)).toBeLessThan(15);
+});
+
+/** @param {import('@playwright/test').Locator} album */
+async function albumCenterOffset(album) {
+  return album.evaluate((element) => {
+    const viewport = element.closest("[data-virtual-viewport]");
+    if (!(viewport instanceof HTMLElement)) throw new Error("Album viewport not found");
+    const viewportRect = viewport.getBoundingClientRect();
+    const albumRect = element.getBoundingClientRect();
+    return Math.abs(
+      albumRect.top + albumRect.height / 2 - (viewportRect.top + viewportRect.height / 2),
+    );
+  });
+}

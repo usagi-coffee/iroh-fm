@@ -28,11 +28,19 @@
   const ALBUM_HORIZONTAL_PADDING_REM = 1.5;
   const MAX_COLUMNS = 16;
   const COLUMN_ADJUSTMENT_KEY = "iroh-fm-album-column-adjustment";
+  const storedColumnAdjustment = Number.parseInt(
+    localStorage.getItem(COLUMN_ADJUSTMENT_KEY) ?? "",
+    10,
+  );
   let gridWidth = $state(untrack(() => initialWidth));
   let rootFontSize = $state(
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16,
   );
-  let columnAdjustment = $state(0);
+  let columnAdjustment = $state(
+    Number.isFinite(storedColumnAdjustment)
+      ? Math.max(-MAX_COLUMNS, Math.min(MAX_COLUMNS, storedColumnAdjustment))
+      : 0,
+  );
   /** @type {{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | undefined} */
   let albumList = $state();
   const initialPlayingTrackId = untrack(() =>
@@ -41,7 +49,6 @@
   const initialPlayingAlbumId = initialPlayingTrackId
     ? (App.library.albumByTrackId.get(initialPlayingTrackId)?.id ?? null)
     : null;
-  let focusedAlbumId = initialPlayingAlbumId;
   const gap = $derived(ALBUM_GAP_REM * rootFontSize);
   const availableWidth = $derived(
     Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize),
@@ -69,10 +76,18 @@
   const playingAlbumId = $derived(
     playingTrackId ? (App.library.albumByTrackId.get(playingTrackId)?.id ?? null) : null,
   );
+  const playingRowIndex = $derived(
+    playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
+  );
   const initialPlayingRowIndex = $derived(
     initialPlayingAlbumId
       ? rows.findIndex((row) => row.some((album) => album.id === initialPlayingAlbumId))
       : -1,
+  );
+  let focusedAlbumPosition = untrack(() =>
+    initialPlayingAlbumId && initialPlayingRowIndex >= 0
+      ? `${initialPlayingAlbumId}:${columns}:${initialPlayingRowIndex}`
+      : "",
   );
 
   /** @param {import('@iroh-fm/client/types').Album[]} row */
@@ -95,9 +110,6 @@
       if (gridWidth !== width) gridWidth = width;
       if (rootFontSize !== measuredFontSize) rootFontSize = measuredFontSize;
     };
-    const storedAdjustment = Number.parseInt(localStorage.getItem(COLUMN_ADJUSTMENT_KEY) ?? "", 10);
-    if (Number.isFinite(storedAdjustment))
-      columnAdjustment = Math.max(-MAX_COLUMNS, Math.min(MAX_COLUMNS, storedAdjustment));
     update(node.clientWidth);
     const observer = new ResizeObserver((entries) => {
       pendingWidth = entries[0]?.contentRect.width ?? 0;
@@ -120,22 +132,34 @@
     const track = App.player.currentTrack;
     const album = track ? App.library.albumByTrackId.get(track.id) : null;
     if (!album) {
-      focusedAlbumId = null;
+      focusedAlbumPosition = "";
       return;
     }
-    if (album.id === focusedAlbumId) return;
-    const rowIndex = initialPlayingRowIndex;
+    const rowIndex = playingRowIndex;
     if (rowIndex < 0) return;
-    focusedAlbumId = album.id;
+    const position = `${album.id}:${columns}:${rowIndex}`;
+    if (position === focusedAlbumPosition) return;
+    focusedAlbumPosition = position;
     let attempts = 60;
     let cancelled = false;
+    let positioned = false;
     /** @type {number | undefined} */
     let frame;
     const center = () => {
       if (cancelled || attempts-- <= 0) return;
+      if (!albumList) {
+        frame = requestAnimationFrame(center);
+        return;
+      }
+      albumList.scrollToIndex(rowIndex, { align: "center" });
+      if (!positioned) {
+        positioned = true;
+        frame = requestAnimationFrame(center);
+        return;
+      }
       const target = host.querySelector(`[data-album-id="${CSS.escape(album.id)}"]`);
       if (target instanceof HTMLElement) return;
-      albumList?.scrollToIndex(rowIndex, { align: "center" });
+      positioned = false;
       frame = requestAnimationFrame(center);
     };
     frame = requestAnimationFrame(center);

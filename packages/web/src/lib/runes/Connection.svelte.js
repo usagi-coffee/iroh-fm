@@ -364,9 +364,7 @@ export class Connection {
 
     // Search metadata and starred/list indexes are intentionally paid for while
     // the startup loader still owns the screen.
-    flushSync(() => {
-      this.connectionStep = "Preparing the library indexes…";
-    });
+    this.connectionStep = "Preparing the library indexes…";
     this.app.library.prepareIndexes();
   }
 
