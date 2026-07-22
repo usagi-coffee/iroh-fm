@@ -268,6 +268,7 @@
       measureItems={false}
       overscan={bufferSize}
       paddingStart={gap}
+      paddingEnd={gap}
       initialIndex={followPlayingTrack && initialPlayingRowIndex >= 0
         ? initialPlayingRowIndex
         : null}

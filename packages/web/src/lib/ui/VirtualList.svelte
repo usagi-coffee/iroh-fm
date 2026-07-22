@@ -291,12 +291,7 @@
       viewport = node;
       api = { scrollToIndex };
       const updateSize = () => {
-        const preserveEnd = pinnedToEnd;
         viewportSize = node.clientHeight;
-        // A mobile toolbar can shrink the viewport after the browser already
-        // clamped it at the larger size. Restore the edge synchronously so there
-        // is no queued correction left to fight the next touchmove.
-        if (preserveEnd) node.scrollTop = maximumScrollOffset(node);
         updateViewportPosition(node);
       };
       updateSize();

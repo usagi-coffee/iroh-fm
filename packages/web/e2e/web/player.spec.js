@@ -225,13 +225,10 @@ test("allows virtualized track and album lists to reach their bottom edge", asyn
   await page.mouse.wheel(0, 100_000);
   await expect(page.locator('[data-album-id="album-120"]')).toBeVisible();
   await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
-
-  const viewportSize = page.viewportSize();
-  if (!viewportSize) throw new Error("Browser viewport size is unavailable");
-  await page.setViewportSize({ ...viewportSize, height: viewportSize.height - 115 });
-  await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
-  await page.setViewportSize(viewportSize);
-  await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
+  await albumViewport.evaluate(
+    (element) => (element.scrollTop = element.scrollHeight - element.clientHeight - 1),
+  );
+  await expect.poll(() => finalVirtualRowOverflow(albumViewport)).toBeLessThanOrEqual(0);
 });
 
 test("centers the playing album without shifting after navigation", async ({ page }, testInfo) => {
@@ -359,4 +356,14 @@ async function distanceFromBottom(viewport) {
   return viewport.evaluate(
     (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
   );
+}
+
+/** @param {import('@playwright/test').Locator} viewport */
+async function finalVirtualRowOverflow(viewport) {
+  return viewport.evaluate((element) => {
+    const renderedRows = element.firstElementChild?.firstElementChild;
+    const finalRow = renderedRows?.lastElementChild;
+    if (!(finalRow instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
+    return finalRow.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom;
+  });
 }
