@@ -13,6 +13,9 @@
   const query = $derived(params.get("query") ?? "");
   const tracks = $derived(App.library.getFilteredTracks(false, query));
   const items = $derived(App.library.getTrackListItems(tracks));
+  /** @type {string | null} */
+  let albumFocusTrackId = $state(null);
+  let albumFocusRequest = $state(0);
 
   /** @param {string} value */
   function updateQuery(value) {
@@ -27,9 +30,22 @@
 
 <div class="desktop:grid-cols-[minmax(0,2fr)_minmax(21rem,1fr)] grid h-full min-h-0 grid-cols-1">
   <div class="desktop:border-r border-surface0 min-h-0">
-    <TrackList {tracks} {items} {query} onquery={updateQuery} />
+    <TrackList
+      {tracks}
+      {items}
+      {query}
+      onquery={updateQuery}
+      onplay={(track) => {
+        albumFocusTrackId = track.id;
+        albumFocusRequest += 1;
+      }}
+    />
   </div>
   <div class="desktop:block hidden min-h-0">
-    <AlbumGrid albums={App.library.visibleAlbums} followPlayingTrack />
+    <AlbumGrid
+      albums={App.library.visibleAlbums}
+      focusTrackId={albumFocusTrackId}
+      focusRequest={albumFocusRequest}
+    />
   </div>
 </div>

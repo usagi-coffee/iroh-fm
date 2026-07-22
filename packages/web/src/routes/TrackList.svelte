@@ -26,9 +26,10 @@
    * @property {ReturnType<import('$lib/runes/Library.svelte.js').Library['getTrackListItems']>} items
    * @property {string} query
    * @property {(value: string) => void} onquery
+   * @property {(track: import('$lib/runes/Track.svelte.js').Track) => void} [onplay]
    */
   /** @type {Props} */
-  const { tracks, items, query, onquery } = $props();
+  const { tracks, items, query, onquery, onplay = () => {} } = $props();
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   const bufferSize = $derived(rowHeight * 24);
@@ -151,6 +152,7 @@
   /** @param {import('$lib/runes/Track.svelte.js').Track} track */
   function playTrackFromList(track) {
     console.info(`[player] track-list play invoked: trackId=${track.id}`);
+    onplay(track);
     let queue = tracks;
     if (query.trim()) {
       queue = App.library.getFilteredTracks();
@@ -158,6 +160,14 @@
       void App.library.focusTrack(track);
     }
     void App.player.playFromTrackList(track, queue);
+  }
+
+  /** @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks */
+  function playAlbumFromList(albumTracks) {
+    const albumTrackIds = new Set(albumTracks.map((track) => track.id));
+    const first = tracks.find((track) => albumTrackIds.has(track.id));
+    if (first) onplay(first);
+    void App.player.playAlbumTracks(albumTracks, tracks);
   }
 
   /**
@@ -299,7 +309,7 @@
                 openAlbumActions(item.album, item.tracks, item.title, item.album?.id ?? item.key),
               )}
               type="button"
-              onclick={() => App.player.playAlbumTracks(item.tracks, tracks)}
+              onclick={() => playAlbumFromList(item.tracks)}
               oncontextmenu={(event) =>
                 openAlbumActions(
                   item.album,

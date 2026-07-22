@@ -19,9 +19,22 @@
 
   import Cover from "../Cover.svelte";
 
-  /** @typedef {{ albums: import('@iroh-fm/client/types').Album[], followPlayingTrack?: boolean, initialWidth?: number }} Props */
+  /**
+   * @typedef {Object} Props
+   * @property {import('@iroh-fm/client/types').Album[]} albums
+   * @property {boolean} [followPlayingTrack]
+   * @property {string | null} [focusTrackId]
+   * @property {number} [focusRequest]
+   * @property {number} [initialWidth]
+   */
   /** @type {Props} */
-  const { albums, followPlayingTrack = false, initialWidth = 0 } = $props();
+  const {
+    albums,
+    followPlayingTrack = false,
+    focusTrackId = null,
+    focusRequest = 0,
+    initialWidth = 0,
+  } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
   const ALBUM_ACTIONS_MIN_WIDTH_REM = 7;
   const ALBUM_GAP_REM = 0.75;
@@ -76,19 +89,20 @@
   const playingAlbumId = $derived(
     playingTrackId ? (App.library.albumByTrackId.get(playingTrackId)?.id ?? null) : null,
   );
-  const playingRowIndex = $derived(
-    playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
+  const requestedAlbumId = $derived(
+    focusTrackId ? (App.library.albumByTrackId.get(focusTrackId)?.id ?? null) : null,
+  );
+  const requestedRowIndex = $derived(
+    requestedAlbumId
+      ? rows.findIndex((row) => row.some((album) => album.id === requestedAlbumId))
+      : -1,
   );
   const initialPlayingRowIndex = $derived(
     initialPlayingAlbumId
       ? rows.findIndex((row) => row.some((album) => album.id === initialPlayingAlbumId))
       : -1,
   );
-  let focusedAlbumPosition = untrack(() =>
-    initialPlayingAlbumId && initialPlayingRowIndex >= 0
-      ? `${initialPlayingAlbumId}:${columns}:${initialPlayingRowIndex}`
-      : "",
-  );
+  let focusedAlbumPosition = "";
 
   /** @param {import('@iroh-fm/client/types').Album[]} row */
   function albumRowKey(row) {
@@ -127,17 +141,14 @@
   }
 
   /** @param {HTMLElement} host */
-  function focusPlayingAlbum(host) {
-    if (!followPlayingTrack) return;
-    const track = App.player.currentTrack;
-    const album = track ? App.library.albumByTrackId.get(track.id) : null;
-    if (!album) {
+  function focusRequestedAlbum(host) {
+    if (!requestedAlbumId) {
       focusedAlbumPosition = "";
       return;
     }
-    const rowIndex = playingRowIndex;
+    const rowIndex = requestedRowIndex;
     if (rowIndex < 0) return;
-    const position = `${album.id}:${columns}:${rowIndex}`;
+    const position = `${focusRequest}:${requestedAlbumId}:${columns}:${rowIndex}`;
     if (position === focusedAlbumPosition) return;
     focusedAlbumPosition = position;
     let attempts = 60;
@@ -157,7 +168,7 @@
         frame = requestAnimationFrame(center);
         return;
       }
-      const target = host.querySelector(`[data-album-id="${CSS.escape(album.id)}"]`);
+      const target = host.querySelector(`[data-album-id="${CSS.escape(requestedAlbumId)}"]`);
       if (target instanceof HTMLElement) return;
       positioned = false;
       frame = requestAnimationFrame(center);
@@ -246,7 +257,7 @@
   <div
     {@attach measureColumns}
     {@attach immediateTauriWheelScroll}
-    {@attach focusPlayingAlbum}
+    {@attach focusRequestedAlbum}
     class="min-h-0 flex-1"
   >
     <VirtualList
