@@ -206,8 +206,8 @@ test("allows virtualized track and album lists to reach their bottom edge", asyn
   page,
 }, testInfo) => {
   test.skip(
-    testInfo.project.name !== "web",
-    "The large-library fixture belongs to the Web client.",
+    testInfo.project.name === "desktop",
+    "The Desktop fixture does not expose the generated large library.",
   );
   await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "120"));
   await page.reload();
@@ -224,6 +224,13 @@ test("allows virtualized track and album lists to reach their bottom edge", asyn
   await albumViewport.hover();
   await page.mouse.wheel(0, 100_000);
   await expect(page.locator('[data-album-id="album-120"]')).toBeVisible();
+  await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
+
+  const viewportSize = page.viewportSize();
+  if (!viewportSize) throw new Error("Browser viewport size is unavailable");
+  await page.setViewportSize({ ...viewportSize, height: viewportSize.height - 115 });
+  await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
+  await page.setViewportSize(viewportSize);
   await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
 });
 
