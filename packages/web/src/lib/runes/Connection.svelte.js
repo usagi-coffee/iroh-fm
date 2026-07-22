@@ -1,4 +1,4 @@
-import { albumSort, cleanRelays, friendlyError, trackSort, variant } from "../utils.js";
+import { albumSort, cleanRelays, friendlyError, trackSort, variant } from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
@@ -17,8 +17,8 @@ export class Connection {
   client = $state(null);
   /** @type {any} */
   loadingClient = $state(null);
-  /** @type {import('../types').ConnectionInfo} */
-  info = $state({ path_type: "unknown", address: "", received_bytes: 0 });
+  /** @type {import('$lib/types').ConnectionInfo} */
+  info = $state.raw({ path_type: "unknown", address: "", received_bytes: 0 });
   receivedBytesPerSecond = $state(0);
   connectionSamples = new WeakMap();
   ticketParseGeneration = 0;
@@ -28,7 +28,7 @@ export class Connection {
   operationGeneration = 0;
   autoConnectAttempted = false;
 
-  /** @param {import('./App.svelte.js').Application} app */
+  /** @param {import('$lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
   }
@@ -350,8 +350,8 @@ export class Connection {
       this.app.player.stop();
       await nextClient.setOfflineOnly(this.app.library.offlineOnly);
       this.client = nextClient;
-      /** @type {import('../types').AlbumData[]} */
-      const albums = /** @type {import('../types').AlbumData[]} */ (
+      /** @type {import('$lib/types').AlbumData[]} */
+      const albums = /** @type {import('$lib/types').AlbumData[]} */ (
         variant(data.albums, "Albums", [])
       ).sort(albumSort);
       /** @type {Map<string, number>} */
@@ -359,8 +359,8 @@ export class Connection {
       for (const [albumIndex, album] of albums.entries()) {
         for (const trackId of album.track_ids) albumOrderByTrackId.set(trackId, albumIndex);
       }
-      /** @type {import('../types').TrackData[]} */
-      const tracks = /** @type {import('../types').TrackData[]} */ (
+      /** @type {import('$lib/types').TrackData[]} */
+      const tracks = /** @type {import('$lib/types').TrackData[]} */ (
         variant(data.tracks, "Tracks", [])
       );
       tracks.sort(

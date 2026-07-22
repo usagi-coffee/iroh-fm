@@ -19,7 +19,7 @@
 
   /** @typedef {{ albums: import('$lib/types').AlbumData[], followPlayingTrack?: boolean }} Props */
   /** @type {Props} */
-  let { albums, followPlayingTrack = false } = $props();
+  const { albums, followPlayingTrack = false } = $props();
   const ALBUM_MIN_WIDTH_REM = 7.8125;
   const ALBUM_ACTIONS_MIN_WIDTH_REM = 7;
   const ALBUM_GAP_REM = 0.75;
@@ -33,18 +33,18 @@
   let albumList = $state();
   /** @type {string | null} */
   let focusedAlbumId = null;
-  const autoColumns = $derived.by(() => {
-    const albumMinWidth = ALBUM_MIN_WIDTH_REM * rootFontSize;
-    const gap = ALBUM_GAP_REM * rootFontSize;
-    const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
-    return Math.max(1, Math.floor((available + gap) / (albumMinWidth + gap)));
-  });
-  const maxColumns = $derived.by(() => {
-    const minimum = ALBUM_ACTIONS_MIN_WIDTH_REM * rootFontSize;
-    const gap = ALBUM_GAP_REM * rootFontSize;
-    const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
-    return Math.max(1, Math.min(MAX_COLUMNS, Math.floor((available + gap) / (minimum + gap))));
-  });
+  const gap = $derived(ALBUM_GAP_REM * rootFontSize);
+  const availableWidth = $derived(
+    Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize),
+  );
+  const albumMinWidth = $derived(ALBUM_MIN_WIDTH_REM * rootFontSize);
+  const actionMinWidth = $derived(ALBUM_ACTIONS_MIN_WIDTH_REM * rootFontSize);
+  const autoColumns = $derived(
+    Math.max(1, Math.floor((availableWidth + gap) / (albumMinWidth + gap))),
+  );
+  const maxColumns = $derived(
+    Math.max(1, Math.min(MAX_COLUMNS, Math.floor((availableWidth + gap) / (actionMinWidth + gap)))),
+  );
   const columns = $derived(Math.max(1, Math.min(maxColumns, autoColumns + columnAdjustment)));
   const bufferSize = $derived(25 * rootFontSize);
   const rows = $derived.by(() => {
@@ -54,16 +54,12 @@
       grouped.push(albums.slice(index, index + columns));
     return grouped;
   });
-  const estimatedRowHeight = $derived.by(() => {
-    const gap = ALBUM_GAP_REM * rootFontSize;
-    const available = Math.max(0, gridWidth - ALBUM_HORIZONTAL_PADDING_REM * rootFontSize);
-    const coverWidth = (available - Math.max(0, columns - 1) * gap) / columns;
-    return Math.max(rootFontSize * 8, coverWidth + rootFontSize * 3.75);
-  });
-  const playingAlbumId = $derived.by(() => {
-    const track = App.player.currentTrack;
-    return track ? (App.library.albumByTrackId.get(track.id)?.id ?? null) : null;
-  });
+  const coverWidth = $derived((availableWidth - Math.max(0, columns - 1) * gap) / columns);
+  const estimatedRowHeight = $derived(Math.max(rootFontSize * 8, coverWidth + rootFontSize * 3.75));
+  const playingTrackId = $derived(App.player.currentTrack?.id ?? null);
+  const playingAlbumId = $derived(
+    playingTrackId ? (App.library.albumByTrackId.get(playingTrackId)?.id ?? null) : null,
+  );
   const initialPlayingRowIndex = $derived(
     playingAlbumId ? rows.findIndex((row) => row.some((album) => album.id === playingAlbumId)) : -1,
   );
@@ -224,6 +220,9 @@
           style={`grid-template-columns:repeat(${columns},minmax(0,1fr))`}
         >
           {#each row as album (album.id)}
+            {const starred = $derived(App.library.starredAlbumIds.has(album.id))}
+            {const cached = $derived(App.library.isAlbumFullyCached(album))}
+            {const caching = $derived(App.library.cachingAlbumIds.has(album.id))}
             <article
               data-album-id={album.id}
               {@attach longPress(() => openActions(album))}
@@ -251,36 +250,27 @@
                   <button
                     type="button"
                     onclick={(event) => starAlbum(album, event)}
-                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {App.library.starredAlbumIds.has(
-                      album.id,
-                    )
+                    class="bg-crust/85 hover:bg-crust hover:text-pink grid size-7 place-items-center rounded-full shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 {starred
                       ? 'text-pink pointer-events-auto translate-y-0 opacity-100'
                       : 'text-subtext0 pointer-events-none translate-y-1 opacity-0'}"
-                    title={App.library.starredAlbumIds.has(album.id)
-                      ? "Unstar album"
-                      : "Star album"}><HeartIcon class="text-xs" /></button
+                    title={starred ? "Unstar album" : "Star album"}
+                    ><HeartIcon class="text-xs" /></button
                   >
                   <button
                     type="button"
                     onclick={(event) => cacheAlbum(album, event)}
-                    disabled={App.library.offlineOnly ||
-                      App.library.isAlbumFullyCached(album) ||
-                      App.library.cachingAlbumIds.has(album.id)}
-                    class="bg-crust/85 text-subtext0 hover:bg-crust hover:text-mauve pointer-events-none grid size-7 translate-y-1 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 disabled:cursor-default {App.library.isAlbumFullyCached(
-                      album,
-                    )
+                    disabled={App.library.offlineOnly || cached || caching}
+                    class="bg-crust/85 text-subtext0 hover:bg-crust hover:text-mauve pointer-events-none grid size-7 translate-y-1 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 disabled:cursor-default {cached
                       ? '!text-green'
-                      : ''} {App.library.cachingAlbumIds.has(album.id)
-                      ? 'text-mauve animate-pulse'
-                      : ''}"
-                    title={App.library.isAlbumFullyCached(album)
+                      : ''} {caching ? 'text-mauve animate-pulse' : ''}"
+                    title={cached
                       ? "Album cached"
-                      : App.library.cachingAlbumIds.has(album.id)
+                      : caching
                         ? "Downloading album"
                         : "Download album"}
-                    >{#if App.library.isAlbumFullyCached(album)}<CachedIcon
+                    >{#if cached}<CachedIcon class="text-xs" />{:else}<DownloadIcon
                         class="text-xs"
-                      />{:else}<DownloadIcon class="text-xs" />{/if}</button
+                      />{/if}</button
                   >
                 </div>
                 <button

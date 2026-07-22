@@ -1,5 +1,5 @@
 <script>
-  import { focusModal } from "./index.js";
+  import { focusModal } from "$lib/modals/index.js";
 
   /**
    * @typedef {Object} Props
@@ -12,7 +12,7 @@
    * @property {boolean} [preventContextMenu]
    */
   /** @type {Props & Record<string, any>} */
-  let {
+  const {
     dismiss,
     snippet,
     cancelValue,

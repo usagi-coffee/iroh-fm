@@ -28,7 +28,7 @@
    * @property {(value: string) => void} onquery
    */
   /** @type {Props} */
-  let { tracks, items, query, onquery } = $props();
+  const { tracks, items, query, onquery } = $props();
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   const bufferSize = $derived(rowHeight * 24);
@@ -242,8 +242,7 @@
     <input
       {@attach focusRequestedFilter}
       {@attach selectFirstSearchResult}
-      value={query}
-      oninput={(event) => onquery(event.currentTarget.value)}
+      bind:value={() => query, onquery}
       onkeydown={(event) => {
         if (event.key === "Escape") {
           onquery("");
@@ -320,13 +319,19 @@
               >
             </button>
           {:else}
+            {const playing = $derived(App.player.currentTrack?.id === item.track.id)}
+            {const selected = $derived(App.library.selectedTrackId === item.track.id)}
+            {const downloading = $derived(
+              item.track.downloading && !item.track.cached && !item.track.memoryCached,
+            )}
+            {const trackNumber = $derived(item.track.track_number || item.trackIndex + 1)}
             <div
               data-list-index={itemIndex}
               data-track-id={item.track.id}
               {@attach longPress(() => openTrackActions(item.track))}
               role="row"
               tabindex="0"
-              aria-selected={App.library.selectedTrackId === item.track.id}
+              aria-selected={selected}
               onclick={() => (App.library.selectedTrackId = item.track.id)}
               ondblclick={() => playTrackFromList(item.track)}
               oncontextmenu={(event) => openTrackActions(item.track, event)}
@@ -337,10 +342,9 @@
                   App.library.selectedTrackId = item.track.id;
                 }
               }}
-              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {App
-                .player.currentTrack?.id === item.track.id
+              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
                 ? 'bg-mauve/15'
-                : App.library.selectedTrackId === item.track.id
+                : selected
                   ? 'bg-surface0'
                   : 'hover:bg-surface0/60'}"
             >
@@ -353,9 +357,9 @@
                 class="text-3xs text-overlay0 hover:text-mauve grid size-6 place-items-center font-mono"
                 aria-label={`Play ${item.track.title}`}
               >
-                {#if App.player.currentTrack?.id === item.track.id && App.player.playing}
+                {#if playing && App.player.playing}
                   <PauseIcon class="text-mauve text-2xs" />
-                {:else if item.track.downloading && !item.track.cached && !item.track.memoryCached}
+                {:else if downloading}
                   <span class="bg-surface1 h-1 w-4 overflow-hidden"
                     ><span
                       class="bg-mauve block h-full transition-[width] duration-150"
@@ -363,17 +367,13 @@
                     ></span></span
                   >
                 {:else if item.track.cached}
-                  <span class="text-green" title="Cached"
-                    >{item.track.track_number || item.trackIndex + 1}</span
-                  >
+                  <span class="text-green" title="Cached">{trackNumber}</span>
                 {:else if item.track.memoryCached}
-                  <span class="text-peach" title="In memory cache"
-                    >{item.track.track_number || item.trackIndex + 1}</span
-                  >
+                  <span class="text-peach" title="In memory cache">{trackNumber}</span>
                 {:else}
-                  <span class="group-hover:hidden"
-                    >{item.track.track_number || item.trackIndex + 1}</span
-                  ><span class="hidden group-hover:block"><PlayIcon class="text-3xs" /></span>
+                  <span class="group-hover:hidden">{trackNumber}</span><span
+                    class="hidden group-hover:block"><PlayIcon class="text-3xs" /></span
+                  >
                 {/if}
               </button>
               <div class="text-mauve tablet-xl:block hidden min-w-0 truncate pr-2">

@@ -22,8 +22,7 @@
     type="range"
     min="0"
     max={duration}
-    value={App.player.currentTime}
-    oninput={(event) => App.player.seek(event.currentTarget.value)}
+    bind:value={App.player.position}
     class="accent-mauve absolute inset-x-0 top-0 h-1 w-full cursor-pointer"
     aria-label="Playback position"
   />
@@ -129,8 +128,7 @@
           min="0"
           max="1"
           step="0.01"
-          value={App.player.volume}
-          oninput={(event) => App.player.changeVolume(event.currentTarget.value)}
+          bind:value={App.player.playbackVolume}
           onchange={(event) => event.currentTarget.blur()}
           class="accent-teal h-1 w-20 cursor-pointer"
           aria-label="Volume"

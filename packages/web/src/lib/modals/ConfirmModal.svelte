@@ -1,5 +1,5 @@
 <script>
-  import SnippetModal from "./Snippet.svelte";
+  import SnippetModal from "$lib/modals/Snippet.svelte";
 
   /**
    * @typedef {Object} Props
@@ -12,7 +12,7 @@
    * @property {boolean} [danger]
    */
   /** @type {Props} */
-  let {
+  const {
     dismiss,
     title,
     message,

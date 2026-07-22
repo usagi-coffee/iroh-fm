@@ -1,6 +1,6 @@
 import { tick, untrack } from "svelte";
 
-import { friendlyError } from "../utils.js";
+import { friendlyError } from "$lib/utils.js";
 
 import { subscribeNativePlayerState } from "@iroh-fm/client/core";
 
@@ -12,10 +12,10 @@ export class Player {
   audioSrc = $state("");
   /** @type {Awaited<ReturnType<import('@iroh-fm/client').MusicClient['trackSource']>> | null} */
   audioSource = $state(null);
-  /** @type {import('./Track.svelte.js').Track | null} */
+  /** @type {import('$lib/runes/Track.svelte.js').Track | null} */
   currentTrack = $state(null);
-  /** @type {import('./Track.svelte.js').Track[]} */
-  queue = $state([]);
+  /** @type {import('$lib/runes/Track.svelte.js').Track[]} */
+  queue = $state.raw([]);
   playing = $state(false);
   audioLoading = $state(false);
   downloadProgress = $derived(this.currentTrack?.progress ?? 0);
@@ -36,7 +36,7 @@ export class Player {
   /** @type {string | null} */
   nativePlayPendingTrackId = null;
 
-  /** @param {import('./App.svelte.js').Application} app */
+  /** @param {import('$lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
     subscribeNativePlayerState((/** @type {any} */ state) => this.applyNativeState(state));
@@ -55,7 +55,7 @@ export class Player {
     };
   };
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   async playAlbum(album) {
     await this.playAlbumTracks(
       this.app.library.tracksForAlbum(album),
@@ -63,14 +63,14 @@ export class Player {
     );
   }
 
-  /** @param {import('./Track.svelte.js').Track[]} albumTracks @param {import('./Track.svelte.js').Track[]} sourceQueue */
+  /** @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks @param {import('$lib/runes/Track.svelte.js').Track[]} sourceQueue */
   async playAlbumTracks(albumTracks, sourceQueue) {
     const albumTrackIds = new Set(albumTracks.map((track) => track.id));
     const first = sourceQueue.find((track) => albumTrackIds.has(track.id));
     if (first) await this.play(first, sourceQueue);
   }
 
-  /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} queue @param {number} generation */
+  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} queue @param {number} generation */
   prefetchNext(track, queue, generation) {
     if (generation !== this.generation || this.shuffle || this.repeat || queue.length < 2) return;
     const client = this.app.connection.client;
@@ -98,7 +98,7 @@ export class Player {
       });
   }
 
-  /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} [sourceQueue] */
+  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} [sourceQueue] */
   async play(track, sourceQueue = this.app.library.tracks) {
     const client = this.app.connection.client;
     if (!client) {
@@ -234,7 +234,7 @@ export class Player {
     }
   }
 
-  /** @param {import('./Track.svelte.js').Track} track @param {import('./Track.svelte.js').Track[]} queue */
+  /** @param {import('$lib/runes/Track.svelte.js').Track} track @param {import('$lib/runes/Track.svelte.js').Track[]} queue */
   async playFromTrackList(track, queue) {
     this.app.library.selectedTrackId = track.id;
     if (
@@ -347,6 +347,15 @@ export class Player {
     if (duration && audio) audio.currentTime = Math.min(Number(value), duration);
   }
 
+  get position() {
+    return this.currentTime;
+  }
+
+  /** @param {string | number} value */
+  set position(value) {
+    this.seek(value);
+  }
+
   /** @param {number} seconds */
   seekBy(seconds) {
     if (!this.currentTrack) return;
@@ -366,6 +375,15 @@ export class Player {
       return;
     }
     if (this.audio) this.audio.volume = this.volume;
+  }
+
+  get playbackVolume() {
+    return this.volume;
+  }
+
+  /** @param {string | number} value */
+  set playbackVolume(value) {
+    this.changeVolume(value);
   }
 
   toggleRepeat() {

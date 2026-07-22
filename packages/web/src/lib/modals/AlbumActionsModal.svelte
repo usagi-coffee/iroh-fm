@@ -1,4 +1,5 @@
 <script>
+  import SnippetModal from "$lib/modals/Snippet.svelte";
   import { App } from "$lib/runes/App.svelte.js";
   import { formatBytes, formatTime } from "$lib/utils.js";
 
@@ -6,7 +7,6 @@
   import HeartIcon from "virtual:icons/ri/heart-line";
 
   import Cover from "../../routes/Cover.svelte";
-  import SnippetModal from "./Snippet.svelte";
 
   /**
    * @typedef {Object} Props
@@ -17,22 +17,7 @@
    * @property {string} cacheKey
    */
   /** @type {Props} */
-  let { dismiss, album, tracks, title, cacheKey } = $props();
-  const cached = $derived(
-    album
-      ? App.library.isAlbumFullyCached(album)
-      : tracks.length > 0 && tracks.every((track) => track.cached),
-  );
-  const starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)));
-  const stats = $derived.by(() => {
-    let duration = 0;
-    let size = 0;
-    for (const track of tracks) {
-      duration += track.duration_seconds ?? 0;
-      size += track.file_size ?? 0;
-    }
-    return { duration, size };
-  });
+  const { dismiss, album, tracks, title, cacheKey } = $props();
 
   async function toggleStar() {
     dismiss();
@@ -54,6 +39,16 @@
 />
 
 {#snippet Content()}
+  {const cached = $derived(
+    album
+      ? App.library.isAlbumFullyCached(album)
+      : tracks.length > 0 && tracks.every((track) => track.cached),
+  )}
+  {const starred = $derived(Boolean(album && App.library.starredAlbumIds.has(album.id)))}
+  {const duration = $derived(
+    tracks.reduce((total, track) => total + (track.duration_seconds ?? 0), 0),
+  )}
+  {const size = $derived(tracks.reduce((total, track) => total + (track.file_size ?? 0), 0))}
   <div class="border-surface0 grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 border-b p-3">
     <Cover
       client={App.connection.client}
@@ -74,9 +69,7 @@
       </p>
       <p class="text-3xs text-overlay0 mt-2 font-mono leading-5">
         {tracks.length}
-        {tracks.length === 1 ? "track" : "tracks"} · {formatTime(stats.duration)}<br />{formatBytes(
-          stats.size,
-        )}
+        {tracks.length === 1 ? "track" : "tracks"} · {formatTime(duration)}<br />{formatBytes(size)}
       </p>
     </div>
   </div>

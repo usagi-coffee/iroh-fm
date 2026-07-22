@@ -20,7 +20,7 @@ export class Track {
   /** @type {string | null} */
   codec = $state(null);
   /** @type {string[]} */
-  genres = $state([]);
+  genres = $state.raw([]);
   /** @type {string | null} */
   date = $state(null);
   /** @type {string | null} */
@@ -49,13 +49,13 @@ export class Track {
   total = $state(0);
   downloadGeneration = 0;
 
-  /** @param {import('../types').TrackData} data @param {boolean} [cached] */
+  /** @param {import('$lib/types').TrackData} data @param {boolean} [cached] */
   constructor(data, cached = false) {
     this.updateMetadata(data);
     this.setCached(cached);
   }
 
-  /** @param {import('../types').TrackData} data */
+  /** @param {import('$lib/types').TrackData} data */
   updateMetadata(data) {
     this.id = data.id;
     this.title = data.title;

@@ -61,18 +61,28 @@
   const leadingPadding = $derived(Math.max(0, paddingStart));
   const trailingPadding = $derived(Math.max(0, paddingEnd));
   const windowStep = $derived(Math.max(1, overscan / 2));
-  const uniformEstimate = $derived.by(() => {
-    if (measureItems !== "uniform") return null;
-    if (typeof estimateSize === "number") return Math.max(1, estimateSize);
-    return items.length ? estimatedSize(items[0], 0) : 1;
+  const uniformMode = $derived(measureItems === "uniform");
+  const numericEstimate = $derived(
+    typeof estimateSize === "number" ? Math.max(1, estimateSize) : null,
+  );
+  const uniformEstimate = $derived(
+    uniformMode ? (numericEstimate ?? (items.length ? estimatedSize(items[0], 0) : 1)) : null,
+  );
+  const measuredUniformSize = $derived.by(() => {
+    const measurement = /** @type {{ estimate: number, size: number } | null} */ (
+      uniformMeasurement
+    );
+    return uniformEstimate !== null && measurement?.estimate === uniformEstimate
+      ? measurement.size
+      : null;
   });
-  const fixedItemSize = $derived.by(() => {
-    if (!measureItems && typeof estimateSize === "number") return Math.max(1, estimateSize);
-    if (uniformEstimate === null) return null;
-    return uniformMeasurement?.estimate === uniformEstimate
-      ? uniformMeasurement.size
-      : uniformEstimate;
-  });
+  const fixedItemSize = $derived(
+    !measureItems && numericEstimate !== null
+      ? numericEstimate
+      : uniformEstimate === null
+        ? null
+        : (measuredUniformSize ?? uniformEstimate),
+  );
 
   /** @param {ResizeObserverEntry} entry */
   function observedHeight(entry) {

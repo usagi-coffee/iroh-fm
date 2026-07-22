@@ -1,6 +1,6 @@
-import { Connection } from "./Connection.svelte.js";
-import { Library } from "./Library.svelte.js";
-import { Player } from "./Player.svelte.js";
+import { Connection } from "$lib/runes/Connection.svelte.js";
+import { Library } from "$lib/runes/Library.svelte.js";
+import { Player } from "$lib/runes/Player.svelte.js";
 
 export class Application {
   connection = new Connection(this);

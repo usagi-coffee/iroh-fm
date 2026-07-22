@@ -106,7 +106,7 @@
    */
   /** @typedef {{ client: import('@iroh-fm/client').MusicClient | null, id: string | null, fullQuality: boolean }} FailedRequest */
   /** @type {Props} */
-  let {
+  const {
     client,
     id = null,
     title = "",
@@ -125,21 +125,6 @@
 
   let visible = $state(false);
   let failedRequest = $state(/** @type {FailedRequest | null} */ (null));
-  const imageFailed = $derived(
-    Boolean(
-      failedRequest &&
-      failedRequest.client === client &&
-      failedRequest.id === id &&
-      failedRequest.fullQuality === fullQuality,
-    ),
-  );
-  const hue = $derived(titleHue(title));
-  const coverSource = $derived.by(() => {
-    if (!client || !id) return null;
-    const resolved = resolvedCoverUrl(client, id, fullQuality);
-    if (resolved) return resolved;
-    return visible ? loadCoverUrl(client, id, fullQuality) : null;
-  });
 
   function imageError() {
     forgetCoverUrl(client, id, fullQuality);
@@ -193,6 +178,19 @@
   <img src={url} alt={`${title} cover`} onerror={imageError} />
 {/snippet}
 
+{const imageFailed = $derived(
+  Boolean(
+    failedRequest &&
+    failedRequest.client === client &&
+    failedRequest.id === id &&
+    failedRequest.fullQuality === fullQuality,
+  ),
+)}
+{const hue = $derived(titleHue(title))}
+{const resolvedSource = $derived(client && id ? resolvedCoverUrl(client, id, fullQuality) : null)}
+{const coverSource = $derived(
+  resolvedSource ?? (client && id && visible ? loadCoverUrl(client, id, fullQuality) : null),
+)}
 <div
   {@attach loadVisibleCover(rootMargin)}
   class={`cover ${className}`}

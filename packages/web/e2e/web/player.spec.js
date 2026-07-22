@@ -110,9 +110,27 @@ test("seeks five seconds right and left with the keyboard", async ({ page }) => 
 
 test("filters tracks by title", async ({ page }) => {
   await page.getByPlaceholder("Filter artist, title, album…").fill("nebula");
+  await expect(page).toHaveURL(/\/tracks\?query=nebula$/);
   await expect(page.getByRole("row")).toHaveCount(1);
   await expect(page.getByRole("row")).toContainText("Nebula Drift");
   await expect(page.getByText("First Light", { exact: true })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("row")).toHaveCount(1);
+});
+
+test("edits client settings through the settings model", async ({ page }) => {
+  await page.getByRole("link", { name: "Connection settings" }).click();
+  await expect(page.getByRole("heading", { name: "Client settings" })).toBeVisible();
+
+  const relays = page.getByPlaceholder("https://relay.example");
+  await expect(relays).toHaveCount(1);
+  await page.getByRole("button", { name: "+ ADD RELAY" }).click();
+  await expect(relays).toHaveCount(2);
+
+  const memoryCache = page.getByRole("spinbutton", { name: "Memory cache size in MiB" });
+  await memoryCache.fill("64");
+  await expect(memoryCache).toHaveValue("64");
 });
 
 test("shows resolved album covers immediately after remounting", async ({ page }) => {

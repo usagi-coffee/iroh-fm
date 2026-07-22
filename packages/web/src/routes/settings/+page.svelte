@@ -1,201 +1,59 @@
 <script>
-  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
 
   import { App } from "$lib/runes/App.svelte.js";
+  import {
+    MAX_MEMORY_CACHE_MIB,
+    MIN_MEMORY_CACHE_MIB,
+    Settings,
+  } from "$lib/runes/Settings.svelte.js";
   import { forceServiceWorkerUpdate, subscribeToServiceWorkerStatus } from "$lib/service-worker.js";
-  import { cleanRelays, formatBytes, friendlyError } from "$lib/utils.js";
+  import { formatBytes, friendlyError } from "$lib/utils.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
   import CopyIcon from "virtual:icons/ri/file-copy-line";
 
   import { ClientCore } from "@iroh-fm/client/core";
 
-  const MIN_MEMORY_CACHE_MIB = 32;
-  const MAX_MEMORY_CACHE_MIB = Math.round(ClientCore.memoryCacheMaxSize() / 1024 / 1024);
-
-  let settings = $state({
-    ticket: App.connection.ticket,
-    endpoint: App.connection.endpoint,
-    relays: [...App.connection.relays],
-    secret: App.connection.secret,
-    starredKey: App.starredKey,
-    memoryCacheMiB: Math.round(ClientCore.memoryCacheSize() / 1024 / 1024),
-    showSecret: false,
-    storage: {
-      loading: true,
-      requesting: false,
-      tracks: 0,
-      trackSize: 0,
-      covers: 0,
-      coverSize: 0,
-      usage: 0,
-      quota: 0,
-      persisted: false,
-      supported: false,
-    },
-  });
-  let ticketParseGeneration = 0;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let ticketParseTimer;
+  const settings = new Settings();
+  let showSecret = $state(false);
   let endpointCopied = $state(false);
   let forcingUpdate = $state(false);
-  /** @type {{platform: string, commit: string} | null} */
-  let nativeBuildInfo = $state(null);
   let serviceWorkerStatus = $state({
     kind: "checking",
     label: "SW CHECKING",
     detail: "Reading service worker status.",
     hash: "—",
   });
+  const nativeBuildInfo = ClientCore.buildInfo().catch((error) => {
+    console.warn("[build] could not read native build information", error);
+    return null;
+  });
   /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let endpointIdTimer;
-  /** @type {{ resolve: (value: string) => void, reject: (reason: unknown) => void }[]} */
-  let endpointIdWaiters = [];
-  let draftEndpointId = $state(endpointIdForSecret(settings.secret));
-  const canSave = $derived(
-    Boolean(
-      settings.endpoint.trim() ? cleanRelays(settings.relays).length : settings.ticket.trim(),
-    ) && !App.connection.connecting,
-  );
-
-  /** @param {string} secret */
-  function endpointIdForSecret(secret) {
-    const value = secret.trim();
-    return value ? Promise.resolve(ClientCore.endpointIdForSecret(value)) : Promise.resolve("");
-  }
-
-  /** @param {string} value */
-  function updateSecret(value) {
-    settings.secret = value;
-    if (endpointIdTimer) clearTimeout(endpointIdTimer);
-    const secret = value.trim();
-    if (!secret) {
-      endpointIdTimer = undefined;
-      for (const waiter of endpointIdWaiters.splice(0)) waiter.resolve("");
-      draftEndpointId = Promise.resolve("");
-      return;
-    }
-    draftEndpointId = new Promise((resolve, reject) => {
-      endpointIdWaiters.push({ resolve, reject });
-      endpointIdTimer = setTimeout(() => {
-        endpointIdTimer = undefined;
-        const waiters = endpointIdWaiters.splice(0);
-        Promise.resolve(ClientCore.endpointIdForSecret(secret)).then(
-          (endpointId) => {
-            for (const waiter of waiters) waiter.resolve(endpointId);
-          },
-          (error) => {
-            for (const waiter of waiters) waiter.reject(error);
-          },
-        );
-      }, 180);
-    });
-  }
+  let copiedTimer;
 
   function initialize() {
-    refreshStorageInfo();
-    if (settings.ticket.trim()) syncTicketAddress(settings.ticket);
-    void ClientCore.buildInfo()
-      .then((info) => (nativeBuildInfo = info))
-      .catch((error) => console.warn("[build] could not read native build information", error));
+    const cleanupSettings = settings.initialize();
     const unsubscribe = subscribeToServiceWorkerStatus((status) => {
       serviceWorkerStatus = status;
     });
     return () => {
+      cleanupSettings();
       unsubscribe();
-      if (ticketParseTimer) clearTimeout(ticketParseTimer);
-      if (endpointIdTimer) clearTimeout(endpointIdTimer);
-      for (const waiter of endpointIdWaiters.splice(0)) waiter.resolve("");
+      if (copiedTimer) clearTimeout(copiedTimer);
     };
   }
 
-  /** @param {string} value */
-  function updateTicket(value) {
-    settings.ticket = value;
-    settings.endpoint = "";
-    settings.relays = [""];
-    if (ticketParseTimer) clearTimeout(ticketParseTimer);
-    ticketParseGeneration += 1;
-    if (!value.trim()) return;
-    ticketParseTimer = setTimeout(() => {
-      ticketParseTimer = undefined;
-      void syncTicketAddress(value);
-    }, 180);
-  }
-
-  /** @param {string} value */
-  async function syncTicketAddress(value) {
-    if (ticketParseTimer) {
-      clearTimeout(ticketParseTimer);
-      ticketParseTimer = undefined;
-    }
-    const generation = ++ticketParseGeneration;
-    if (!value.trim()) return;
+  async function copyDraftEndpoint() {
     try {
-      const address = await ClientCore.parseTicket(value.trim());
-      if (generation !== ticketParseGeneration) return;
-      settings.endpoint = address.endpointId;
-      settings.relays = address.relays.length ? address.relays : [""];
-    } catch {
-      // Keep the editor ready while the user is typing.
-    }
-  }
-
-  function addRelay() {
-    settings.relays.push("");
-  }
-
-  /** @param {number} index */
-  function removeRelay(index) {
-    settings.relays.splice(index, 1);
-    if (!settings.relays.length) settings.relays.push("");
-  }
-
-  /** @param {string} value */
-  function updateMemoryCacheSize(value) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    settings.memoryCacheMiB = Math.min(
-      MAX_MEMORY_CACHE_MIB,
-      Math.max(MIN_MEMORY_CACHE_MIB, Math.round(parsed)),
-    );
-  }
-
-  async function refreshStorageInfo() {
-    const storage = settings.storage;
-    storage.loading = true;
-    storage.supported = Boolean(navigator.storage);
-    try {
-      const [cacheStats, estimate, persisted] = await Promise.all([
-        App.connection.client?.cacheStats() ?? ClientCore.cacheStats(),
-        navigator.storage?.estimate?.() ?? Promise.resolve({}),
-        navigator.storage?.persisted?.() ?? Promise.resolve(false),
-      ]);
-      Object.assign(storage, {
-        loading: false,
-        tracks: cacheStats.tracks.count,
-        trackSize: cacheStats.tracks.size,
-        covers: cacheStats.covers.count,
-        coverSize: cacheStats.covers.size,
-        usage: estimate.usage ?? 0,
-        quota: estimate.quota ?? 0,
-        persisted,
-      });
+      const endpointId = await settings.draftEndpointId;
+      if (!endpointId) return;
+      await navigator.clipboard.writeText(endpointId);
+      endpointCopied = true;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (endpointCopied = false), 1600);
     } catch (error) {
-      console.warn("[storage] could not read cache statistics", error);
-      storage.loading = false;
-    }
-  }
-
-  async function requestPersistentStorage() {
-    if (!navigator.storage?.persist) return;
-    settings.storage.requesting = true;
-    try {
-      await navigator.storage.persist();
-    } finally {
-      settings.storage.requesting = false;
-      await refreshStorageInfo();
+      App.connection.error = friendlyError(error, "Could not copy the client endpoint ID.");
     }
   }
 
@@ -208,52 +66,13 @@
       App.connection.error = friendlyError(error, "Could not reset the application update cache.");
     }
   }
-
-  async function save() {
-    if (!canSave) return;
-    let secret = settings.secret.trim();
-    try {
-      if (secret) App.connection.clientEndpointId = await draftEndpointId;
-      else {
-        const identity = await ClientCore.generateIdentity();
-        secret = identity.secret;
-        App.connection.clientEndpointId = identity.endpointId;
-      }
-    } catch (error) {
-      App.connection.error = friendlyError(error, "The client secret is invalid.");
-      return;
-    }
-    App.connection.ticket = settings.ticket.trim();
-    App.connection.endpoint = settings.endpoint.trim();
-    App.connection.relays = [...settings.relays];
-    App.connection.secret = secret;
-    App.starredKey = settings.starredKey.trim();
-    const memoryCacheBytes = ClientCore.setMemoryCacheSize(settings.memoryCacheMiB);
-    if (App.connection.client) await App.connection.client.setMemoryCacheSize(memoryCacheBytes);
-    if (App.starredKey) localStorage.setItem("iroh-fm-starred-key", App.starredKey);
-    else localStorage.removeItem("iroh-fm-starred-key");
-    localStorage.removeItem("iroh-fm-loved-key");
-    if (await App.connection.connect()) await goto(resolve("/tracks"));
-  }
-
-  async function copyDraftEndpoint() {
-    try {
-      const endpointId = await draftEndpointId;
-      if (!endpointId) return;
-      await navigator.clipboard.writeText(endpointId);
-      endpointCopied = true;
-      setTimeout(() => (endpointCopied = false), 1600);
-    } catch (error) {
-      App.connection.error = friendlyError(error, "Could not copy the client endpoint ID.");
-    }
-  }
 </script>
 
 <section {@attach initialize} class="bg-base text-text h-full overflow-y-auto">
   <form
     onsubmit={(event) => {
       event.preventDefault();
-      save();
+      settings.save();
     }}
     class="mx-auto flex min-h-full w-full max-w-3xl flex-col"
   >
@@ -279,8 +98,7 @@
           >Server ticket</label
         ><textarea
           id="settings-ticket"
-          value={settings.ticket}
-          oninput={(event) => updateTicket(event.currentTarget.value)}
+          bind:value={settings.ticket}
           rows="3"
           spellcheck="false"
           autocomplete="off"
@@ -313,7 +131,7 @@
             class="text-3xs text-subtext0 font-mono tracking-[.14em] uppercase">Relay URLs</label
           ><button
             type="button"
-            onclick={addRelay}
+            onclick={settings.addRelay}
             class="text-3xs text-mauve hover:text-pink font-mono">+ ADD RELAY</button
           >
         </div>
@@ -328,7 +146,7 @@
                 class="border-surface1 bg-mantle placeholder:text-overlay0 focus:border-mauve h-11 w-full border px-3 pr-10 font-mono text-xs outline-none"
               />{#if settings.relays.length > 1}<button
                   type="button"
-                  onclick={() => removeRelay(index)}
+                  onclick={() => settings.removeRelay(index)}
                   class="text-overlay0 hover:text-red absolute inset-y-0 right-2 grid w-7 place-items-center"
                   aria-label={`Remove relay ${index + 1}`}><CloseIcon class="text-xs" /></button
                 >{/if}
@@ -344,16 +162,16 @@
         <div class="relative">
           <input
             id="settings-secret"
-            bind:value={() => settings.secret, updateSecret}
-            type={settings.showSecret ? "text" : "password"}
+            bind:value={settings.secret}
+            type={showSecret ? "text" : "password"}
             spellcheck="false"
             autocomplete="new-password"
             class="border-surface1 bg-mantle focus:border-mauve h-11 w-full border px-3 pr-14 font-mono text-xs outline-none"
           /><button
             type="button"
-            onclick={() => (settings.showSecret = !settings.showSecret)}
+            onclick={() => (showSecret = !showSecret)}
             class="text-3xs text-overlay1 hover:text-mauve absolute inset-y-0 right-3 font-mono"
-            >{settings.showSecret ? "HIDE" : "SHOW"}</button
+            >{showSecret ? "HIDE" : "SHOW"}</button
           >
         </div>
         <div class="mt-3">
@@ -372,7 +190,7 @@
             </div>
             <code class="text-2xs text-subtext0 block font-mono leading-5 break-all"
               >{settings.secret.trim()
-                ? await draftEndpointId
+                ? await settings.draftEndpointId
                 : "Generated automatically when settings are saved"}</code
             >
             {#snippet pending()}<code class="text-2xs text-overlay0 block font-mono leading-5"
@@ -418,7 +236,7 @@
           </div>
           <button
             type="button"
-            onclick={refreshStorageInfo}
+            onclick={settings.refreshStorageInfo}
             disabled={settings.storage.loading}
             class="text-4xs text-mauve hover:text-pink shrink-0 font-mono disabled:opacity-40"
             >{settings.storage.loading ? "READING…" : "REFRESH"}</button
@@ -453,7 +271,7 @@
           </div>
           {#if settings.storage.supported && !settings.storage.persisted}<button
               type="button"
-              onclick={requestPersistentStorage}
+              onclick={settings.requestPersistentStorage}
               disabled={settings.storage.requesting}
               class="border-mauve text-4xs text-mauve hover:bg-mauve hover:text-crust shrink-0 border px-2 py-1.5 font-mono disabled:opacity-40"
               >{settings.storage.requesting ? "REQUESTING…" : "KEEP OFFLINE"}</button
@@ -470,8 +288,7 @@
               min={MIN_MEMORY_CACHE_MIB}
               max={MAX_MEMORY_CACHE_MIB}
               step="16"
-              value={settings.memoryCacheMiB}
-              oninput={(event) => updateMemoryCacheSize(event.currentTarget.value)}
+              bind:value={settings.memoryCacheMiB}
               class="border-surface1 bg-mantle focus:border-mauve h-9 w-24 border px-2 text-right font-mono text-xs outline-none"
               aria-label="Memory cache size in MiB"
             />
@@ -528,12 +345,15 @@
               {serviceWorkerStatus.label}
             </span>
           </div>
-          {#if nativeBuildInfo}
-            <span title={`${nativeBuildInfo.platform} application build commit`}>
-              {nativeBuildInfo.platform.toUpperCase()}
-              {nativeBuildInfo.commit.slice(0, 12)}
-            </span>
-          {/if}
+          <svelte:boundary>
+            {const buildInfo = await nativeBuildInfo}
+            {#if buildInfo}
+              <span title={`${buildInfo.platform} application build commit`}>
+                {buildInfo.platform.toUpperCase()}
+                {buildInfo.commit.slice(0, 12)}
+              </span>
+            {/if}
+          </svelte:boundary>
         </div>
       </div>
     </div>
@@ -547,7 +367,7 @@
         >CANCEL</a
       ><button
         type="submit"
-        disabled={!canSave}
+        disabled={!settings.canSave}
         class="bg-mauve text-3xs text-crust hover:bg-pink px-4 py-2 font-mono font-bold disabled:opacity-40"
         >SAVE & RECONNECT</button
       >

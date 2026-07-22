@@ -1,4 +1,6 @@
 <script>
+  import { SvelteURLSearchParams } from "svelte/reactivity";
+
   import { goto } from "$app/navigation";
   import { asset } from "$app/paths";
   import { resolve } from "$app/paths";
@@ -26,7 +28,7 @@
 
   /** @typedef {import('./$types').LayoutProps} Props */
   /** @type {Props} */
-  let { children } = $props();
+  const { children } = $props();
   let updateReady = $state(false);
   let updateBannerDismissed = $state(false);
   let androidRestartRequired = $state(false);
@@ -151,7 +153,13 @@
 
       if (event.key.length === 1 && App.connection.client) {
         event.preventDefault();
-        void App.library.focusTrackFilter(event.key);
+        App.library.trackFilterFocusPending = true;
+        const path = resolve("/tracks");
+        const params = new SvelteURLSearchParams(
+          page.url.pathname.replace(/\/$/, "") === path.replace(/\/$/, "") ? page.url.search : "",
+        );
+        params.set("query", `${params.get("query") ?? ""}${event.key}`);
+        void goto(`${path}?${params}`);
       }
     };
     window.addEventListener("keydown", keydown, true);

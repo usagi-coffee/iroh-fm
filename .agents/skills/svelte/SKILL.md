@@ -28,7 +28,7 @@ Apply these rules when creating or modifying Svelte files. Preserve existing pro
 - Use `$state` for mutable state, `$derived` for expressions, and `$derived.by` for multi-step calculations. Default to `$state([])` for arrays. When an array is only reassigned, `$state.raw([])` avoids unnecessary proxy overhead, especially for large arrays. Its elements can still be independently reactive through their own `$state` fields.
 - Declare `$derived` with `const` unless it is reassigned; then use `let`, `$derived.by()` cannot be reassigned/mutated.
 - Prefer many small, composable `$derived` values over one large computation. They stay lazy, track narrower dependency sets, and make broad or expensive invalidations easy to locate and fix.
-- Default to class-first design for stateful workflows: classes own state, derived facts, and mutations; components render them and call their methods. Put shared workflow classes in `.svelte.js` and page-only classes in the component. Prefer reactive fields over getters.
+- Use classes for domain entities and domain workflows that own invariants, derived facts, and mutations. Do not create page or component wrapper classes such as `ConnectPage` or `PageState`; keep view-only state and derived values as top-level runes in the component. Put reusable domain classes in `.svelte.js` and page-local domain classes in the component.
 - Prefer mutating methods such as `push` and `splice` when updating an existing reactive array. Do not replace the entire array solely to trigger reactivity.
 - Avoid `$effect` for synchronization. Use derived state, function bindings, attachments, or direct mutation at the event/API/entity method that owns the change.
 
@@ -163,22 +163,38 @@ Use class accessors for bindings with coordinated writes or side effects. This a
 <input bind:value={person.name} />
 ```
 
-### Class-first design
+### Domain classes
 
-Represent a stateful entity or workflow as a class. Keep its invariants and mutations out of loose component variables:
+Classes represent concepts in the application domain, not the component containing them. Keep view-only state at the component level and use classes for domain models that own behavior:
 
-```js
-class Line {
-  transactions = $state([]);
-  issued = $derived(
-    this.transactions.reduce((total, tx) => total + tx.quantity, 0),
-  );
+```svelte
+<script>
+  class Order {
+    name;
+    lines = $state([]);
+    total = $derived(this.lines.reduce((sum, line) => sum + line.quantity, 0));
 
-  add(transaction) {
-    this.transactions.push(transaction);
+    constructor(name) {
+      this.name = name;
+    }
+
+    add(line) {
+      this.lines.push(line);
+    }
   }
-}
+
+  let search = $state("");
+
+  const orders = $state([new Order("First order")]);
+  const visible = $derived(orders.filter((order) => order.name.includes(search)));
+</script>
+
+{#each visible as order}
+  <p>{order.name}: {order.total}</p>
+{/each}
 ```
+
+`search` and `visible` only shape this view, while `Order` represents a domain entity and owns its lines and total.
 
 ### Search parameters
 

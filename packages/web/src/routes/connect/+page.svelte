@@ -54,6 +54,13 @@
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let endpointCopiedTimer;
 
+  function cleanupCopiedTimers() {
+    return () => {
+      if (ticketCopiedTimer) clearTimeout(ticketCopiedTimer);
+      if (endpointCopiedTimer) clearTimeout(endpointCopiedTimer);
+    };
+  }
+
   /** @param {'ticket' | 'endpoint'} kind */
   function showCopied(kind) {
     const timer = kind === "ticket" ? ticketCopiedTimer : endpointCopiedTimer;
@@ -162,7 +169,7 @@
   }
 </script>
 
-<main class="bg-base text-text relative h-dvh overflow-hidden">
+<main {@attach cleanupCopiedTimers} class="bg-base text-text relative h-dvh overflow-hidden">
   <div
     class="tablet-xl:flex absolute inset-0 hidden flex-col opacity-65 select-none"
     aria-hidden="true"
@@ -312,9 +319,10 @@
           </div>
           <textarea
             id="ticket"
-            value={App.connection.ticket}
-            oninput={(event) =>
-              App.connection.updateLoginTicket(event.currentTarget.value, loginTab === "advanced")}
+            bind:value={
+              () => App.connection.ticket,
+              (value) => App.connection.updateLoginTicket(value, loginTab === "advanced")
+            }
             rows={loginTab === "ticket" ? 3 : 2}
             spellcheck="false"
             autocomplete="off"
@@ -377,8 +385,9 @@
             <div class="relative">
               <input
                 id="secret"
-                value={App.connection.secret}
-                oninput={(event) => App.connection.updateIdentity(event.currentTarget.value)}
+                bind:value={
+                  () => App.connection.secret, (value) => void App.connection.updateIdentity(value)
+                }
                 type={showSecret ? "text" : "password"}
                 spellcheck="false"
                 autocomplete="new-password"

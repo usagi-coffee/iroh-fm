@@ -22,17 +22,7 @@
 
   /** @typedef {{ updateReady: boolean, onupdate: () => void }} Props */
   /** @type {Props} */
-  let { updateReady, onupdate } = $props();
-  const path = $derived(page.url.pathname.replace(/\/$/, ""));
-  const connectionToggleTitle = $derived(
-    App.library.offlineOnly
-      ? "Offline-only mode enabled — use network"
-      : App.connection.info.path_type === "relay"
-        ? "Connected via relay — use cached music only"
-        : App.connection.info.path_type === "direct"
-          ? "Connected directly — use cached music only"
-          : "Connecting — use cached music only",
-  );
+  const { updateReady, onupdate } = $props();
   const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   /** @param {'minimize' | 'toggleMaximize' | 'close'} command */
@@ -65,6 +55,16 @@
   data-tauri-drag-region={desktop ? "" : undefined}
   class="border-surface0 bg-crust text-2xs flex h-9 min-w-0 items-center border-b"
 >
+  {const path = $derived(page.url.pathname.replace(/\/$/, ""))}
+  {const connectionToggleTitle = $derived(
+    App.library.offlineOnly
+      ? "Offline-only mode enabled — use network"
+      : App.connection.info.path_type === "relay"
+        ? "Connected via relay — use cached music only"
+        : App.connection.info.path_type === "direct"
+          ? "Connected directly — use cached music only"
+          : "Connecting — use cached music only",
+  )}
   <a
     href={resolve("/tracks")}
     onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}

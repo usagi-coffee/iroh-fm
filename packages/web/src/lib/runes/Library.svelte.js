@@ -3,19 +3,19 @@ import { SvelteSet } from "svelte/reactivity";
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { filterTracks, friendlyError } from "../utils.js";
-import { Track } from "./Track.svelte.js";
+import { Track } from "$lib/runes/Track.svelte.js";
+import { filterTracks, friendlyError } from "$lib/utils.js";
 
 export class Library {
-  /** @type {import('../types').LibrarySummary} */
-  summary = $state({ artist_count: 0, album_count: 0, track_count: 0 });
-  /** @type {import('../types').AlbumData[]} */
-  albums = $state([]);
-  /** @type {import('../types').ArtistData[]} */
-  artists = $state([]);
+  /** @type {import('$lib/types').LibrarySummary} */
+  summary = $state.raw({ artist_count: 0, album_count: 0, track_count: 0 });
+  /** @type {import('$lib/types').AlbumData[]} */
+  albums = $state.raw([]);
+  /** @type {import('$lib/types').ArtistData[]} */
+  artists = $state.raw([]);
   /** @type {Track[]} */
-  tracks = $state([]);
-  /** @type {import('../types').StarredSet} */
+  tracks = $state.raw([]);
+  /** @type {import('$lib/types').StarredSet} */
   starred = $state({ artists: [], albums: [], tracks: [] });
   offlineOnly = $state(false);
   /** @type {Set<string>} */
@@ -30,11 +30,11 @@ export class Library {
   cachingAlbumIds = new SvelteSet();
   /** @type {Map<string, Track>} */
   tracksById = $derived(new Map(this.tracks.map((track) => [track.id, track])));
-  /** @type {Map<string, import('../types').AlbumData>} */
+  /** @type {Map<string, import('$lib/types').AlbumData>} */
   albumById = $derived(new Map(this.albums.map((album) => [album.id, album])));
-  /** @type {Map<string, import('../types').AlbumData>} */
+  /** @type {Map<string, import('$lib/types').AlbumData>} */
   albumByTrackId = $derived.by(() => {
-    /** @type {Map<string, import('../types').AlbumData>} */
+    /** @type {Map<string, import('$lib/types').AlbumData>} */
     const albums = new Map();
     for (const album of this.albums) {
       for (const id of album.track_ids) albums.set(id, album);
@@ -87,40 +87,27 @@ export class Library {
   availableStarredTracks = $derived(
     this.offlineOnly ? this.cachedStarredTracks : this.starredTracks,
   );
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   trackListItems = $derived(this.createTrackListItems(this.tracks, false));
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   cachedTrackListItems = $derived(this.createTrackListItems(this.cachedTracks, true));
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   starredTrackListItems = $derived(this.createTrackListItems(this.starredTracks, false));
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   cachedStarredTrackListItems = $derived(this.createTrackListItems(this.cachedStarredTracks, true));
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   availableTrackListItems = $derived(
     this.offlineOnly ? this.cachedTrackListItems : this.trackListItems,
   );
-  /** @type {import('../types').TrackListItem[]} */
+  /** @type {import('$lib/types').TrackListItem[]} */
   availableStarredTrackListItems = $derived(
     this.offlineOnly ? this.cachedStarredTrackListItems : this.starredTrackListItems,
   );
-  trackFilterQuery = $state("");
-  /** @type {Track[]} */
-  filteredTracks = $derived(
-    this.trackFilterQuery.trim()
-      ? filterTracks(this.availableTracks, this.trackFilterQuery)
-      : this.availableTracks,
-  );
-  /** @type {import('../types').TrackListItem[]} */
-  filteredTrackListItems = $derived(
-    this.trackFilterQuery.trim()
-      ? this.createTrackListItems(this.filteredTracks)
-      : this.availableTrackListItems,
-  );
-  /** @type {import('../types').AlbumData[]} */
+  /** @type {import('$lib/types').AlbumData[]} */
   offlineAlbums = $derived(
     this.albums.filter((album) => (this.cachedTracksByAlbum.get(album.id)?.length ?? 0) > 0),
   );
-  /** @type {import('../types').AlbumData[]} */
+  /** @type {import('$lib/types').AlbumData[]} */
   visibleAlbums = $derived(this.offlineOnly ? this.offlineAlbums : this.albums);
   /** @type {Set<string>} */
   fullyCachedAlbumIds = $derived(
@@ -140,12 +127,12 @@ export class Library {
   /** @type {string | null} */
   pendingTrackFocusId = $state(null);
 
-  /** @param {import('./App.svelte.js').Application} app */
+  /** @param {import('$lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
   }
 
-  /** @param {import('../types').TrackData[]} rawTracks @param {Iterable<string>} cachedIds */
+  /** @param {import('$lib/types').TrackData[]} rawTracks @param {Iterable<string>} cachedIds */
   replaceTracks(rawTracks, cachedIds) {
     const cached = new Set(cachedIds);
     const previousTracksById = this.tracksById;
@@ -192,7 +179,7 @@ export class Library {
 
   /** @param {Track[]} filtered @param {boolean} [offlineOnly] */
   createTrackListItems(filtered, offlineOnly = this.offlineOnly) {
-    /** @type {import('../types').TrackListItem[]} */
+    /** @type {import('$lib/types').TrackListItem[]} */
     const items = [];
     let previousAlbumKey;
     for (const [trackIndex, track] of filtered.entries()) {
@@ -235,26 +222,19 @@ export class Library {
     await goto(resolve("/tracks"));
   }
 
-  /** @param {string} character */
-  async focusTrackFilter(character) {
-    this.trackFilterQuery += character;
-    this.trackFilterFocusPending = true;
-    await goto(resolve("/tracks"));
-  }
-
   /** Album cache state is derived exclusively from its individual track files. */
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   isAlbumFullyCached(album) {
     return this.fullyCachedAlbumIds.has(album.id);
   }
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   firstAvailableTrackForAlbum(album) {
     const ids = new Set(album.track_ids);
     return this.tracks.find((track) => ids.has(track.id) && (!this.offlineOnly || track.cached));
   }
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   async selectAlbum(album) {
     const first = this.firstAvailableTrackForAlbum(album);
     if (!first) return null;
@@ -262,14 +242,14 @@ export class Library {
     return first;
   }
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   async activateAlbum(album) {
     const first = await this.selectAlbum(album);
     if (first && window.matchMedia("(max-width: 1023px)").matches)
       await this.app.player.playAlbum(album);
   }
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   async playAndSelectAlbum(album) {
     const first = await this.selectAlbum(album);
     if (!first) return;
@@ -349,7 +329,7 @@ export class Library {
     }
   }
 
-  /** @param {import('../types').AlbumData} album */
+  /** @param {import('$lib/types').AlbumData} album */
   tracksForAlbum(album) {
     const tracks = this.tracksByAlbum.get(album.id) ?? [];
     return this.offlineOnly ? (this.cachedTracksByAlbum.get(album.id) ?? []) : tracks;
@@ -393,7 +373,7 @@ export class Library {
     }
   }
 
-  /** @param {import('../types').AlbumData | null | undefined} album */
+  /** @param {import('$lib/types').AlbumData | null | undefined} album */
   async toggleStarAlbum(album) {
     if (!album) return;
     const client = this.app.connection.client;
