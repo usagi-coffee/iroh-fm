@@ -9,34 +9,218 @@ Apply these rules when creating or modifying Svelte files. Preserve existing pro
 
 ## Svelte
 
-- Use Svelte 5 runes. Do not use legacy component APIs such as `export let`.
-- Use `$state`, `$derived`, `$derived.by(` insetead of legacy `$:` declarations.
+- Use Svelte 5 runes. Do not introduce legacy APIs such as `export let`, `$:`, `on:click`, or slots.
+- Use event properties, snippets, and `{@render ...}`.
 - Use `{const ...}`, `{const ... = $derived(...)}`, and `{let ... = $state(...)}` in markup. Do not use legacy `{@const ...}`.
-- Use `{@attach ...}` over `bind:this`, `onMount`, `onDestroy`, keep in mind reads inside the attachment force re-attachments.
+- Use `{@attach ...}` over `bind:this`, `onMount`, and `onDestroy`. Reactive reads inside an attachment cause reattachment.
 - Destructure component props from `$props()`.
-- Use `<svelte:boundary>` instead of legacy `{#await` blocks.
-- You can use top-level await e.g `const value = $derived(await fetch())` in the `<script>` block and the markup.
+- Prefer top-level await and async `$derived` under `<svelte:boundary>` over `{#await}` blocks and manual loading state.
 
 ## SvelteKit
 
 - Use `$app/state`, not `$app/stores`.
 - Use `$lib` for imports from `src/lib`.
 - Use `goto` from `$app/navigation` for application navigation instead of assigning `window.location.href`.
+- Treat `const { data } = $props()` and route load functions used for anything other than navigation guards or redirects as legacy patterns. Initialize and fetch in components under `<svelte:boundary>`; initialize the application in `+layout.svelte` and gate its children with the boundary.
 
 ## State and reactivity
 
-- Model mutable local state with `$state` and derived values with `$derived` or `$derived.by`, keep in mind `$derived` when defined with `let` can be mutated.
-- Use many `$derived`'s, split state into small, focused values rather than one large computation, this improves the performance and helps localize performance issues.
-- Prefer reactive class fields such as `value = $derived(...)` over getters when both express the same logic clearly.
-- Use a getter only when `$derived` or `$derived.by` would be insufficient.
-- Prefer mutating array methods when updating an existing reactive array instead of replacing the full array solely to trigger reactivity.
-- Do not use `$effect` as a default synchronization mechanism, in most cases `$effect` usage can be replaced with a mutating `$derived`, function bindings or just updating at call-site.
-- Keep related state consistent at the mutation site: event handlers, function bindings, API callbacks, or entity methods.
+- Use `$state` for mutable state, `$derived` for expressions, and `$derived.by` for multi-step calculations. Default to `$state([])` for arrays. When an array is only reassigned, `$state.raw([])` avoids unnecessary proxy overhead, especially for large arrays. Its elements can still be independently reactive through their own `$state` fields.
+- Declare `$derived` with `const` unless it is reassigned; then use `let`, `$derived.by()` cannot be reassigned/mutated.
+- Prefer many small, composable `$derived` values over one large computation. They stay lazy, track narrower dependency sets, and make broad or expensive invalidations easy to locate and fix.
+- Default to class-first design for stateful workflows: classes own state, derived facts, and mutations; components render them and call their methods. Put shared workflow classes in `.svelte.js` and page-only classes in the component. Prefer reactive fields over getters.
+- Prefer mutating methods such as `push` and `splice` when updating an existing reactive array. Do not replace the entire array solely to trigger reactivity.
+- Avoid `$effect` for synchronization. Use derived state, function bindings, attachments, or direct mutation at the event/API/entity method that owns the change.
 
 ## Patterns
 
-- Prefer function bindings when input updates require validation, normalization, or coordinated side effects:
+### Derived declarations
+
+Use `const` when code only reads the binding and `let` when code also assigns to it. Both forms are valid:
+
+```js
+const total = $derived(lines.reduce((sum, line) => sum + line.quantity, 0));
+
+let selected = $derived(lines[0]);
+function select(line) {
+  selected = line;
+}
+```
+
+`selected` is still derived state; declaring it with `let` allows the explicit override which quite often can help with avoiding `$effect`.
+
+### Split derived calculations
+
+Keep each dependency step narrow and lazy. This exposes where work happens and lets an unchanged intermediate value stop invalidation from reaching later calculations:
+
+```js
+const search = $derived(query.toUpperCase());
+const visible = $derived(
+  records.filter((record) => record.name.includes(search)),
+);
+const groups = $derived(group_by(visible, (record) => record.group));
+```
+
+A boolean derived is a useful gate:
+
+```js
+const overweight = $derived(weight > 100);
+const warning = $derived(overweight ? x : y);
+```
+
+Changing `weight` from `110` to `120` keeps `overweight` `true`, so `warning` is not recalculated. Changing it from `120` to `90` changes `overweight` to `false` and recalculates `warning`; further changes below `100` are skipped again.
+
+### Local markup declarations
+
+Declare small values in the markup when they only coordinate a local part of the template. Keep them next to the places that use them instead of hoisting them into the component script:
 
 ```svelte
-<input bind:value={() => value, (next) => (value = next)} />
+<section>
+  {const template = $derived(compact ? "1fr 5rem" : "1fr 8rem")}
+
+  <header style:grid-template-columns={template}>
+    ...
+  </header>
+
+  <article style:grid-template-columns={template}>
+    ...
+  </article>
+</section>
 ```
+
+Use `{const ...}` for local values and `{let ... = $state(...)}` for local mutable state. Their scope and lifetime follow the surrounding markup block.
+
+### Reactive collections
+
+Use svelte's built-in reactive collections when mutations such as `.add()`, `.set()`, or `.delete()` must update derived values or markup:
+
+```svelte
+<script>
+  import { SvelteSet } from "svelte/reactivity";
+
+  const selected = new SvelteSet();
+</script>
+
+<button onclick={() => selected.add(record.id)}>
+  Select
+</button>
+
+{selected.size} selected
+```
+
+Use `SvelteMap`, `SvelteSet`, or `SvelteURLSearchParams` instead of their native counterparts when the collection itself participates in reactivity.
+
+### Attachments
+
+Register DOM behavior and its cleanup in the same attachment. Compose independent behaviors directly on the element:
+
+```svelte
+<script>
+  function autoselect(element) {
+    const select = () => element.select();
+
+    element.addEventListener("focus", select);
+    element.addEventListener("click", select);
+
+    return () => {
+      element.removeEventListener("focus", select);
+      element.removeEventListener("click", select);
+    };
+  }
+</script>
+
+<input {@attach autoselect} {@attach tooltip("Search")} />
+```
+
+### Function binding
+
+Normalize or coordinate writes at the binding boundary:
+
+```svelte
+<input bind:value={() => search, (value) => (search = value.toUpperCase())} />
+```
+
+Use class accessors for bindings with coordinated writes or side effects. This avoids having to use `$effect` and leaking wrapper internals such as `.current` into the template and keeps the markup as a clean domain property:
+
+```svelte
+<script>
+  class Person {
+    #name = $state();
+
+    get name() {
+      return this.#name;
+    }
+
+    set name(value) {
+      this.#name = value;
+      doSomethingElse();
+    }
+  };
+
+  const person = new Person();
+</script>
+
+<input bind:value={person.name} />
+```
+
+### Class-first design
+
+Represent a stateful entity or workflow as a class. Keep its invariants and mutations out of loose component variables:
+
+```js
+class Line {
+  transactions = $state([]);
+  issued = $derived(
+    this.transactions.reduce((total, tx) => total + tx.quantity, 0),
+  );
+
+  add(transaction) {
+    this.transactions.push(transaction);
+  }
+}
+```
+
+### Search parameters
+
+Use `SvelteURLSearchParams` when search parameters participate in reactivity. Keeping filters and selections in the URL makes the current view shareable: someone opening the link gets the same values already applied.
+
+```svelte
+<script>
+  import { replaceState } from "$app/navigation";
+  import { page } from "$app/state";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
+
+  const params = $derived(new SvelteURLSearchParams(page.url.search));
+  const query = $derived(params.get("query") ?? "");
+</script>
+
+<input bind:value={() => query, (value) => {
+  params.set('query', value);
+  replaceState(`?${params}`, {});
+}}/>
+```
+
+### Layout initialization
+
+Run application initialization in `+layout.svelte` and await it inside a boundary before rendering child routes:
+
+```svelte
+<script>
+  const { children } = $props();
+</script>
+
+<svelte:boundary>
+  {void (await App.initialize())}
+  {@render children()}
+
+  {#snippet pending()}
+    <p>Starting application…</p>
+  {/snippet}
+
+  {#snippet failed(error)}
+    <p>{error.message}</p>
+  {/snippet}
+</svelte:boundary>
+```
+
+This keeps startup ordering, loading UI, and initialization errors in the component tree instead of hiding them in a route loader.
