@@ -162,7 +162,7 @@ test("keeps album scrolling stable and centers a selected album track", async ({
   await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
-  const albumViewport = page.locator("[data-virtual-viewport]");
+  const albumViewport = page.locator("[data-album-library] [data-virtual-viewport]");
   await page.waitForTimeout(250);
   await albumViewport.evaluate((viewport) => (viewport.scrollTop = viewport.scrollHeight / 2));
   await expect(page.locator("[data-album-id]").first()).toBeVisible();
@@ -200,6 +200,31 @@ test("keeps album scrolling stable and centers a selected album track", async ({
       }),
     )
     .toBeLessThan(2);
+});
+
+test("allows virtualized track and album lists to reach their bottom edge", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "web",
+    "The large-library fixture belongs to the Web client.",
+  );
+  await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-album-count", "120"));
+  await page.reload();
+  await expect(page.getByText("120 / 120", { exact: true })).toBeVisible();
+
+  const trackViewport = page.locator("section.bg-base [data-virtual-viewport]");
+  await trackViewport.hover();
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.locator('[data-track-id="track-120"]')).toBeVisible();
+  await expect.poll(() => distanceFromBottom(trackViewport)).toBeLessThan(1);
+
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  const albumViewport = page.locator("[data-album-library] [data-virtual-viewport]");
+  await albumViewport.hover();
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.locator('[data-album-id="album-120"]')).toBeVisible();
+  await expect.poll(() => distanceFromBottom(albumViewport)).toBeLessThan(1);
 });
 
 test("centers the playing album without shifting after navigation", async ({ page }, testInfo) => {
@@ -320,4 +345,11 @@ async function albumCenterOffset(album) {
       albumRect.top + albumRect.height / 2 - (viewportRect.top + viewportRect.height / 2),
     );
   });
+}
+
+/** @param {import('@playwright/test').Locator} viewport */
+async function distanceFromBottom(viewport) {
+  return viewport.evaluate(
+    (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+  );
 }

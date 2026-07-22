@@ -243,7 +243,7 @@
 
   /** @param {HTMLElement} node */
   function maximumScrollOffset(node) {
-    return Math.max(0, layout.totalSize - node.clientHeight);
+    return Math.max(0, node.scrollHeight - node.clientHeight);
   }
 
   /** @param {HTMLElement} node */
@@ -291,15 +291,11 @@
       viewport = node;
       api = { scrollToIndex };
       const updateSize = () => {
-        const preserveEnd = pinnedToEnd;
         viewportSize = node.clientHeight;
-        if (preserveEnd)
-          queueMicrotask(() => {
-            if (viewport !== node) return;
-            node.scrollTop = maximumScrollOffset(node);
-            updateViewportPosition(node);
-          });
-        else updateViewportPosition(node);
+        // The browser already clamps scrollTop when the viewport changes. Writing
+        // an independently calculated edge here fights mobile toolbar and native
+        // window resizes while the user is still scrolling.
+        updateViewportPosition(node);
       };
       updateSize();
       const observer = new ResizeObserver(updateSize);

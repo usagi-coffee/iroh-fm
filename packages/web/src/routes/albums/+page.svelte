@@ -4,7 +4,7 @@
   import AlbumGrid from "./AlbumGrid.svelte";
 </script>
 
-<div class="contents">
+<div class="contents" data-album-library>
   <AlbumGrid
     albums={App.library.visibleAlbums}
     followPlayingTrack
