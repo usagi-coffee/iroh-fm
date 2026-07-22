@@ -15,6 +15,7 @@
    * @property {number} [paddingEnd]
    * @property {number | null} [initialIndex]
    * @property {"start" | "center" | "end"} [initialAlign]
+   * @property {boolean} [overscroll]
    * @property {VirtualListApi | undefined} [api]
    * @property {import("svelte").Snippet<[any, number]>} children
    */
@@ -30,6 +31,7 @@
     paddingEnd = 0,
     initialIndex = null,
     initialAlign = "center",
+    overscroll = false,
     api = $bindable(),
     children,
   } = $props();
@@ -387,11 +389,11 @@
 
 <div
   {@attach setupViewport}
-  {@attach disableTouchOverscroll}
+  {@attach !overscroll && disableTouchOverscroll}
   data-virtual-viewport
   onscroll={(event) => updateViewportPosition(event.currentTarget)}
   class="h-full overflow-y-auto"
-  style="visibility: hidden; overscroll-behavior: none; overflow-anchor: none;"
+  style={`visibility:hidden;overscroll-behavior:${overscroll ? "auto" : "none"};overflow-anchor:none`}
 >
   <div class="relative w-full" style={`height:${layout.totalSize}px`}>
     <div

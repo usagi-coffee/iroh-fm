@@ -267,6 +267,7 @@
       estimateSize={rowHeight}
       measureItems={false}
       overscan={bufferSize}
+      overscroll={false}
       paddingStart={gap}
       paddingEnd={gap}
       initialIndex={followPlayingTrack && initialPlayingRowIndex >= 0
