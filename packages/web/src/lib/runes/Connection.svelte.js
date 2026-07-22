@@ -305,6 +305,71 @@ export class Connection {
     return this.endpoint.trim() ? cleanRelays(this.relays).length > 0 : Boolean(this.ticket.trim());
   }
 
+  /** @param {number} operation */
+  async ensureConnectionIdentity(operation) {
+    if (this.secret.trim()) return true;
+    const identity = await ClientCore.generateIdentity();
+    if (operation !== this.operationGeneration) return false;
+    this.identityGeneration += 1;
+    this.secret = identity.secret;
+    this.clientEndpointId = identity.endpointId;
+    return true;
+  }
+
+  /** @param {boolean} forceTicket */
+  connectionOptions(forceTicket) {
+    return {
+      ticket: this.ticket.trim(),
+      endpoint: forceTicket ? "" : this.endpoint.trim(),
+      relays: cleanRelays(this.relays),
+      secret: this.secret,
+    };
+  }
+
+  /**
+   * @param {Awaited<ReturnType<typeof ClientCore.connect>>} client
+   * @param {number} operation
+   */
+  async readLibrarySnapshot(client, operation) {
+    this.connectionStep = "Indexing the remote library…";
+    const data = await client.bootstrap(this.app.starredKey);
+    if (operation !== this.operationGeneration) return null;
+    this.connectionStep = "Reading the offline track cache…";
+    const cachedIds = await client.cachedTrackIds();
+    if (operation !== this.operationGeneration) return null;
+    return { data, cachedIds };
+  }
+
+  /** @param {NonNullable<Awaited<ReturnType<Connection['readLibrarySnapshot']>>>} snapshot */
+  installLibrarySnapshot({ data, cachedIds }) {
+    const albums = data.albums.sort(albumSort);
+    /** @type {Map<string, number>} */
+    const albumOrderByTrackId = new Map();
+    for (const [albumIndex, album] of albums.entries()) {
+      for (const trackId of album.track_ids) albumOrderByTrackId.set(trackId, albumIndex);
+    }
+
+    const tracks = data.tracks;
+    tracks.sort(
+      (left, right) =>
+        (albumOrderByTrackId.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+          (albumOrderByTrackId.get(right.id) ?? Number.MAX_SAFE_INTEGER) || trackSort(left, right),
+    );
+
+    this.app.library.summary = data.summary;
+    this.app.library.albums = albums;
+    this.app.library.artists = data.artists;
+    this.app.library.replaceTracks(tracks, cachedIds);
+    this.app.library.starred = data.starred;
+
+    // Search metadata and starred/list indexes are intentionally paid for while
+    // the startup loader still owns the screen.
+    flushSync(() => {
+      this.connectionStep = "Preparing the library indexes…";
+    });
+    this.app.library.prepareIndexes();
+  }
+
   /**
    * @param {boolean} [forceTicket]
    * @param {() => void} [onConnected]
@@ -315,6 +380,9 @@ export class Connection {
       onConnected?.();
       return false;
     }
+
+    // The startup boundary only needs to know when a transport exists. The
+    // candidate stays separate from `client` until its library is ready.
     let connectionReported = false;
     const reportConnected = () => {
       if (connectionReported) return;
@@ -328,71 +396,52 @@ export class Connection {
     const previousClient = this.client;
     /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | undefined} */
     let nextClient;
+
     try {
-      if (!this.secret.trim()) {
-        const identity = await ClientCore.generateIdentity();
-        if (operation !== this.operationGeneration) return false;
-        this.identityGeneration += 1;
-        this.secret = identity.secret;
-        this.clientEndpointId = identity.endpointId;
-      }
+      // Resolve and persist identity before opening either a ticket-based or
+      // endpoint-and-relays connection.
+      if (!(await this.ensureConnectionIdentity(operation))) return false;
       this.persist();
-      nextClient = await ClientCore.connect({
-        ticket: this.ticket.trim(),
-        endpoint: forceTicket ? "" : this.endpoint.trim(),
-        relays: cleanRelays(this.relays),
-        secret: this.secret,
-      });
+      nextClient = await ClientCore.connect(this.connectionOptions(forceTicket));
       if (operation !== this.operationGeneration) {
         await nextClient.close().catch(() => {});
         return false;
       }
       this.loadingClient = nextClient;
       reportConnected();
-      this.connectionStep = "Indexing the remote library…";
-      const data = await nextClient.bootstrap(this.app.starredKey);
-      this.connectionStep = "Reading the offline track cache…";
-      const cachedIds = await nextClient.cachedTrackIds();
-      if (operation !== this.operationGeneration) {
+
+      // Bootstrap the candidate without disturbing the active client. Every
+      // await is followed by an operation check so disconnect/reconnect wins.
+      const snapshot = await this.readLibrarySnapshot(nextClient, operation);
+      if (!snapshot) {
         await nextClient.close().catch(() => {});
         return false;
       }
       this.connectionStep = "Preparing the music player…";
-      this.app.player.stop();
       await nextClient.setOfflineOnly(this.app.library.offlineOnly);
-      const albums = data.albums.sort(albumSort);
-      /** @type {Map<string, number>} */
-      const albumOrderByTrackId = new Map();
-      for (const [albumIndex, album] of albums.entries()) {
-        for (const trackId of album.track_ids) albumOrderByTrackId.set(trackId, albumIndex);
+      if (operation !== this.operationGeneration) {
+        await nextClient.close().catch(() => {});
+        return false;
       }
-      const tracks = data.tracks;
-      tracks.sort(
-        (left, right) =>
-          (albumOrderByTrackId.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
-            (albumOrderByTrackId.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
-          trackSort(left, right),
-      );
-      this.app.library.summary = data.summary;
-      this.app.library.albums = albums;
-      this.app.library.artists = data.artists;
-      this.app.library.replaceTracks(tracks, cachedIds);
-      this.app.library.starred = data.starred;
-      flushSync(() => {
-        this.connectionStep = "Preparing the library indexes…";
-      });
-      this.app.library.prepareIndexes();
+
+      // Commit only after the candidate is fully configured. Until this point,
+      // a failure leaves the previous client and its playback untouched.
+      this.app.player.stop();
+      this.installLibrarySnapshot(snapshot);
       this.client = nextClient;
       if (previousClient && previousClient !== nextClient)
         await previousClient.close().catch(() => {});
       return true;
     } catch (error) {
+      // Roll back the unpublished candidate and retain the last usable client.
       await nextClient?.close().catch(() => {});
       if (operation !== this.operationGeneration) return false;
       this.error = friendlyError(error, "Could not reach this iroh-fm server.");
       this.client = previousClient;
       return false;
     } finally {
+      // `onConnected` must resolve even for validation failures so startup can
+      // render the connection page instead of leaving a boundary pending.
       if (this.loadingClient === nextClient) this.loadingClient = null;
       reportConnected();
       if (operation === this.operationGeneration) this.connecting = false;
