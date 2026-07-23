@@ -7,3 +7,4 @@
 /android/app/src/main/jniLibs
 /packages/web/test-results
 .opencode
+.claude

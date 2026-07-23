@@ -11,10 +11,10 @@ Apply these rules when creating or modifying Svelte files. Preserve existing pro
 
 - Use Svelte 5 runes. Do not introduce legacy APIs such as `export let`, `$:`, `on:click`, or slots.
 - Use event properties, snippets, and `{@render ...}`.
-- Use `{const ...}`, `{const ... = $derived(...)}`, and `{let ... = $state(...)}` in markup. Do not use legacy `{@const ...}`.
+- Markup declaration tags are not reactive by default. Use `{const value = $derived(expression)}` when the value must update and `{let value = $state(initial)}` for mutable reactive state. Use bare `{const value = expression}` only when the value does not need to update, and avoid bare `{let ...}` for state. Do not use legacy `{@const ...}`.
 - Use `{@attach ...}` over `bind:this`, `onMount`, and `onDestroy`. Reactive reads inside an attachment cause reattachment.
 - Destructure component props from `$props()`.
-- Prefer top-level await and async `$derived` under `<svelte:boundary>` over `{#await}` blocks and manual loading state.
+- Treat `{#await ...}` blocks as legacy. Use top-level `<script>` await for component-level work and `{await expression}` inside `<svelte:boundary>` for a local subtree. The latter is a markup await, not top-level await. Add a `pending` snippet only when the expected delay justifies replacing the current UI; omit it for short work to avoid loader flashes.
 
 ## SvelteKit
 
@@ -55,9 +55,7 @@ Keep each dependency step narrow and lazy. This exposes where work happens and l
 
 ```js
 const search = $derived(query.toUpperCase());
-const visible = $derived(
-  records.filter((record) => record.name.includes(search)),
-);
+const visible = $derived(records.filter((record) => record.name.includes(search)));
 const groups = $derived(group_by(visible, (record) => record.group));
 ```
 
@@ -70,9 +68,27 @@ const warning = $derived(overweight ? x : y);
 
 Changing `weight` from `110` to `120` keeps `overweight` `true`, so `warning` is not recalculated. Changing it from `120` to `90` changes `overweight` to `false` and recalculates `warning`; further changes below `100` are skipped again.
 
+### Async dependencies
+
+Values read inside asynchronous callbacks are not tracked automatically. Pass reactive dependencies as function arguments so they are read synchronously by the reactive expression and become stable snapshots inside the callback:
+
+```js
+let filter = $state("active");
+let limit = $state(20);
+
+function createRequest(filter, limit) {
+  return observe(async () => {
+    // Values read inside this callback are not tracked automatically
+    return await loadItems({ filter, limit });
+  });
+}
+
+const results = $derived(createRequest(filter, limit));
+```
+
 ### Local markup declarations
 
-Declare small values in the markup when they only coordinate a local part of the template. Keep them next to the places that use them instead of hoisting them into the component script:
+Declaration tags only provide local variables and block scope; `$derived` and `$state` provide reactivity. Keep small local values next to the markup that uses them instead of hoisting them into the component script:
 
 ```svelte
 <section>
@@ -88,7 +104,7 @@ Declare small values in the markup when they only coordinate a local part of the
 </section>
 ```
 
-Use `{const ...}` for local values and `{let ... = $state(...)}` for local mutable state. Their scope and lifetime follow the surrounding markup block.
+`{const template = compact ? a : b}` would not update when `compact` changes; `$derived` is what makes it reactive. Likewise, `{let expanded = false}` is not reactive; use `{let expanded = $state(false)}` when assignments must update the markup. Their scope and lifetime follow the surrounding block.
 
 ### Reactive collections
 
