@@ -11,3 +11,19 @@ test("uses the ticket and client secret from a root share link", async ({ page }
     .poll(() => page.evaluate(() => localStorage.getItem("iroh-fm-secret")))
     .toBe("shared-secret");
 });
+
+test("redirects disconnected app routes to connection setup", async ({ page }) => {
+  await page.goto("/albums");
+
+  await expect(page).toHaveURL(/\/connect$/);
+});
+
+test("redirects connected users away from connection setup", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("iroh-fm-ticket", "e2e-ticket");
+    localStorage.setItem("iroh-fm-secret", "e2e-secret");
+  });
+  await page.goto("/connect");
+
+  await expect(page).toHaveURL(/\/tracks$/);
+});

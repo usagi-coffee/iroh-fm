@@ -6,7 +6,7 @@
 
   import { App } from "$lib/runes/App.svelte.js";
 
-  import TrackList from "../TrackList.svelte";
+  import TrackList from "../../TrackList.svelte";
 
   const params = $derived(new SvelteURLSearchParams(page.url.search));
   const query = $derived(params.get("query") ?? "");

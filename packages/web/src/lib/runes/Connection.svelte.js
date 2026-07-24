@@ -1,10 +1,10 @@
-import { flushSync } from "svelte";
-
 import { albumSort, cleanRelays, friendlyError, trackSort } from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
 export class Connection {
+  #startupTransport = Promise.withResolvers();
+
   ticket = $state("");
   endpoint = $state("");
   /** @type {string[]} */
@@ -14,6 +14,7 @@ export class Connection {
   identityLoading = $state(true);
   connecting = $state(false);
   connectionStep = $state("Connecting to the iroh server…");
+  connectionProgress = $state(5);
   error = $state("");
   /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | null} */
   client = $state(null);
@@ -28,6 +29,7 @@ export class Connection {
   identityGeneration = 0;
   operationGeneration = 0;
   autoConnectAttempted = false;
+  startupTransportReady = this.#startupTransport.promise;
 
   /** @param {import('$lib/runes/App.svelte.js').Application} app */
   constructor(app) {
@@ -40,9 +42,12 @@ export class Connection {
     await this.initializeIdentity();
   }
 
-  /** @param {() => void} [onConnected] */
-  async connectStored(onConnected) {
-    await this.autoConnectOnce(onConnected);
+  async connectStored() {
+    try {
+      await this.autoConnectOnce();
+    } finally {
+      this.#startupTransport.resolve(undefined);
+    }
   }
 
   attachHashChanges = () => {
@@ -284,19 +289,12 @@ export class Connection {
     }
   }
 
-  /** @param {() => void} [onConnected] */
-  async autoConnectOnce(onConnected) {
-    if (this.autoConnectAttempted || !this.clientEndpointId) {
-      onConnected?.();
-      return;
-    }
+  async autoConnectOnce() {
+    if (this.autoConnectAttempted || !this.clientEndpointId) return;
     const forceTicket = Boolean(this.ticket.trim());
-    if (!this.canConnect(forceTicket)) {
-      onConnected?.();
-      return;
-    }
+    if (!this.canConnect(forceTicket)) return;
     this.autoConnectAttempted = true;
-    await this.connect(forceTicket, onConnected);
+    await this.connect(forceTicket);
   }
 
   /** @param {boolean} [forceTicket] */
@@ -316,6 +314,12 @@ export class Connection {
     return true;
   }
 
+  /** @param {string} text @param {number} progress */
+  setConnectionStep(text, progress) {
+    this.connectionStep = text;
+    this.connectionProgress = progress;
+  }
+
   /** @param {boolean} forceTicket */
   connectionOptions(forceTicket) {
     return {
@@ -331,10 +335,10 @@ export class Connection {
    * @param {number} operation
    */
   async readLibrarySnapshot(client, operation) {
-    this.connectionStep = "Indexing the remote library…";
+    this.setConnectionStep("Indexing the remote library…", 6);
     const data = await client.bootstrap(this.app.starredKey);
     if (operation !== this.operationGeneration) return null;
-    this.connectionStep = "Reading the offline track cache…";
+    this.setConnectionStep("Reading the offline track cache…", 7);
     const cachedIds = await client.cachedTrackIds();
     if (operation !== this.operationGeneration) return null;
     return { data, cachedIds };
@@ -364,33 +368,21 @@ export class Connection {
 
     // Search metadata and starred/list indexes are intentionally paid for while
     // the startup loader still owns the screen.
-    this.connectionStep = "Preparing the library indexes…";
+    this.setConnectionStep("Preparing the library indexes…", 9);
     this.app.library.prepareIndexes();
   }
 
   /**
    * @param {boolean} [forceTicket]
-   * @param {() => void} [onConnected]
    * @returns {Promise<boolean>}
    */
-  async connect(forceTicket = false, onConnected) {
-    if (!this.canConnect(forceTicket) || this.connecting) {
-      onConnected?.();
-      return false;
-    }
+  async connect(forceTicket = false) {
+    if (!this.canConnect(forceTicket) || this.connecting) return false;
 
-    // The startup boundary only needs to know when a transport exists. The
-    // candidate stays separate from `client` until its library is ready.
-    let connectionReported = false;
-    const reportConnected = () => {
-      if (connectionReported) return;
-      connectionReported = true;
-      onConnected?.();
-    };
     const operation = ++this.operationGeneration;
     this.connecting = true;
     this.error = "";
-    this.connectionStep = "Connecting to the iroh server…";
+    this.setConnectionStep("Connecting to the iroh server…", 5);
     const previousClient = this.client;
     /** @type {Awaited<ReturnType<typeof ClientCore.connect>> | undefined} */
     let nextClient;
@@ -406,7 +398,7 @@ export class Connection {
         return false;
       }
       this.loadingClient = nextClient;
-      reportConnected();
+      this.#startupTransport.resolve(undefined);
 
       // Bootstrap the candidate without disturbing the active client. Every
       // await is followed by an operation check so disconnect/reconnect wins.
@@ -415,7 +407,7 @@ export class Connection {
         await nextClient.close().catch(() => {});
         return false;
       }
-      this.connectionStep = "Preparing the music player…";
+      this.setConnectionStep("Preparing the music player…", 8);
       await nextClient.setOfflineOnly(this.app.library.offlineOnly);
       if (operation !== this.operationGeneration) {
         await nextClient.close().catch(() => {});
@@ -438,10 +430,7 @@ export class Connection {
       this.client = previousClient;
       return false;
     } finally {
-      // `onConnected` must resolve even for validation failures so startup can
-      // render the connection page instead of leaving a boundary pending.
       if (this.loadingClient === nextClient) this.loadingClient = null;
-      reportConnected();
       if (operation === this.operationGeneration) this.connecting = false;
     }
   }

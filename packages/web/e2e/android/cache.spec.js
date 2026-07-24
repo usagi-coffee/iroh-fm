@@ -16,6 +16,9 @@ test("shows asynchronous native connection stats while starting", async ({ page 
   await expect(status).toContainText("DIRECT");
   await expect(status).toContainText(/DIRECT \d+ KiB/);
   await expect(status).toContainText(/↓ [1-9][\d.]* (?:B|KiB|MiB)\/s/);
+  const progress = page.getByRole("progressbar", { name: "Indexing the remote library…" });
+  await expect(progress).toHaveAttribute("aria-valuenow", "6");
+  await expect(progress).toHaveAttribute("aria-valuemax", "9");
 });
 
 test("marks Android played and prefetched tracks from transfer state", async ({ page }) => {

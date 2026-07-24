@@ -17,7 +17,7 @@
   import PlayIcon from "virtual:icons/ri/play-fill";
   import SubtractIcon from "virtual:icons/ri/subtract-line";
 
-  import Cover from "../Cover.svelte";
+  import Cover from "../../Cover.svelte";
 
   /**
    * @typedef {Object} Props

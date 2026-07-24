@@ -16,14 +16,10 @@ export class Application {
     this.identityInitialized = true;
   }
 
-  /** @param {() => void} [onConnected] */
-  async initialize(onConnected) {
-    if (this.initialized) {
-      onConnected?.();
-      return;
-    }
+  async initialize() {
+    if (this.initialized) return;
     await this.prepareIdentity();
-    await this.connection.connectStored(onConnected);
+    await this.connection.connectStored();
     this.initialized = true;
   }
 }
