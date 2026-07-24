@@ -6,7 +6,7 @@
   import { page } from "$app/state";
 
   import { App } from "$lib/runes/App.svelte.js";
-  import { Updates } from "$lib/runes/Updater.svelte.js";
+  import { Updater } from "$lib/runes/Updater.svelte.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
 
@@ -33,7 +33,7 @@
   function hotkeys() {
     /** @param {KeyboardEvent} event */
     const keydown = (event) => {
-      if (Updates.applying) {
+      if (Updater.applying) {
         event.preventDefault();
         return;
       }
@@ -88,7 +88,7 @@
 
 <div class="bg-base text-text flex h-dvh flex-col overflow-hidden" {@attach hotkeys}>
   <div class="shrink-0">
-    <TopBar updateReady={Updates.ready && !Updates.nativeUpgrade} onupdate={Updates.apply} />
+    <TopBar updateReady={Updater.ready && !Updater.nativeUpgrade} onupdate={Updater.apply} />
     <UpdateNotice overlay={false} />
   </div>
   <main class="min-h-0 flex-1 overflow-hidden">{@render children()}</main>

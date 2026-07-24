@@ -50,57 +50,47 @@ export class Connection {
     }
   }
 
-  attachHashChanges = () => {
-    const importConnection = () => this.importConnectionHash(location.hash);
-    window.addEventListener("hashchange", importConnection);
-    return () => window.removeEventListener("hashchange", importConnection);
-  };
+  watch = () => {
+    const client = this.loadingClient ?? this.client;
+    if (!client) {
+      this.info = { path_type: "unknown", address: "", received_bytes: 0 };
+      this.receivedBytesPerSecond = 0;
+      return;
+    }
 
-  /**
-   * @param {any} client
-   * @param {number} [intervalMs]
-   */
-  monitor(client, intervalMs = 1000) {
-    return () => {
-      if (!client) {
-        this.info = { path_type: "unknown", address: "", received_bytes: 0 };
-        this.receivedBytesPerSecond = 0;
-        return;
-      }
-      let active = true;
-      let updating = false;
-      const update = async () => {
-        if (!active || updating) return;
-        updating = true;
-        try {
-          const info = await client.connectionInfo();
-          if (!active) return;
-          const now = performance.now();
-          const previous = this.connectionSamples.get(client);
-          if (previous) {
-            const elapsed = now - previous.time;
-            const received = Math.max(0, info.received_bytes - previous.bytes);
-            this.receivedBytesPerSecond = elapsed > 0 ? (received * 1000) / elapsed : 0;
-          } else {
-            this.receivedBytesPerSecond = 0;
-          }
-          this.connectionSamples.set(client, { bytes: info.received_bytes, time: now });
-          this.info = info;
-          void this.app.player.refreshNativeState(client);
-        } catch {
-          // The connection may be closing while settings are applied.
-        } finally {
-          updating = false;
+    let active = true;
+    let updating = false;
+    const update = async () => {
+      if (!active || updating) return;
+      updating = true;
+      try {
+        const info = await client.connectionInfo();
+        if (!active) return;
+        const now = performance.now();
+        const previous = this.connectionSamples.get(client);
+        if (previous) {
+          const elapsed = now - previous.time;
+          const received = Math.max(0, info.received_bytes - previous.bytes);
+          this.receivedBytesPerSecond = elapsed > 0 ? (received * 1000) / elapsed : 0;
+        } else {
+          this.receivedBytesPerSecond = 0;
         }
-      };
-      void update();
-      const interval = setInterval(() => void update(), intervalMs);
-      return () => {
-        active = false;
-        clearInterval(interval);
-      };
+        this.connectionSamples.set(client, { bytes: info.received_bytes, time: now });
+        this.info = info;
+        void this.app.player.refreshNativeState(client);
+      } catch {
+        // The connection may be closing while settings are applied.
+      } finally {
+        updating = false;
+      }
     };
-  }
+    void update();
+    const interval = setInterval(() => void update(), this.loadingClient ? 250 : 1000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  };
 
   loadLocalState() {
     this.ticket = localStorage.getItem("iroh-fm-ticket") ?? "";

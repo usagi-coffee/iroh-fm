@@ -1,20 +1,35 @@
 import {
   activateServiceWorkerUpdate,
   currentNativeRequirement,
+  ensure_service_worker,
   subscribeToNativeUpgrade,
   subscribeToServiceWorkerUpdates,
 } from "$lib/service-worker.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
-class Updater {
+class UpdateManager {
   ready = $state(false);
   dismissed = $state(false);
   androidRestartRequired = $state(false);
   applying = $state(false);
   /** @type {ReturnType<typeof currentNativeRequirement>} */
   nativeUpgrade = $state(null);
-  nativeBuild = ClientCore.buildInfo();
+  /** @type {"web" | ReturnType<typeof currentNativeRequirement>} */
+  block = $state(null);
+  build = ClientCore.buildInfo();
+  start = this.build.then(async (build) => {
+    const requirement = currentNativeRequirement(build);
+    const worker = await ensure_service_worker(build);
+    if (requirement) {
+      this.block = requirement;
+      throw new Error("The native application is out of date.");
+    }
+    if (worker.updateReady && worker.nativeNewerThanWeb && !worker.nativeUpgrade) {
+      this.block = "web";
+      throw new Error("The cached web application is out of date.");
+    }
+  });
 
   watch = () => {
     const unsubscribeUpdates = subscribeToServiceWorkerUpdates((ready) => {
@@ -32,7 +47,7 @@ class Updater {
     if (this.applying) return;
     this.applying = true;
     try {
-      const native = await this.nativeBuild;
+      const native = await this.build;
       const reload = native?.platform !== "Android";
       if (!(await activateServiceWorkerUpdate({ reload }))) this.applying = false;
       else if (!reload) {
@@ -46,4 +61,4 @@ class Updater {
   };
 }
 
-export const Updates = new Updater();
+export const Updater = new UpdateManager();

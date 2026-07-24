@@ -3,8 +3,7 @@
   import { asset } from "$app/paths";
 
   import { App } from "$lib/runes/App.svelte.js";
-  import { Updates } from "$lib/runes/Updater.svelte.js";
-  import { currentNativeRequirement, ensure_service_worker } from "$lib/service-worker.js";
+  import { Updater } from "$lib/runes/Updater.svelte.js";
   import { connectionAddressLabel, formatBytes } from "$lib/utils.js";
 
   import DatabaseIcon from "virtual:icons/ri/database-2-line";
@@ -14,21 +13,6 @@
 
   /** @type {{ children: import("svelte").Snippet<[void]> }} */
   const { children } = $props();
-
-  /** @type {ReturnType<typeof currentNativeRequirement>} */
-  let initialNativeRequirement = $state(null);
-  let initialWebUpdateRequired = $state(false);
-  const startupStepCount = 9;
-  const nativeBuild = Updates.nativeBuild;
-  const monitoredClient = $derived(App.connection.loadingClient ?? App.connection.client);
-  const connectionMonitor = $derived(
-    App.connection.monitor(monitoredClient, App.connection.loadingClient ? 250 : 1000),
-  );
-  const nativeCompatibility = nativeBuild.then((buildInfo) => {
-    initialNativeRequirement = currentNativeRequirement(buildInfo);
-    return initialNativeRequirement;
-  });
-  const registeredWorker = nativeBuild.then((buildInfo) => ensure_service_worker(buildInfo));
 </script>
 
 <svelte:head>
@@ -36,22 +20,9 @@
   <meta name="description" content="A private iroh music player." />
 </svelte:head>
 
-<div
-  id="content"
-  {@attach Updates.watch}
-  {@attach App.connection.attachHashChanges}
-  {@attach connectionMonitor}
->
+<div id="content" {@attach Updater.watch} {@attach App.connection.watch}>
   <svelte:boundary>
-    {const sw = Promise.all([registeredWorker, nativeCompatibility]).then(
-      ([worker, requirement]) => {
-        if (requirement) throw new Error("The native application is out of date.");
-        if (worker.updateReady && worker.nativeNewerThanWeb && !worker.nativeUpgrade) {
-          initialWebUpdateRequired = true;
-          throw new Error("The cached web application is out of date.");
-        }
-      },
-    )}
+    {const sw = Updater.start}
     {await sw}
     <svelte:boundary>
       {const wasm = sw.then(() => ClientCore.prepare())}
@@ -98,10 +69,10 @@
     {/snippet}
 
     {#snippet failed(error)}
-      {#if initialNativeRequirement}
-        {@render nativeBlocked(initialNativeRequirement)}
-      {:else if initialWebUpdateRequired}
+      {#if Updater.block === "web"}
         {@render webUpdateBlocked()}
+      {:else if Updater.block}
+        {@render nativeBlocked(Updater.block)}
       {:else}
         {@render startupFailed(error)}
       {/if}
@@ -109,9 +80,7 @@
   </svelte:boundary>
 </div>
 
-{#snippet nativeBlocked(
-  /** @type {NonNullable<ReturnType<typeof currentNativeRequirement>>} */ requirement,
-)}
+{#snippet nativeBlocked(/** @type {{ platform: string, releaseUrl: string }} */ requirement)}
   <div class="bg-base text-text grid h-dvh place-items-center p-6">
     <div class="border-yellow/40 bg-crust w-full max-w-md border p-5 text-center">
       <h1 class="text-yellow text-sm font-semibold">
@@ -140,7 +109,7 @@
       </p>
       <button
         type="button"
-        onclick={Updates.apply}
+        onclick={Updater.apply}
         class="bg-mauve text-3xs text-crust mt-4 px-4 py-2 font-mono font-bold">WEB UPDATE</button
       >
     </div>
@@ -160,12 +129,12 @@
         role="progressbar"
         aria-label={text}
         aria-valuemin="0"
-        aria-valuemax={startupStepCount}
+        aria-valuemax="9"
         aria-valuenow={step}
       >
-        <div class="bg-mauve h-full" style={`width:${(step / startupStepCount) * 100}%`}></div>
+        <div class="bg-mauve h-full" style={`width:${(step / 9) * 100}%`}></div>
       </div>
-      {#if monitoredClient}
+      {#if App.connection.loadingClient ?? App.connection.client}
         <div
           class="border-surface0 bg-mantle text-4xs text-overlay1 flex w-fit max-w-full items-center justify-center gap-1.5 border px-2 py-1 font-mono"
           title={`${App.connection.info.path_type}: ${App.connection.info.address || "selecting path"}`}
