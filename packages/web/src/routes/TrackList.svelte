@@ -48,6 +48,9 @@
     playlist = null,
   } = $props();
   let draggedTrackId = "";
+  let dragOverTrackId = $state("");
+  /** @type {'top' | 'bottom'} */
+  let dragOverEdge = $state("top");
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   const bufferSize = $derived(rowHeight * 24);
@@ -165,6 +168,69 @@
   function playSearchSelection() {
     const selected = tracks.find((track) => track.id === App.library.selectedTrackId) ?? tracks[0];
     if (selected) playTrackFromList(selected);
+  }
+
+  /**
+   * @param {DragEvent} event
+   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   */
+  function startTrackDrag(event, track) {
+    draggedTrackId = track.id;
+    setPlaylistTracksDrag(event, [track], {
+      label: track.title,
+      detail: `${track.artist} · ${track.album}`,
+    });
+    if (playlist && event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
+  }
+
+  /** @param {DragEvent} event @param {string} trackId */
+  function dragOverPlaylistTrack(event, trackId) {
+    if (!draggedTrackId || !playlist || query.trim()) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    if (draggedTrackId === trackId) {
+      dragOverTrackId = "";
+      return;
+    }
+    const row = event.currentTarget;
+    if (!(row instanceof HTMLElement)) return;
+    const bounds = row.getBoundingClientRect();
+    dragOverTrackId = trackId;
+    dragOverEdge = event.clientY < bounds.top + bounds.height / 2 ? "top" : "bottom";
+  }
+
+  /** @param {DragEvent} event @param {string} trackId */
+  function leavePlaylistTrack(event, trackId) {
+    const row = event.currentTarget;
+    if (!(row instanceof HTMLElement)) return;
+    if (
+      dragOverTrackId === trackId &&
+      (!(event.relatedTarget instanceof Node) || !row.contains(event.relatedTarget))
+    )
+      dragOverTrackId = "";
+  }
+
+  /** @param {DragEvent} event @param {string} trackId */
+  function dropPlaylistTrack(event, trackId) {
+    event.preventDefault();
+    const edge = dragOverEdge;
+    dragOverTrackId = "";
+    if (!playlist || !draggedTrackId || query.trim()) return;
+    const from = playlist.track_ids.indexOf(draggedTrackId);
+    const target = playlist.track_ids.indexOf(trackId);
+    if (from >= 0 && target >= 0 && from !== target) {
+      const index =
+        edge === "top"
+          ? target - (from < target ? 1 : 0)
+          : target + (from > target ? 1 : 0);
+      void App.library.movePlaylistTrack(playlist, draggedTrackId, index);
+    }
+    draggedTrackId = "";
+  }
+
+  function endTrackDrag() {
+    draggedTrackId = "";
+    dragOverTrackId = "";
   }
 
   /** @param {import('$lib/runes/Track.svelte.js').Track} track */
@@ -387,25 +453,11 @@
               ondblclick={() => playTrackFromList(item.track)}
               oncontextmenu={(event) => openTrackActions(item.track, event)}
               draggable="true"
-              ondragstart={(event) => {
-                draggedTrackId = item.track.id;
-                setPlaylistTracksDrag(event, [item.track], {
-                  label: item.track.title,
-                  detail: `${item.track.artist} · ${item.track.album}`,
-                });
-                if (playlist && event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
-              }}
-              ondragover={(event) => {
-                if (draggedTrackId && playlist && !query.trim()) event.preventDefault();
-              }}
-              ondrop={(event) => {
-                event.preventDefault();
-                if (!playlist || !draggedTrackId || query.trim()) return;
-                const index = playlist.track_ids.indexOf(item.track.id);
-                if (index >= 0) void App.library.movePlaylistTrack(playlist, draggedTrackId, index);
-                draggedTrackId = "";
-              }}
-              ondragend={() => (draggedTrackId = "")}
+              ondragstart={(event) => startTrackDrag(event, item.track)}
+              ondragover={(event) => dragOverPlaylistTrack(event, item.track.id)}
+              ondragleave={(event) => leavePlaylistTrack(event, item.track.id)}
+              ondrop={(event) => dropPlaylistTrack(event, item.track.id)}
+              ondragend={endTrackDrag}
               onkeydown={(event) => {
                 if (event.key === "Enter") playTrackFromList(item.track);
                 else if (event.key === " ") {
@@ -413,12 +465,20 @@
                   App.library.selectedTrackId = item.track.id;
                 }
               }}
-              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 select-none grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
+              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] relative grid h-7 select-none grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
                 ? 'bg-mauve/15'
                 : selected
                   ? 'bg-surface0'
                   : 'hover:bg-surface0/60'}"
             >
+              {#if dragOverTrackId === item.track.id}<span
+                  data-playlist-drop-edge={dragOverEdge}
+                  aria-hidden="true"
+                  class="bg-teal pointer-events-none absolute inset-x-0 z-10 h-0.5 {dragOverEdge ===
+                  'top'
+                    ? 'top-0'
+                    : 'bottom-0'}"
+                ></span>{/if}
               <button
                 type="button"
                 onclick={(event) => {
@@ -451,9 +511,20 @@
                 {item.track.album}
               </div>
               <div class="flex min-w-0 items-center gap-2 pr-2">
-                  {#if playlist && !query.trim()}<DragIcon
-                    class="text-overlay0 shrink-0 cursor-grab"
-                  />{/if}<span class="text-teal truncate">{item.track.title}</span><button
+                  {#if playlist && !query.trim()}<button
+                      type="button"
+                      draggable="true"
+                      onclick={(event) => event.stopPropagation()}
+                      ondragstart={(event) => {
+                        event.stopPropagation();
+                        startTrackDrag(event, item.track);
+                      }}
+                      ondragend={endTrackDrag}
+                      class="text-overlay0 hover:text-teal shrink-0 cursor-grab bg-transparent p-0 active:cursor-grabbing"
+                      title={`Drag ${item.track.title} to reorder`}
+                      aria-label={`Drag ${item.track.title} to reorder`}
+                      data-playlist-drag-handle><DragIcon /></button
+                    >{/if}<span class="text-teal truncate">{item.track.title}</span><button
                   type="button"
                   onclick={(event) => App.library.toggleStar(item.track, event)}
                   class="text-overlay0 hover:text-pink ml-auto hidden shrink-0 group-hover:block {App.library.starredTrackIds.has(

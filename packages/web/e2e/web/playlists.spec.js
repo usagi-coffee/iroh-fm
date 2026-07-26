@@ -45,6 +45,19 @@ test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) 
   await expect(page.getByRole("button", { name: "Rename playlist" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Delete playlist" })).toHaveCount(0);
   await page
+    .locator('[data-track-id="track-3"] .cursor-grab')
+    .dragTo(page.locator('[data-track-id="track-2"]'), {
+      targetPosition: { x: 20, y: 1 },
+    });
+  await expect(page.getByRole("row").nth(0)).toHaveAttribute("data-track-id", "track-3");
+  await expect(page.getByRole("row").nth(1)).toHaveAttribute("data-track-id", "track-2");
+  await page
+    .locator('[data-track-id="track-3"] .cursor-grab')
+    .dragTo(page.locator('[data-track-id="track-1"]'), {
+      targetPosition: { x: 20, y: 26 },
+    });
+  await expect(page.getByRole("row").nth(2)).toHaveAttribute("data-track-id", "track-3");
+  await page
     .getByRole("link", { name: "Playlist (1)", exact: true })
     .click({ button: "right" });
   await page.getByRole("button", { name: "Cache playlist" }).click();
