@@ -11,6 +11,7 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
   import { longPress } from "$lib/ui/long-press.js";
+  import { setPlaylistTracksDrag } from "$lib/ui/playlist-drag.js";
   import VirtualList from "$lib/ui/VirtualList.svelte";
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
@@ -173,6 +174,8 @@
     let queue = queueTracks;
     if (query.trim()) {
       onquery("");
+      if (playlist) App.library.requestTrackFocus(track);
+      else void App.library.focusTrack(track);
     }
     void App.player.playFromTrackList(track, queue);
   }
@@ -328,6 +331,12 @@
           {#if item.kind === "album"}
             <button
               data-list-index={itemIndex}
+              draggable="true"
+              ondragstart={(event) =>
+                setPlaylistTracksDrag(event, item.tracks, {
+                  label: item.title,
+                  detail: `${item.tracks.length} ${item.tracks.length === 1 ? "track" : "tracks"} · ${item.artist}`,
+                })}
               {@attach longPress(() =>
                 openAlbumActions(item.album, item.tracks, item.title, item.album?.id ?? item.key),
               )}
@@ -341,7 +350,7 @@
                   item.album?.id ?? item.key,
                   event,
                 )}
-              class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full items-center gap-2 border-y px-2 text-left transition"
+              class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full select-none items-center gap-2 border-y px-2 text-left transition"
               aria-label={`Play album ${item.title}`}
             >
               <Cover
@@ -377,10 +386,14 @@
               onclick={() => (App.library.selectedTrackId = item.track.id)}
               ondblclick={() => playTrackFromList(item.track)}
               oncontextmenu={(event) => openTrackActions(item.track, event)}
-              draggable={Boolean(playlist && !query.trim())}
+              draggable="true"
               ondragstart={(event) => {
                 draggedTrackId = item.track.id;
-                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+                setPlaylistTracksDrag(event, [item.track], {
+                  label: item.track.title,
+                  detail: `${item.track.artist} · ${item.track.album}`,
+                });
+                if (playlist && event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
               }}
               ondragover={(event) => {
                 if (draggedTrackId && playlist && !query.trim()) event.preventDefault();
@@ -400,7 +413,7 @@
                   App.library.selectedTrackId = item.track.id;
                 }
               }}
-              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
+              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] grid h-7 select-none grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
                 ? 'bg-mauve/15'
                 : selected
                   ? 'bg-surface0'

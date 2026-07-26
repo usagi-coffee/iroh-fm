@@ -209,6 +209,19 @@ export class Library {
     }
   }
 
+  nextPlaylistName() {
+    const names = new Set(this.playlists.map((playlist) => playlist.name));
+    if (!names.has("Playlist")) return "Playlist";
+    let index = 1;
+    while (names.has(`Playlist (${index})`)) index += 1;
+    return `Playlist (${index})`;
+  }
+
+  /** @param {Track[]} [tracks] */
+  createDefaultPlaylist(tracks = []) {
+    return this.createPlaylist(this.nextPlaylistName(), tracks);
+  }
+
   /**
    * @param {import('@iroh-fm/client/types').Playlist} playlist
    * @param {{name?: string, comment?: string, trackIds?: string[]}} fields

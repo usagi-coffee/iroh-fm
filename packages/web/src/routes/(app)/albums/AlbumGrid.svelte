@@ -6,6 +6,7 @@
   import { App } from "$lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
   import { longPress } from "$lib/ui/long-press.js";
+  import { setPlaylistTracksDrag } from "$lib/ui/playlist-drag.js";
   import VirtualList from "$lib/ui/VirtualList.svelte";
   import { friendlyError } from "$lib/utils.js";
 
@@ -285,9 +286,15 @@
             {const caching = $derived(App.library.cachingAlbumIds.has(album.id))}
             <article
               data-album-id={album.id}
+              draggable="true"
+              ondragstart={(event) =>
+                setPlaylistTracksDrag(event, App.library.tracksForAlbum(album), {
+                  label: album.title,
+                  detail: `${album.track_ids.length} ${album.track_ids.length === 1 ? "track" : "tracks"} · ${album.album_artist ?? album.artist}`,
+                })}
               {@attach longPress(() => openActions(album))}
               oncontextmenu={(event) => openActions(album, event)}
-              class="group min-w-0"
+              class="group min-w-0 select-none"
             >
               <div
                 class="bg-base relative border-4 transition {playingAlbumId === album.id

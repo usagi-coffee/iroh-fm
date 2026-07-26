@@ -127,6 +127,17 @@ test("filters tracks by title", async ({ page }) => {
 
   await page.reload();
   await expect(page.getByRole("row")).toHaveCount(1);
+
+  await page.getByPlaceholder("Filter artist, title, album…").press("Enter");
+  await expect(page).toHaveURL(/\/tracks$/);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await expect(page.locator('[data-track-id="track-2"]')).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("Nebula Drift");
 });
 
 test("edits client settings through the settings model", async ({ page }, testInfo) => {

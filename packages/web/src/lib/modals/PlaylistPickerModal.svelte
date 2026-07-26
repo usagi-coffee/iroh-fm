@@ -12,7 +12,6 @@
    */
   /** @type {Props} */
   const { dismiss, tracks } = $props();
-  let name = $state("");
   let busy = $state(false);
 
   /** @param {import('@iroh-fm/client/types').Playlist} playlist */
@@ -24,10 +23,8 @@
   }
 
   async function create() {
-    const value = name.trim();
-    if (!value) return;
     busy = true;
-    const result = await App.library.createPlaylist(value, tracks);
+    const result = await App.library.createDefaultPlaylist(tracks);
     busy = false;
     if (result) dismiss(result);
   }
@@ -58,23 +55,13 @@
       >
     {/each}
   </div>
-  <form
-    class="border-surface0 bg-mantle flex gap-2 border-t p-3"
-    onsubmit={(event) => {
-      event.preventDefault();
-      void create();
-    }}
-  >
-    <input
-      bind:value={name}
-      placeholder="New playlist name"
-      class="border-surface1 bg-base text-text min-w-0 flex-1 border px-3 py-2 text-xs outline-none focus:border-mauve"
-    />
+  <div class="border-surface0 bg-mantle border-t p-3">
     <button
-      type="submit"
-      disabled={busy || !name.trim()}
-      class="bg-mauve text-crust grid w-9 place-items-center disabled:opacity-40"
-      aria-label="Create playlist and add tracks"><AddIcon class="text-sm" /></button
+      type="button"
+      onclick={create}
+      disabled={busy}
+      class="bg-mauve text-crust flex w-full items-center justify-center gap-2 px-3 py-2 text-xs font-semibold disabled:opacity-40"
+      aria-label="Create playlist and add tracks"><AddIcon class="text-sm" />New playlist</button
     >
-  </form>
+  </div>
 {/snippet}
