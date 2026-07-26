@@ -9,11 +9,11 @@ test.beforeEach(async ({ page }) => {
 test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) => {
   await page.getByRole("button", { name: "Create playlist" }).click();
   await expect(page).toHaveURL(/\/playlists\/playlist-1$/);
-  await expect(page.getByRole("heading", { name: "Playlist", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Playlist", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Create playlist" }).click();
   await expect(page).toHaveURL(/\/playlists\/playlist-2$/);
-  await expect(page.getByRole("heading", { name: "Playlist (1)", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Playlist (1)", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "TRACKS", exact: true }).click();
   await page.evaluate(() => {
@@ -42,6 +42,17 @@ test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) 
     .dragTo(page.getByRole("link", { name: "Playlist (1)", exact: true }));
   await page.getByRole("link", { name: "Playlist (1)", exact: true }).click();
   await expect(page.getByRole("row")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "Rename playlist" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete playlist" })).toHaveCount(0);
+  await page
+    .getByRole("link", { name: "Playlist (1)", exact: true })
+    .click({ button: "right" });
+  await page.getByRole("button", { name: "Cache playlist" }).click();
+  await page
+    .getByRole("link", { name: "Playlist (1)", exact: true })
+    .click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Playlist cached" })).toBeDisabled();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Play Nebula Drift" }).click();
   await expect(
@@ -56,7 +67,7 @@ test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) 
   await page.getByRole("button", { name: "Rename", exact: true }).click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Evening");
   await page.getByRole("button", { name: "SAVE", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Evening" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Evening", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "Evening", exact: true }).click({ button: "right" });
   await page.getByRole("button", { name: "Delete", exact: true }).click();

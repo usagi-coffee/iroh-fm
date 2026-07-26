@@ -474,8 +474,9 @@ export class Library {
   /**
    * @param {Track[]} tracks
    * @param {string} cacheKey
+   * @param {'album' | 'playlist'} kind
    */
-  async cacheAlbum(tracks, cacheKey) {
+  async cacheTrackCollection(tracks, cacheKey, kind) {
     if (this.offlineOnly || this.cachingAlbumIds.has(cacheKey)) return;
     const client = this.app.connection.client;
     if (!client) return;
@@ -505,11 +506,27 @@ export class Library {
     } catch (error) {
       for (const [track, generation] of downloads) track.stopDownload(generation);
       if (this.app.connection.client === client)
-        this.app.connection.error = friendlyError(error, "Could not cache this album.");
+        this.app.connection.error = friendlyError(error, `Could not cache this ${kind}.`);
     } finally {
       for (const track of missing) this.cachingTrackIds.delete(track.id);
       this.cachingAlbumIds.delete(cacheKey);
     }
+  }
+
+  /**
+   * @param {Track[]} tracks
+   * @param {string} cacheKey
+   */
+  cacheAlbum(tracks, cacheKey) {
+    return this.cacheTrackCollection(tracks, cacheKey, "album");
+  }
+
+  /**
+   * @param {Track[]} tracks
+   * @param {string} playlistId
+   */
+  cachePlaylist(tracks, playlistId) {
+    return this.cacheTrackCollection(tracks, `playlist:${playlistId}`, "playlist");
   }
 
   /** @param {import('@iroh-fm/client/types').Album | null | undefined} album */

@@ -27,7 +27,9 @@
   import ConnectingIcon from "virtual:icons/ri/wifi-line";
   import OfflineIcon from "virtual:icons/ri/wifi-off-line";
   import AddIcon from "virtual:icons/ri/add-line";
+  import CachedIcon from "virtual:icons/ri/check-line";
   import DeleteIcon from "virtual:icons/ri/delete-bin-line";
+  import DownloadIcon from "virtual:icons/ri/download-line";
   import EditIcon from "virtual:icons/ri/edit-line";
   import LeftIcon from "virtual:icons/ri/arrow-left-line";
   import RightIcon from "virtual:icons/ri/arrow-right-line";
@@ -169,6 +171,16 @@
     });
     if (!confirmed || !(await App.library.deletePlaylist(playlist))) return;
     if (page.url.pathname.endsWith(`/playlists/${playlist.id}`)) await goto(resolve("/tracks"));
+  }
+
+  /**
+   * @param {import('@iroh-fm/client/types').Playlist} playlist
+   * @param {import('$lib/runes/Track.svelte.js').Track[]} tracks
+   * @param {() => void} dismiss
+   */
+  function cachePlaylist(playlist, tracks, dismiss) {
+    dismiss();
+    void App.library.cachePlaylist(tracks, playlist.id);
   }
 </script>
 
@@ -352,6 +364,15 @@
   },
 )}
   {const index = $derived(App.library.playlists.findIndex((item) => item.id === playlist.id))}
+  {const playlistTracks = $derived(
+    /** @type {import('$lib/runes/Track.svelte.js').Track[]} */ (
+      playlist.track_ids.map((id) => App.library.tracksById.get(id)).filter(Boolean)
+    ),
+  )}
+  {const cached = $derived(
+    playlistTracks.length > 0 && playlistTracks.every((track) => track.cached),
+  )}
+  {const caching = $derived(App.library.cachingAlbumIds.has(`playlist:${playlist.id}`))}
   <p id="playlist-tab-actions-title" class="text-text truncate px-3 py-3 text-sm font-semibold">
     {playlist.name}
   </p>
@@ -378,6 +399,19 @@
     >
   </div>
   <div class="border-surface0 border-t pt-1">
+    <button
+      type="button"
+      disabled={App.library.offlineOnly || cached || caching || playlistTracks.length === 0}
+      onclick={() => cachePlaylist(playlist, playlistTracks, dismiss)}
+      class="text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0 flex w-full items-center gap-2 px-3 py-3 text-xs {cached
+        ? '!text-green'
+        : ''}"
+      >{#if cached}<CachedIcon />Playlist cached{:else}<DownloadIcon />{caching
+          ? "Caching playlist…"
+          : App.library.offlineOnly
+            ? "Unavailable offline"
+            : "Cache playlist"}{/if}</button
+    >
     <button
       type="button"
       onclick={() => {
