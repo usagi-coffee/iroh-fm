@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io::ErrorKind, path::PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use client::Client;
@@ -97,6 +97,14 @@ pub(super) async fn stats(remote_id: &str) -> Result<(u64, u64), String> {
         }
     }
     Ok((count, size))
+}
+
+pub(super) async fn clear(remote_id: &str) -> Result<(), String> {
+    match tokio::fs::remove_dir_all(cache_dir(remote_id)).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[cfg(test)]

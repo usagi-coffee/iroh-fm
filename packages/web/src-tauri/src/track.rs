@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    io::ErrorKind,
     path::PathBuf,
 };
 
@@ -346,6 +347,14 @@ pub(super) async fn stats(remote_id: &str) -> Result<(u64, u64), String> {
         }
     }
     Ok((count, size))
+}
+
+pub(super) async fn clear(remote_id: &str) -> Result<(), String> {
+    match tokio::fs::remove_dir_all(cache_dir(remote_id)).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[cfg(test)]

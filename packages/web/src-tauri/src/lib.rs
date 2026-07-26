@@ -356,6 +356,20 @@ async fn desktop_cache_stats(state: State<'_, DesktopState>, handle: u64) -> Res
 }
 
 #[tauri::command]
+async fn desktop_clear_cache(
+    state: State<'_, DesktopState>,
+    handle: u64,
+    kind: String,
+) -> Result<(), String> {
+    let remote_id = state.client(handle)?.remote_id().to_string();
+    match kind.as_str() {
+        "tracks" => track::clear(&remote_id).await,
+        "covers" => cover::clear(&remote_id).await,
+        _ => Err(format!("unknown offline cache kind: {kind}")),
+    }
+}
+
+#[tauri::command]
 fn desktop_set_memory_cache_size(
     state: State<'_, DesktopState>,
     handle: u64,
@@ -508,6 +522,7 @@ pub fn run() {
             desktop_cache_progress,
             desktop_set_offline_only,
             desktop_cache_stats,
+            desktop_clear_cache,
             desktop_set_memory_cache_size,
             desktop_close,
             desktop_generate_identity,

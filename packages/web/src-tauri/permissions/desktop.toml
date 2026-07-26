@@ -17,6 +17,7 @@ commands.allow = [
   "desktop_cache_progress",
   "desktop_set_offline_only",
   "desktop_cache_stats",
+  "desktop_clear_cache",
   "desktop_set_memory_cache_size",
   "desktop_close",
   "desktop_generate_identity",
