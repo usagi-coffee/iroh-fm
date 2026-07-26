@@ -138,6 +138,7 @@ export class FixtureClient {
   cached = new Set();
   memoryCached = new Set();
   receivedBytes = 0;
+  playlists = [];
 
   bootstrap() {
     const library = fixtureLibrary();
@@ -157,6 +158,7 @@ export class FixtureClient {
       ],
       tracks: library.tracks,
       starred: { artists: [], albums: [], tracks: [] },
+      playlists: this.playlists.map((playlist) => ({ ...playlist, track_ids: [...playlist.track_ids] })),
     });
   }
 
@@ -196,6 +198,47 @@ export class FixtureClient {
   }
 
   setStarred() {
+    return Promise.resolve();
+  }
+
+  getPlaylist(id) {
+    const playlist = this.playlists.find((item) => item.id === id);
+    if (!playlist) return Promise.reject(new Error("playlist not found"));
+    return Promise.resolve({ ...playlist, track_ids: [...playlist.track_ids] });
+  }
+
+  createPlaylist(name, trackIds = []) {
+    const now = Math.floor(Date.now() / 1000);
+    const playlist = {
+      id: `playlist-${this.playlists.length + 1}`,
+      name: name.trim(),
+      comment: null,
+      track_ids: [...new Set(trackIds)],
+      created_unix: now,
+      changed_unix: now,
+    };
+    this.playlists.push(playlist);
+    return Promise.resolve({ ...playlist, track_ids: [...playlist.track_ids] });
+  }
+
+  updatePlaylist(id, fields) {
+    const playlist = this.playlists.find((item) => item.id === id);
+    if (!playlist) return Promise.reject(new Error("playlist not found"));
+    if (fields.name !== undefined) playlist.name = fields.name.trim();
+    if (fields.comment !== undefined) playlist.comment = fields.comment || null;
+    if (fields.trackIds !== undefined) playlist.track_ids = [...new Set(fields.trackIds)];
+    playlist.changed_unix = Math.floor(Date.now() / 1000);
+    return Promise.resolve({ ...playlist, track_ids: [...playlist.track_ids] });
+  }
+
+  deletePlaylist(id) {
+    this.playlists = this.playlists.filter((item) => item.id !== id);
+    return Promise.resolve();
+  }
+
+  reorderPlaylists(ids) {
+    const byId = new Map(this.playlists.map((playlist) => [playlist.id, playlist]));
+    this.playlists = ids.map((id) => byId.get(id)).filter(Boolean);
     return Promise.resolve();
   }
 

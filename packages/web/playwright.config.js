@@ -25,7 +25,12 @@ export default defineConfig({
   projects: [
     {
       name: "web",
-      testMatch: ["web/player.spec.js", "web/cache.spec.js", "web/auth.spec.js"],
+      testMatch: [
+        "web/player.spec.js",
+        "web/cache.spec.js",
+        "web/auth.spec.js",
+        "web/playlists.spec.js",
+      ],
       use: {
         ...browser,
         baseURL: "http://127.0.0.1:4173",

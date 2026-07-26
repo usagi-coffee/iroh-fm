@@ -190,7 +190,7 @@ Additional adapter options:
 ```text
 --endpoint <ID>       connect using an endpoint ID instead of a ticket
 --relay <URL>         provide or override the backend relay
---secret <SECRET>     use a stable identity for the adapter
+--secret <SECRET>     use a stable identity for the adapter and preserve playlist ownership
 --bind <ADDRESS>      HTTP listen address; defaults to 127.0.0.1:4040
 ```
 

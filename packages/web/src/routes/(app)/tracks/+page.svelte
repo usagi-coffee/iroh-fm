@@ -34,6 +34,7 @@
       {tracks}
       {items}
       {query}
+      queueTracks={App.library.availableTracks}
       onquery={updateQuery}
       onplay={(track) => {
         albumFocusTrackId = track.id;

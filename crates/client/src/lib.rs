@@ -13,7 +13,7 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::IROH_ALPN;
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
-    ResolvedId, SearchQuery, StarredSet, StreamDescriptor, Track, TrackId,
+    Playlist, PlaylistId, ResolvedId, SearchQuery, StarredSet, StreamDescriptor, Track, TrackId,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -382,6 +382,12 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::GetStarredWithKey { .. } => "GetStarredWithKey",
         BackendRequest::SetStarred { .. } => "SetStarred",
         BackendRequest::SetStarredWithKey { .. } => "SetStarredWithKey",
+        BackendRequest::ListPlaylists => "ListPlaylists",
+        BackendRequest::GetPlaylist { .. } => "GetPlaylist",
+        BackendRequest::CreatePlaylist { .. } => "CreatePlaylist",
+        BackendRequest::UpdatePlaylist { .. } => "UpdatePlaylist",
+        BackendRequest::DeletePlaylist { .. } => "DeletePlaylist",
+        BackendRequest::ReorderPlaylists { .. } => "ReorderPlaylists",
         BackendRequest::GetArtist { .. } => "GetArtist",
         BackendRequest::GetAlbum { .. } => "GetAlbum",
         BackendRequest::GetAlbumTracks { .. } => "GetAlbumTracks",

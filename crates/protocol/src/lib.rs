@@ -16,6 +16,9 @@ pub struct AlbumId(pub String);
 pub struct TrackId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+pub struct PlaylistId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 pub struct CoverArtId(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -92,6 +95,16 @@ pub struct StarredSet {
     pub tracks: Vec<Track>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Playlist {
+    pub id: PlaylistId,
+    pub name: String,
+    pub comment: Option<String>,
+    pub track_ids: Vec<TrackId>,
+    pub created_unix: i64,
+    pub changed_unix: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StreamDescriptor {
     pub track_id: TrackId,
@@ -134,6 +147,29 @@ pub enum BackendRequest {
         id: String,
         starred: bool,
         key: String,
+    },
+    ListPlaylists,
+    GetPlaylist {
+        playlist_id: PlaylistId,
+    },
+    CreatePlaylist {
+        name: String,
+        track_ids: Vec<TrackId>,
+    },
+    UpdatePlaylist {
+        playlist_id: PlaylistId,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
+        #[serde(default)]
+        track_ids: Option<Vec<TrackId>>,
+    },
+    DeletePlaylist {
+        playlist_id: PlaylistId,
+    },
+    ReorderPlaylists {
+        playlist_ids: Vec<PlaylistId>,
     },
     GetArtist {
         artist_id: ArtistId,
@@ -181,6 +217,8 @@ pub enum BackendResponse {
     Artists(Vec<Artist>),
     Albums(Vec<Album>),
     Starred(StarredSet),
+    Playlists(Vec<Playlist>),
+    Playlist(Playlist),
     Artist(Artist),
     Album(Album),
     Tracks(Vec<Track>),
@@ -230,6 +268,51 @@ mod tests {
                     "artist_count": 1,
                     "album_count": 2,
                     "track_count": 3
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn playlist_update_fields_may_be_absent() {
+        let request: BackendRequest = serde_json::from_value(serde_json::json!({
+            "UpdatePlaylist": { "playlist_id": "playlist-1" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            BackendRequest::UpdatePlaylist {
+                name: None,
+                comment: None,
+                track_ids: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn playlist_wire_shape_preserves_track_order() {
+        let playlist = Playlist {
+            id: PlaylistId("playlist-1".to_string()),
+            name: "Mix".to_string(),
+            comment: Some("Ordered".to_string()),
+            track_ids: vec![
+                TrackId("track-2".to_string()),
+                TrackId("track-1".to_string()),
+            ],
+            created_unix: 10,
+            changed_unix: 20,
+        };
+        assert_eq!(
+            serde_json::to_value(BackendResponse::Playlist(playlist)).unwrap(),
+            serde_json::json!({
+                "Playlist": {
+                    "id": "playlist-1",
+                    "name": "Mix",
+                    "comment": "Ordered",
+                    "track_ids": ["track-2", "track-1"],
+                    "created_unix": 10,
+                    "changed_unix": 20
                 }
             })
         );

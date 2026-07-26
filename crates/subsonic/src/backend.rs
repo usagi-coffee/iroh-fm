@@ -1,7 +1,7 @@
 use client::{Client, Error, Result};
 use iroh::endpoint::RecvStream;
 use protocol::{
-    BackendRequest, BackendResponse, CoverArtId, SearchQuery, StreamDescriptor, TrackId,
+    BackendRequest, BackendResponse, CoverArtId, PlaylistId, SearchQuery, StreamDescriptor, TrackId,
 };
 
 #[allow(async_fn_in_trait)]
@@ -11,6 +11,41 @@ pub trait Backend {
     async fn albums(&self) -> Result<BackendResponse>;
     async fn starred(&self) -> Result<BackendResponse>;
     async fn set_starred(&self, id: &str, starred: bool) -> Result<BackendResponse>;
+    async fn playlists(&self) -> Result<BackendResponse> {
+        Err(Error::InvalidRequest(
+            "playlists are unavailable".to_string(),
+        ))
+    }
+    async fn playlist(&self, _playlist_id: &str) -> Result<BackendResponse> {
+        Err(Error::InvalidRequest(
+            "playlists are unavailable".to_string(),
+        ))
+    }
+    async fn create_playlist(
+        &self,
+        _name: &str,
+        _track_ids: Vec<TrackId>,
+    ) -> Result<BackendResponse> {
+        Err(Error::InvalidRequest(
+            "playlists are unavailable".to_string(),
+        ))
+    }
+    async fn update_playlist(
+        &self,
+        _playlist_id: &str,
+        _name: Option<String>,
+        _comment: Option<String>,
+        _track_ids: Option<Vec<TrackId>>,
+    ) -> Result<BackendResponse> {
+        Err(Error::InvalidRequest(
+            "playlists are unavailable".to_string(),
+        ))
+    }
+    async fn delete_playlist(&self, _playlist_id: &str) -> Result<BackendResponse> {
+        Err(Error::InvalidRequest(
+            "playlists are unavailable".to_string(),
+        ))
+    }
     async fn artist(&self, artist_id: &str) -> Result<BackendResponse>;
     async fn album(&self, album_id: &str) -> Result<BackendResponse>;
     async fn album_tracks(&self, album_id: &str) -> Result<BackendResponse>;
@@ -44,6 +79,52 @@ impl Backend for Client {
         self.request(BackendRequest::SetStarred {
             id: id.to_string(),
             starred,
+        })
+        .await
+    }
+
+    async fn playlists(&self) -> Result<BackendResponse> {
+        self.request(BackendRequest::ListPlaylists).await
+    }
+
+    async fn playlist(&self, playlist_id: &str) -> Result<BackendResponse> {
+        self.request(BackendRequest::GetPlaylist {
+            playlist_id: PlaylistId(playlist_id.to_string()),
+        })
+        .await
+    }
+
+    async fn create_playlist(
+        &self,
+        name: &str,
+        track_ids: Vec<TrackId>,
+    ) -> Result<BackendResponse> {
+        self.request(BackendRequest::CreatePlaylist {
+            name: name.to_string(),
+            track_ids,
+        })
+        .await
+    }
+
+    async fn update_playlist(
+        &self,
+        playlist_id: &str,
+        name: Option<String>,
+        comment: Option<String>,
+        track_ids: Option<Vec<TrackId>>,
+    ) -> Result<BackendResponse> {
+        self.request(BackendRequest::UpdatePlaylist {
+            playlist_id: PlaylistId(playlist_id.to_string()),
+            name,
+            comment,
+            track_ids,
+        })
+        .await
+    }
+
+    async fn delete_playlist(&self, playlist_id: &str) -> Result<BackendResponse> {
+        self.request(BackendRequest::DeletePlaylist {
+            playlist_id: PlaylistId(playlist_id.to_string()),
         })
         .await
     }

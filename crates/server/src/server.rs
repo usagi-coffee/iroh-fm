@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,8 +19,8 @@ use crate::error::{Error, Result};
 use crate::index::{CoverArtSource, LibraryIndex};
 use crate::scanner::{legacy_id, scan_music_dir};
 use protocol::{
-    AlbumId, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId, ResolvedId,
-    SearchQuery, StarredSet, StreamDescriptor, TrackId,
+    AlbumId, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId, Playlist,
+    PlaylistId, ResolvedId, SearchQuery, StarredSet, StreamDescriptor, TrackId,
 };
 
 const STATE_DB_FILE: &str = "iroh-fm.db";
@@ -28,6 +29,7 @@ const COVER_THUMBNAIL_JPEG_QUALITY: u8 = 82;
 const COVER_THUMBNAIL_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 const COVER_SOURCE_MAX_DIMENSION: u32 = 16_384;
 const COVER_DECODE_MAX_BYTES: u64 = 128 * 1024 * 1024;
+static PLAYLIST_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, PartialEq, Eq)]
 struct CoverSourceVersion {
@@ -113,7 +115,7 @@ impl CoverThumbnailCache {
 pub struct MusicServer {
     config: ServerConfig,
     library: Arc<RwLock<LibraryIndex>>,
-    starred_db: std::sync::Mutex<Connection>,
+    state_db: std::sync::Mutex<Connection>,
     cover_thumbnail_cache: std::sync::Mutex<CoverThumbnailCache>,
     _watcher: RecommendedWatcher,
     _watch_task: JoinHandle<()>,
@@ -123,14 +125,14 @@ impl MusicServer {
     pub fn load(config: ServerConfig) -> Result<Self> {
         let initial_library = scan_music_dir(&config.music_dir)?;
         let library = Arc::new(RwLock::new(initial_library));
-        let starred_db = open_state_db(&config.music_dir)?;
+        let state_db = open_state_db(&config.music_dir)?;
         let (watcher, watch_task) =
             spawn_library_watcher(config.music_dir.clone(), Arc::clone(&library))?;
 
         Ok(Self {
             config,
             library,
-            starred_db: std::sync::Mutex::new(starred_db),
+            state_db: std::sync::Mutex::new(state_db),
             cover_thumbnail_cache: std::sync::Mutex::new(CoverThumbnailCache::new(
                 COVER_THUMBNAIL_CACHE_MAX_BYTES,
             )),
@@ -187,6 +189,34 @@ impl MusicServer {
             BackendRequest::SetStarredWithKey { id, starred, key } => {
                 self.set_starred(&library, &starred_scope(Some(key), identity), id, starred)
             }
+            BackendRequest::ListPlaylists => {
+                self.list_playlists(&library, &playlist_scope(identity)?)
+            }
+            BackendRequest::GetPlaylist { playlist_id } => {
+                self.get_playlist(&library, &playlist_scope(identity)?, &playlist_id)
+            }
+            BackendRequest::CreatePlaylist { name, track_ids } => {
+                self.create_playlist(&library, &playlist_scope(identity)?, name, track_ids)
+            }
+            BackendRequest::UpdatePlaylist {
+                playlist_id,
+                name,
+                comment,
+                track_ids,
+            } => self.update_playlist(
+                &library,
+                &playlist_scope(identity)?,
+                &playlist_id,
+                name,
+                comment,
+                track_ids,
+            ),
+            BackendRequest::DeletePlaylist { playlist_id } => {
+                self.delete_playlist(&playlist_scope(identity)?, &playlist_id)
+            }
+            BackendRequest::ReorderPlaylists { playlist_ids } => {
+                self.reorder_playlists(&playlist_scope(identity)?, playlist_ids)
+            }
             BackendRequest::GetArtist { artist_id } => Self::get_artist(&library, artist_id),
             BackendRequest::GetAlbum { album_id } => Self::get_album(&library, album_id),
             BackendRequest::GetAlbumTracks { album_id } => {
@@ -213,7 +243,7 @@ impl MusicServer {
     }
 
     fn get_starred(&self, library: &LibraryIndex, scope: &str) -> Result<BackendResponse> {
-        let conn = self.starred_db.lock().expect("starred db lock poisoned");
+        let conn = self.state_db.lock().expect("state db lock poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, kind FROM starred_items WHERE scope = ?1 ORDER BY starred_unix DESC, id ASC",
         )?;
@@ -346,7 +376,7 @@ impl MusicServer {
             return Err(Error::NotFound("id", id));
         };
 
-        let conn = self.starred_db.lock().expect("starred db lock poisoned");
+        let conn = self.state_db.lock().expect("state db lock poisoned");
         if starred {
             conn.execute(
                 r#"
@@ -365,6 +395,176 @@ impl MusicServer {
             )?;
         }
 
+        Ok(BackendResponse::Empty)
+    }
+
+    fn list_playlists(&self, library: &LibraryIndex, scope: &str) -> Result<BackendResponse> {
+        let mut conn = self.state_db.lock().expect("state db lock poisoned");
+        let ids = {
+            let mut stmt =
+                conn.prepare("SELECT id FROM playlists WHERE scope = ?1 ORDER BY position, id")?;
+            stmt.query_map([scope], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut playlists = Vec::with_capacity(ids.len());
+        for id in ids {
+            playlists.push(load_playlist(&mut conn, library, scope, &PlaylistId(id))?);
+        }
+        Ok(BackendResponse::Playlists(playlists))
+    }
+
+    fn get_playlist(
+        &self,
+        library: &LibraryIndex,
+        scope: &str,
+        playlist_id: &PlaylistId,
+    ) -> Result<BackendResponse> {
+        let mut conn = self.state_db.lock().expect("state db lock poisoned");
+        Ok(BackendResponse::Playlist(load_playlist(
+            &mut conn,
+            library,
+            scope,
+            playlist_id,
+        )?))
+    }
+
+    fn create_playlist(
+        &self,
+        library: &LibraryIndex,
+        scope: &str,
+        name: String,
+        track_ids: Vec<TrackId>,
+    ) -> Result<BackendResponse> {
+        let name = playlist_name(name)?;
+        let track_ids = validate_playlist_tracks(library, track_ids)?;
+        let mut conn = self.state_db.lock().expect("state db lock poisoned");
+        let transaction = conn.transaction()?;
+        let position: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM playlists WHERE scope = ?1",
+            [scope],
+            |row| row.get(0),
+        )?;
+        let playlist_id = PlaylistId(new_playlist_id());
+        let now = now_unix();
+        transaction.execute(
+            "INSERT INTO playlists (id, scope, name, comment, position, created_unix, changed_unix)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?5)",
+            params![playlist_id.0, scope, name, position, now],
+        )?;
+        replace_playlist_tracks(&transaction, &playlist_id, &track_ids)?;
+        transaction.commit()?;
+        Ok(BackendResponse::Playlist(Playlist {
+            id: playlist_id,
+            name,
+            comment: None,
+            track_ids,
+            created_unix: now,
+            changed_unix: now,
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_playlist(
+        &self,
+        library: &LibraryIndex,
+        scope: &str,
+        playlist_id: &PlaylistId,
+        name: Option<String>,
+        comment: Option<String>,
+        track_ids: Option<Vec<TrackId>>,
+    ) -> Result<BackendResponse> {
+        let name = name.map(playlist_name).transpose()?;
+        let comment = comment.map(|value| {
+            let value = value.trim().to_owned();
+            (!value.is_empty()).then_some(value)
+        });
+        let track_ids = track_ids
+            .map(|ids| validate_playlist_tracks(library, ids))
+            .transpose()?;
+        let mut conn = self.state_db.lock().expect("state db lock poisoned");
+        let transaction = conn.transaction()?;
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM playlists WHERE id = ?1 AND scope = ?2)",
+            params![playlist_id.0, scope],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(Error::NotFound("playlist", playlist_id.0.clone()));
+        }
+        let changed = now_unix();
+        if let Some(name) = &name {
+            transaction.execute(
+                "UPDATE playlists SET name = ?1 WHERE id = ?2 AND scope = ?3",
+                params![name, playlist_id.0, scope],
+            )?;
+        }
+        if let Some(comment) = &comment {
+            transaction.execute(
+                "UPDATE playlists SET comment = ?1 WHERE id = ?2 AND scope = ?3",
+                params![comment, playlist_id.0, scope],
+            )?;
+        }
+        if let Some(track_ids) = &track_ids {
+            replace_playlist_tracks(&transaction, playlist_id, track_ids)?;
+        }
+        transaction.execute(
+            "UPDATE playlists SET changed_unix = ?1 WHERE id = ?2 AND scope = ?3",
+            params![changed, playlist_id.0, scope],
+        )?;
+        transaction.commit()?;
+        Ok(BackendResponse::Playlist(load_playlist(
+            &mut conn,
+            library,
+            scope,
+            playlist_id,
+        )?))
+    }
+
+    fn delete_playlist(&self, scope: &str, playlist_id: &PlaylistId) -> Result<BackendResponse> {
+        let conn = self.state_db.lock().expect("state db lock poisoned");
+        let changed = conn.execute(
+            "DELETE FROM playlists WHERE id = ?1 AND scope = ?2",
+            params![playlist_id.0, scope],
+        )?;
+        if changed == 0 {
+            return Err(Error::NotFound("playlist", playlist_id.0.clone()));
+        }
+        Ok(BackendResponse::Empty)
+    }
+
+    fn reorder_playlists(
+        &self,
+        scope: &str,
+        playlist_ids: Vec<PlaylistId>,
+    ) -> Result<BackendResponse> {
+        let mut supplied = playlist_ids
+            .iter()
+            .map(|id| id.0.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if supplied.len() != playlist_ids.len() {
+            return Err(Error::InvalidRequest(
+                "playlist order contains duplicate ids".to_string(),
+            ));
+        }
+        let mut conn = self.state_db.lock().expect("state db lock poisoned");
+        let transaction = conn.transaction()?;
+        let stored = {
+            let mut stmt = transaction.prepare("SELECT id FROM playlists WHERE scope = ?1")?;
+            stmt.query_map([scope], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?
+        };
+        if stored.len() != supplied.len() || !stored.iter().all(|id| supplied.remove(id.as_str())) {
+            return Err(Error::InvalidRequest(
+                "playlist order must contain every playlist exactly once".to_string(),
+            ));
+        }
+        for (position, playlist_id) in playlist_ids.iter().enumerate() {
+            transaction.execute(
+                "UPDATE playlists SET position = ?1 WHERE id = ?2 AND scope = ?3",
+                params![position as i64, playlist_id.0, scope],
+            )?;
+        }
+        transaction.commit()?;
         Ok(BackendResponse::Empty)
     }
 
@@ -675,7 +875,7 @@ fn spawn_library_watcher(
 
 fn open_state_db(root: &std::path::Path) -> Result<Connection> {
     let conn = Connection::open(root.join(STATE_DB_FILE))?;
-    conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
     let table_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'starred_items')",
         [],
@@ -711,6 +911,28 @@ fn open_state_db(root: &std::path::Path) -> Result<Connection> {
             )?;
         }
     }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS playlists (
+            id TEXT PRIMARY KEY NOT NULL,
+            scope TEXT NOT NULL,
+            name TEXT NOT NULL,
+            comment TEXT,
+            position INTEGER NOT NULL,
+            created_unix INTEGER NOT NULL,
+            changed_unix INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS playlists_scope_position
+            ON playlists(scope, position);
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+            playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+            track_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, track_id),
+            UNIQUE (playlist_id, position)
+        );
+        "#,
+    )?;
     Ok(conn)
 }
 
@@ -739,6 +961,130 @@ fn starred_scope(key: Option<String>, identity: Option<&str>) -> String {
             .map(|identity| format!("identity:{identity}"))
             .unwrap_or_else(|| "legacy".to_owned()),
     }
+}
+
+fn playlist_scope(identity: Option<&str>) -> Result<String> {
+    identity
+        .map(|identity| format!("identity:{identity}"))
+        .ok_or_else(|| {
+            Error::InvalidRequest(
+                "playlist operations require an authenticated identity".to_string(),
+            )
+        })
+}
+
+fn playlist_name(name: String) -> Result<String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err(Error::InvalidRequest(
+            "playlist name must not be empty".to_string(),
+        ));
+    }
+    Ok(name)
+}
+
+fn validate_playlist_tracks(
+    library: &LibraryIndex,
+    track_ids: Vec<TrackId>,
+) -> Result<Vec<TrackId>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut unique = Vec::with_capacity(track_ids.len());
+    for track_id in track_ids {
+        if !library.tracks.contains_key(&track_id) {
+            return Err(Error::NotFound("track", track_id.0));
+        }
+        if seen.insert(track_id.clone()) {
+            unique.push(track_id);
+        }
+    }
+    Ok(unique)
+}
+
+fn replace_playlist_tracks(
+    transaction: &rusqlite::Transaction<'_>,
+    playlist_id: &PlaylistId,
+    track_ids: &[TrackId],
+) -> Result<()> {
+    transaction.execute(
+        "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+        [playlist_id.0.as_str()],
+    )?;
+    for (position, track_id) in track_ids.iter().enumerate() {
+        transaction.execute(
+            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
+            params![playlist_id.0, track_id.0, position as i64],
+        )?;
+    }
+    Ok(())
+}
+
+fn load_playlist(
+    conn: &mut Connection,
+    library: &LibraryIndex,
+    scope: &str,
+    playlist_id: &PlaylistId,
+) -> Result<Playlist> {
+    let (name, comment, created_unix, mut changed_unix) = conn
+        .query_row(
+            "SELECT name, comment, created_unix, changed_unix
+             FROM playlists WHERE id = ?1 AND scope = ?2",
+            params![playlist_id.0, scope],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                Error::NotFound("playlist", playlist_id.0.clone())
+            }
+            other => Error::Sqlite(other),
+        })?;
+    let stored = {
+        let mut stmt = conn.prepare(
+            "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position",
+        )?;
+        stmt.query_map([playlist_id.0.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let track_ids = stored
+        .iter()
+        .filter_map(|id| {
+            let id = TrackId(id.clone());
+            library.tracks.contains_key(&id).then_some(id)
+        })
+        .collect::<Vec<_>>();
+    if track_ids.len() != stored.len() {
+        changed_unix = now_unix();
+        let transaction = conn.transaction()?;
+        replace_playlist_tracks(&transaction, playlist_id, &track_ids)?;
+        transaction.execute(
+            "UPDATE playlists SET changed_unix = ?1 WHERE id = ?2 AND scope = ?3",
+            params![changed_unix, playlist_id.0, scope],
+        )?;
+        transaction.commit()?;
+    }
+    Ok(Playlist {
+        id: playlist_id.clone(),
+        name,
+        comment,
+        track_ids,
+        created_unix,
+        changed_unix,
+    })
+}
+
+fn new_playlist_id() -> String {
+    let sequence = PLAYLIST_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("playlist-{nanos:032x}-{sequence:016x}")
 }
 
 fn find_legacy_track<'a>(library: &'a LibraryIndex, id: &str) -> Option<&'a protocol::Track> {
@@ -865,6 +1211,7 @@ fn is_library_relevant_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
+    use std::path::PathBuf;
 
     use image::GenericImageView;
 
@@ -875,6 +1222,36 @@ mod tests {
             cover_art_id: CoverArtId(id.to_string()),
             content_type: "image/jpeg".to_string(),
             bytes: vec![0; size],
+        }
+    }
+
+    fn sample_track(id: &str) -> protocol::Track {
+        protocol::Track {
+            id: TrackId(id.to_string()),
+            title: id.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            album_artist: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_seconds: Some(60),
+            bitrate: None,
+            sample_rate: None,
+            channels: None,
+            codec: None,
+            genres: Vec::new(),
+            date: None,
+            musicbrainz_track_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            cover_art_id: None,
+            has_embedded_cover: false,
+            suffix: Some("mp3".to_string()),
+            relative_path: PathBuf::from(format!("{id}.mp3")),
+            file_size: 1,
+            modified_at: SystemTime::UNIX_EPOCH,
+            content_type: "audio/mpeg".to_string(),
         }
     }
 
@@ -928,5 +1305,89 @@ mod tests {
                 .is_none()
         );
         assert_eq!(cache.bytes, 0);
+    }
+
+    #[test]
+    fn state_schema_preserves_starred_and_prunes_stale_playlist_tracks() {
+        let root =
+            std::env::temp_dir().join(format!("iroh-fm-playlist-test-{}", new_playlist_id()));
+        std::fs::create_dir(&root).unwrap();
+        let conn = open_state_db(&root).unwrap();
+        conn.execute(
+            "INSERT INTO starred_items (scope, id, kind, starred_unix) VALUES ('legacy', 'x', 'track', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playlists (id, scope, name, comment, position, created_unix, changed_unix)
+             VALUES ('playlist-1', 'identity:alice', 'Mix', NULL, 0, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES
+             ('playlist-1', 'track-1', 0), ('playlist-1', 'missing', 1)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut conn = open_state_db(&root).unwrap();
+        let mut library = LibraryIndex::default();
+        let track = sample_track("track-1");
+        library.tracks.insert(track.id.clone(), track);
+        let playlist = load_playlist(
+            &mut conn,
+            &library,
+            "identity:alice",
+            &PlaylistId("playlist-1".to_string()),
+        )
+        .unwrap();
+        assert_eq!(playlist.track_ids, vec![TrackId("track-1".to_string())]);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM starred_items WHERE id = 'x'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT position FROM playlist_tracks WHERE playlist_id = 'playlist-1'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        drop(conn);
+        std::fs::remove_file(root.join(STATE_DB_FILE)).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn playlist_validation_deduplicates_and_identity_scope_is_private() {
+        let mut library = LibraryIndex::default();
+        let track = sample_track("track-1");
+        library.tracks.insert(track.id.clone(), track);
+        assert_eq!(
+            validate_playlist_tracks(
+                &library,
+                vec![
+                    TrackId("track-1".to_string()),
+                    TrackId("track-1".to_string())
+                ]
+            )
+            .unwrap(),
+            vec![TrackId("track-1".to_string())]
+        );
+        assert!(validate_playlist_tracks(&library, vec![TrackId("missing".to_string())]).is_err());
+        assert_eq!(
+            playlist_scope(Some("alice")).unwrap(),
+            "identity:alice".to_string()
+        );
+        assert!(playlist_scope(None).is_err());
     }
 }

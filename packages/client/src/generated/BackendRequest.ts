@@ -2,7 +2,8 @@
 import type { AlbumId } from "./AlbumId.js";
 import type { ArtistId } from "./ArtistId.js";
 import type { CoverArtId } from "./CoverArtId.js";
+import type { PlaylistId } from "./PlaylistId.js";
 import type { SearchQuery } from "./SearchQuery.js";
 import type { TrackId } from "./TrackId.js";
 
-export type BackendRequest = "GetLibrarySummary" | "ListArtists" | "ListAlbums" | "ListTracks" | "GetStarred" | { "GetStarredWithKey": { key: string, } } | { "SetStarred": { id: string, starred: boolean, } } | { "SetStarredWithKey": { id: string, starred: boolean, key: string, } } | { "GetArtist": { artist_id: ArtistId, } } | { "GetAlbum": { album_id: AlbumId, } } | { "GetAlbumTracks": { album_id: AlbumId, } } | { "GetTrack": { track_id: TrackId, } } | { "GetCoverArt": { cover_art_id: CoverArtId, full_quality: boolean, } } | { "ResolveId": { id: string, } } | { "Search": { query: SearchQuery, } } | { "OpenStream": { track_id: TrackId, } };
+export type BackendRequest = "GetLibrarySummary" | "ListArtists" | "ListAlbums" | "ListTracks" | "GetStarred" | { "GetStarredWithKey": { key: string, } } | { "SetStarred": { id: string, starred: boolean, } } | { "SetStarredWithKey": { id: string, starred: boolean, key: string, } } | "ListPlaylists" | { "GetPlaylist": { playlist_id: PlaylistId, } } | { "CreatePlaylist": { name: string, track_ids: Array<TrackId>, } } | { "UpdatePlaylist": { playlist_id: PlaylistId, name: string | null, comment: string | null, track_ids: Array<TrackId> | null, } } | { "DeletePlaylist": { playlist_id: PlaylistId, } } | { "ReorderPlaylists": { playlist_ids: Array<PlaylistId>, } } | { "GetArtist": { artist_id: ArtistId, } } | { "GetAlbum": { album_id: AlbumId, } } | { "GetAlbumTracks": { album_id: AlbumId, } } | { "GetTrack": { track_id: TrackId, } } | { "GetCoverArt": { cover_art_id: CoverArtId, full_quality: boolean, } } | { "ResolveId": { id: string, } } | { "Search": { query: SearchQuery, } } | { "OpenStream": { track_id: TrackId, } };

@@ -108,7 +108,8 @@ test("seeks five seconds right and left with the keyboard", async ({ page }) => 
   await expect.poll(async () => Number(await position.inputValue())).toBeLessThan(moved - 4);
 });
 
-test("gives lower volumes more slider range", async ({ page }) => {
+test("gives lower volumes more slider range", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "android", "Android uses the system volume controls.");
   const volume = page.getByRole("slider", { name: "Volume" });
 
   await volume.fill("0.5");

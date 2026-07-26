@@ -24,4 +24,10 @@
   }
 </script>
 
-<TrackList {tracks} {items} {query} onquery={updateQuery} />
+<TrackList
+  {tracks}
+  {items}
+  {query}
+  queueTracks={App.library.availableStarredTracks}
+  onquery={updateQuery}
+/>

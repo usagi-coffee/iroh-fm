@@ -17,6 +17,8 @@ export class Library {
   tracks = $state.raw([]);
   /** @type {import('@iroh-fm/client/types').StarredSet} */
   starred = $state({ artists: [], albums: [], tracks: [] });
+  /** @type {import('@iroh-fm/client/types').Playlist[]} */
+  playlists = $state.raw([]);
   offlineOnly = $state(false);
   starredTrackIds = $derived(new Set(this.starred.tracks.map((track) => track.id)));
   starredAlbumIds = $derived(new Set(this.starred.albums.map((album) => album.id)));
@@ -26,6 +28,7 @@ export class Library {
   /** @type {SvelteSet<string>} */
   cachingAlbumIds = new SvelteSet();
   tracksById = $derived(new Map(this.tracks.map((track) => [track.id, track])));
+  playlistById = $derived(new Map(this.playlists.map((playlist) => [playlist.id, playlist])));
   albumById = $derived(new Map(this.albums.map((album) => [album.id, album])));
   albumByTrackId = $derived.by(() => {
     /** @type {Map<string, import('@iroh-fm/client/types').Album>} */
@@ -171,6 +174,149 @@ export class Library {
     if (filtered === this.availableTracks) return this.availableTrackListItems;
     if (filtered === this.availableStarredTracks) return this.availableStarredTrackListItems;
     return this.createTrackListItems(filtered);
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist */
+  tracksForPlaylist(playlist) {
+    const tracks = playlist.track_ids
+      .map((id) => this.tracksById.get(id))
+      .filter((track) => track && (!this.offlineOnly || track.cached));
+    return /** @type {Track[]} */ (tracks);
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist @param {string} query */
+  filteredPlaylistTracks(playlist, query = "") {
+    const tracks = this.tracksForPlaylist(playlist);
+    return query.trim() ? filterTracks(tracks, query) : tracks;
+  }
+
+  /** @param {string} name @param {Track[]} [tracks] */
+  async createPlaylist(name, tracks = []) {
+    const client = this.app.connection.client;
+    if (!client) return null;
+    try {
+      const playlist = await client.createPlaylist(
+        name,
+        tracks.map((track) => track.id),
+      );
+      if (this.app.connection.client !== client) return null;
+      this.playlists = [...this.playlists, playlist];
+      return playlist;
+    } catch (error) {
+      if (this.app.connection.client === client)
+        this.app.connection.error = friendlyError(error, "Could not create the playlist.");
+      return null;
+    }
+  }
+
+  /**
+   * @param {import('@iroh-fm/client/types').Playlist} playlist
+   * @param {{name?: string, comment?: string, trackIds?: string[]}} fields
+   */
+  async updatePlaylist(playlist, fields) {
+    const client = this.app.connection.client;
+    if (!client) return null;
+    try {
+      const updated = await client.updatePlaylist(playlist.id, fields);
+      if (this.app.connection.client !== client) return null;
+      this.playlists = this.playlists.map((item) => (item.id === updated.id ? updated : item));
+      return updated;
+    } catch (error) {
+      if (this.app.connection.client === client)
+        this.app.connection.error = friendlyError(error, "Could not update the playlist.");
+      return null;
+    }
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist @param {Track[]} tracks */
+  async addTracksToPlaylist(playlist, tracks) {
+    const ids = [...playlist.track_ids];
+    const seen = new Set(ids);
+    for (const track of tracks) {
+      if (!seen.has(track.id)) {
+        seen.add(track.id);
+        ids.push(track.id);
+      }
+    }
+    if (ids.length === playlist.track_ids.length) return playlist;
+    return this.updatePlaylist(playlist, { trackIds: ids });
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist */
+  async deletePlaylist(playlist) {
+    const client = this.app.connection.client;
+    if (!client) return false;
+    try {
+      await client.deletePlaylist(playlist.id);
+      if (this.app.connection.client !== client) return false;
+      this.playlists = this.playlists.filter((item) => item.id !== playlist.id);
+      return true;
+    } catch (error) {
+      if (this.app.connection.client === client)
+        this.app.connection.error = friendlyError(error, "Could not delete the playlist.");
+      return false;
+    }
+  }
+
+  /** @param {string[]} ids */
+  async reorderPlaylists(ids) {
+    if (
+      ids.length !== this.playlists.length ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !this.playlistById.has(id))
+    )
+      return false;
+    const client = this.app.connection.client;
+    if (!client) return false;
+    const previous = this.playlists;
+    /** @type {import('@iroh-fm/client/types').Playlist[]} */
+    const reordered = [];
+    for (const id of ids) {
+      const playlist = this.playlistById.get(id);
+      if (playlist) reordered.push(playlist);
+    }
+    this.playlists = reordered;
+    try {
+      await client.reorderPlaylists(ids);
+      return this.app.connection.client === client;
+    } catch (error) {
+      if (this.app.connection.client === client) {
+        this.playlists = previous;
+        this.app.connection.error = friendlyError(error, "Could not reorder playlists.");
+      }
+      return false;
+    }
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist @param {number} index */
+  async movePlaylist(playlist, index) {
+    const ids = this.playlists.map((item) => item.id);
+    const from = ids.indexOf(playlist.id);
+    if (from < 0) return false;
+    ids.splice(from, 1);
+    ids.splice(Math.max(0, Math.min(ids.length, index)), 0, playlist.id);
+    return this.reorderPlaylists(ids);
+  }
+
+  /**
+   * @param {import('@iroh-fm/client/types').Playlist} playlist
+   * @param {string} trackId
+   * @param {number} index
+   */
+  async movePlaylistTrack(playlist, trackId, index) {
+    const ids = [...playlist.track_ids];
+    const from = ids.indexOf(trackId);
+    if (from < 0) return null;
+    ids.splice(from, 1);
+    ids.splice(Math.max(0, Math.min(ids.length, index)), 0, trackId);
+    return this.updatePlaylist(playlist, { trackIds: ids });
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist @param {string} trackId */
+  removePlaylistTrack(playlist, trackId) {
+    return this.updatePlaylist(playlist, {
+      trackIds: playlist.track_ids.filter((id) => id !== trackId),
+    });
   }
 
   /**

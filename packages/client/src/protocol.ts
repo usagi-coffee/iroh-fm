@@ -37,12 +37,13 @@ function empty(response: BackendResponse) {
 }
 
 export async function bootstrap(request: Request, starredKey = "") {
-  const [summary, albums, artists, tracks, starred] = await Promise.all([
+  const [summary, albums, artists, tracks, starred, playlists] = await Promise.all([
     request("GetLibrarySummary"),
     request("ListAlbums"),
     request("ListArtists"),
     request("ListTracks"),
     request(starredKey.trim() ? { GetStarredWithKey: { key: starredKey.trim() } } : "GetStarred"),
+    request("ListPlaylists"),
   ]);
   return {
     summary: variant(summary, "LibrarySummary"),
@@ -50,7 +51,45 @@ export async function bootstrap(request: Request, starredKey = "") {
     artists: variant(artists, "Artists"),
     tracks: variant(tracks, "Tracks"),
     starred: variant(starred, "Starred"),
+    playlists: variant(playlists, "Playlists"),
   };
+}
+
+export async function getPlaylist(request: Request, playlistId: string) {
+  return variant(await request({ GetPlaylist: { playlist_id: playlistId } }), "Playlist");
+}
+
+export async function createPlaylist(request: Request, name: string, trackIds: string[] = []) {
+  return variant(
+    await request({ CreatePlaylist: { name, track_ids: trackIds } }),
+    "Playlist",
+  );
+}
+
+export async function updatePlaylist(
+  request: Request,
+  playlistId: string,
+  fields: { name?: string; comment?: string; trackIds?: string[] },
+) {
+  return variant(
+    await request({
+      UpdatePlaylist: {
+        playlist_id: playlistId,
+        name: fields.name ?? null,
+        comment: fields.comment ?? null,
+        track_ids: fields.trackIds ?? null,
+      },
+    }),
+    "Playlist",
+  );
+}
+
+export async function deletePlaylist(request: Request, playlistId: string) {
+  empty(await request({ DeletePlaylist: { playlist_id: playlistId } }));
+}
+
+export async function reorderPlaylists(request: Request, playlistIds: string[]) {
+  empty(await request({ ReorderPlaylists: { playlist_ids: playlistIds } }));
 }
 
 export async function setStarred(request: Request, id: string, starred: boolean, key = "") {

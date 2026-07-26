@@ -1,8 +1,13 @@
 import {
   bootstrap as bootstrapProtocol,
+  createPlaylist as createPlaylistProtocol,
   decodeResponse,
+  deletePlaylist as deletePlaylistProtocol,
   encodeRequest,
+  getPlaylist as getPlaylistProtocol,
+  reorderPlaylists as reorderPlaylistsProtocol,
   setStarred as setStarredProtocol,
+  updatePlaylist as updatePlaylistProtocol,
 } from "./protocol.js";
 
 let modulePromise;
@@ -440,6 +445,31 @@ export class MusicClient {
    */
   setStarred(id, starred, key = "") {
     return setStarredProtocol(this.request.bind(this), id, starred, key);
+  }
+
+  /** @param {string} id */
+  getPlaylist(id) {
+    return getPlaylistProtocol(this.request.bind(this), id);
+  }
+
+  /** @param {string} name @param {string[]} [trackIds] */
+  createPlaylist(name, trackIds = []) {
+    return createPlaylistProtocol(this.request.bind(this), name, trackIds);
+  }
+
+  /** @param {string} id @param {{name?: string, comment?: string, trackIds?: string[]}} fields */
+  updatePlaylist(id, fields) {
+    return updatePlaylistProtocol(this.request.bind(this), id, fields);
+  }
+
+  /** @param {string} id */
+  deletePlaylist(id) {
+    return deletePlaylistProtocol(this.request.bind(this), id);
+  }
+
+  /** @param {string[]} ids */
+  reorderPlaylists(ids) {
+    return reorderPlaylistsProtocol(this.request.bind(this), ids);
   }
 
   /**

@@ -1,10 +1,13 @@
 <script>
   import SnippetModal from "$lib/modals/Snippet.svelte";
+  import PlaylistPickerModal from "$lib/modals/PlaylistPickerModal.svelte";
+  import { modal } from "$lib/modals/index.js";
   import { App } from "$lib/runes/App.svelte.js";
   import { formatBytes, formatTime } from "$lib/utils.js";
 
   import DownloadIcon from "virtual:icons/ri/download-line";
   import HeartIcon from "virtual:icons/ri/heart-line";
+  import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
 
   import Cover from "../../routes/Cover.svelte";
 
@@ -27,6 +30,11 @@
   function cache() {
     dismiss();
     void App.library.cacheAlbum(tracks, cacheKey);
+  }
+
+  function addToPlaylist() {
+    dismiss();
+    void modal(PlaylistPickerModal, { tracks });
   }
 </script>
 
@@ -94,5 +102,12 @@
         : App.library.offlineOnly
           ? "Unavailable offline"
           : "Download album"}</button
+  >
+  <button
+    type="button"
+    onclick={addToPlaylist}
+    disabled={!tracks.length}
+    class="text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0 flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
+    ><PlaylistIcon class="text-sm" />Add album to playlist</button
   >
 {/snippet}

@@ -1,5 +1,5 @@
 use client::{Error, Result};
-use protocol::{BackendResponse, ResolvedId, StreamDescriptor};
+use protocol::{BackendResponse, Playlist, ResolvedId, StreamDescriptor, Track, TrackId};
 use serde_json::json;
 
 use crate::auth::Credentials;
@@ -51,6 +51,11 @@ pub async fn handle_request(
             map_cover_art(backend.cover_art(cover_art_id).await?)
         }
         "/rest/getStarred2" => map_starred2(format, backend.starred().await?),
+        "/rest/getPlaylists" => get_playlists(format, config, backend, &request).await,
+        "/rest/getPlaylist" => get_playlist(format, config, backend, &request).await,
+        "/rest/createPlaylist" => create_playlist(format, config, backend, &request).await,
+        "/rest/updatePlaylist" => update_playlist(format, config, backend, &request).await,
+        "/rest/deletePlaylist" => delete_playlist(format, backend, &request).await,
         "/rest/search3" => {
             let term = query_value(&request, "query").unwrap_or_default();
             map_search(format, backend.search(term, 20).await?)
@@ -72,6 +77,199 @@ pub async fn handle_request(
             format,
             &format!("unsupported route: {}", request.path),
         )),
+    }
+}
+
+async fn get_playlists(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    backend: &impl Backend,
+    request: &RequestContext,
+) -> Result<SubsonicResponse> {
+    if query_value(request, "username").is_some_and(|username| username != config.username) {
+        return Ok(subsonic_error(
+            format,
+            50,
+            "not authorized for that playlist owner",
+        ));
+    }
+    let BackendResponse::Playlists(playlists) = backend.playlists().await? else {
+        return Err(Error::InvalidRequest(
+            "backend returned unexpected response for getPlaylists".to_string(),
+        ));
+    };
+    let mut summaries = Vec::with_capacity(playlists.len());
+    for playlist in playlists {
+        let tracks = playlist_tracks(backend, &playlist).await?;
+        summaries.push((playlist, tracks));
+    }
+    Ok(render_playlists(format, config, summaries))
+}
+
+async fn get_playlist(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    backend: &impl Backend,
+    request: &RequestContext,
+) -> Result<SubsonicResponse> {
+    let Some(id) = query_value(request, "id") else {
+        return Ok(subsonic_error(format, 10, "missing playlist id"));
+    };
+    let playlist = match backend.playlist(id).await {
+        Ok(BackendResponse::Playlist(playlist)) => playlist,
+        Ok(_) => {
+            return Err(Error::InvalidRequest(
+                "backend returned unexpected response for getPlaylist".to_string(),
+            ));
+        }
+        Err(_) => return Ok(subsonic_error(format, 70, "playlist not found")),
+    };
+    let tracks = playlist_tracks(backend, &playlist).await?;
+    Ok(render_playlist(format, config, playlist, tracks))
+}
+
+async fn create_playlist(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    backend: &impl Backend,
+    request: &RequestContext,
+) -> Result<SubsonicResponse> {
+    if public_requested(request) {
+        return Ok(subsonic_error(
+            format,
+            50,
+            "public playlists are not supported",
+        ));
+    }
+    let track_ids = unique_query_values(request, "songId")
+        .into_iter()
+        .map(|id| TrackId(id.to_string()))
+        .collect::<Vec<_>>();
+    let playlist = if let Some(id) = query_value(request, "playlistId") {
+        let existing = match backend.playlist(id).await {
+            Ok(BackendResponse::Playlist(playlist)) => playlist,
+            Ok(_) => {
+                return Err(Error::InvalidRequest(
+                    "backend returned unexpected playlist response".to_string(),
+                ));
+            }
+            Err(_) => return Ok(subsonic_error(format, 70, "playlist not found")),
+        };
+        let name = query_value(request, "name").map(str::to_string);
+        match backend
+            .update_playlist(&existing.id.0, name, None, Some(track_ids))
+            .await?
+        {
+            BackendResponse::Playlist(playlist) => playlist,
+            _ => {
+                return Err(Error::InvalidRequest(
+                    "backend returned unexpected response for createPlaylist update".to_string(),
+                ));
+            }
+        }
+    } else {
+        let Some(name) = query_value(request, "name") else {
+            return Ok(subsonic_error(format, 10, "missing playlist name"));
+        };
+        match backend.create_playlist(name, track_ids).await? {
+            BackendResponse::Playlist(playlist) => playlist,
+            _ => {
+                return Err(Error::InvalidRequest(
+                    "backend returned unexpected response for createPlaylist".to_string(),
+                ));
+            }
+        }
+    };
+    let tracks = playlist_tracks(backend, &playlist).await?;
+    Ok(render_playlist(format, config, playlist, tracks))
+}
+
+async fn update_playlist(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    backend: &impl Backend,
+    request: &RequestContext,
+) -> Result<SubsonicResponse> {
+    if public_requested(request) {
+        return Ok(subsonic_error(
+            format,
+            50,
+            "public playlists are not supported",
+        ));
+    }
+    let Some(id) = query_value(request, "playlistId") else {
+        return Ok(subsonic_error(format, 10, "missing playlist id"));
+    };
+    let existing = match backend.playlist(id).await {
+        Ok(BackendResponse::Playlist(playlist)) => playlist,
+        Ok(_) => {
+            return Err(Error::InvalidRequest(
+                "backend returned unexpected playlist response".to_string(),
+            ));
+        }
+        Err(_) => return Ok(subsonic_error(format, 70, "playlist not found")),
+    };
+    let mut track_ids = existing.track_ids.clone();
+    let mut indexes = query_values(request, "songIndexToRemove")
+        .filter_map(|value| value.parse::<usize>().ok())
+        .collect::<Vec<_>>();
+    indexes.sort_unstable();
+    indexes.dedup();
+    for index in indexes.into_iter().rev() {
+        if index < track_ids.len() {
+            track_ids.remove(index);
+        }
+    }
+    let mut seen = track_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    for id in query_values(request, "songIdToAdd") {
+        let id = TrackId(id.to_string());
+        if seen.insert(id.clone()) {
+            track_ids.push(id);
+        }
+    }
+    let tracks_changed = request
+        .query
+        .iter()
+        .any(|(key, _)| key == "songIndexToRemove" || key == "songIdToAdd");
+    let comment = if query_value(request, "comment").is_some() {
+        query_value(request, "comment").map(str::to_string)
+    } else {
+        None
+    };
+    let response = backend
+        .update_playlist(
+            &existing.id.0,
+            query_value(request, "name").map(str::to_string),
+            comment,
+            tracks_changed.then_some(track_ids),
+        )
+        .await?;
+    let BackendResponse::Playlist(playlist) = response else {
+        return Err(Error::InvalidRequest(
+            "backend returned unexpected response for updatePlaylist".to_string(),
+        ));
+    };
+    let tracks = playlist_tracks(backend, &playlist).await?;
+    Ok(render_playlist(format, config, playlist, tracks))
+}
+
+async fn delete_playlist(
+    format: ResponseFormat,
+    backend: &impl Backend,
+    request: &RequestContext,
+) -> Result<SubsonicResponse> {
+    let Some(id) = query_value(request, "id") else {
+        return Ok(subsonic_error(format, 10, "missing playlist id"));
+    };
+    match backend.delete_playlist(id).await {
+        Ok(BackendResponse::Empty) => Ok(empty_ok(format)),
+        Ok(_) => Err(Error::InvalidRequest(
+            "backend returned unexpected response for deletePlaylist".to_string(),
+        )),
+        Err(_) => Ok(subsonic_error(format, 70, "playlist not found")),
     }
 }
 
@@ -790,6 +988,25 @@ fn empty_ok(format: ResponseFormat) -> SubsonicResponse {
     }
 }
 
+fn subsonic_error(format: ResponseFormat, code: u32, message: &str) -> SubsonicResponse {
+    match format {
+        ResponseFormat::Xml => SubsonicResponse::Xml(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><subsonic-response status=\"failed\" version=\"1.16.1\"><error code=\"{code}\" message=\"{}\" /></subsonic-response>",
+            xml_escape(message)
+        )),
+        ResponseFormat::Json => SubsonicResponse::Json(
+            json!({
+                "subsonic-response": {
+                    "status": "failed",
+                    "version": "1.16.1",
+                    "error": { "code": code, "message": message }
+                }
+            })
+            .to_string(),
+        ),
+    }
+}
+
 fn error_response(format: ResponseFormat, message: &str) -> SubsonicResponse {
     match format {
         ResponseFormat::Xml => SubsonicResponse::Xml(format!(
@@ -856,6 +1073,171 @@ fn query_value<'a>(request: &'a RequestContext, key: &str) -> Option<&'a str> {
         .query
         .iter()
         .find_map(|(candidate, value)| (candidate == key).then_some(value.as_str()))
+}
+
+fn query_values<'a>(
+    request: &'a RequestContext,
+    key: &'a str,
+) -> impl Iterator<Item = &'a str> + 'a {
+    request
+        .query
+        .iter()
+        .filter_map(move |(candidate, value)| (candidate == key).then_some(value.as_str()))
+}
+
+fn unique_query_values<'a>(request: &'a RequestContext, key: &'a str) -> Vec<&'a str> {
+    let mut seen = std::collections::HashSet::new();
+    query_values(request, key)
+        .filter(|value| seen.insert(*value))
+        .collect()
+}
+
+fn public_requested(request: &RequestContext) -> bool {
+    query_value(request, "public").is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+async fn playlist_tracks(backend: &impl Backend, playlist: &Playlist) -> Result<Vec<Track>> {
+    let mut tracks = Vec::with_capacity(playlist.track_ids.len());
+    for track_id in &playlist.track_ids {
+        let BackendResponse::Track(track) = backend.track(&track_id.0).await? else {
+            return Err(Error::InvalidRequest(
+                "backend returned unexpected playlist track response".to_string(),
+            ));
+        };
+        tracks.push(track);
+    }
+    Ok(tracks)
+}
+
+fn playlist_metadata_json(
+    config: &SubsonicConfig,
+    playlist: &Playlist,
+    tracks: &[Track],
+) -> serde_json::Value {
+    json!({
+        "id": playlist.id.0,
+        "name": playlist.name,
+        "owner": config.username,
+        "comment": playlist.comment,
+        "public": false,
+        "songCount": tracks.len(),
+        "duration": tracks.iter().map(|track| track.duration_seconds.unwrap_or(0)).sum::<u32>(),
+        "created": unix_rfc3339(playlist.created_unix),
+        "changed": unix_rfc3339(playlist.changed_unix),
+        "coverArt": tracks.first().and_then(|track| track.cover_art_id.as_ref()).map(|id| id.0.clone())
+    })
+}
+
+fn playlist_metadata_xml(config: &SubsonicConfig, playlist: &Playlist, tracks: &[Track]) -> String {
+    let duration = tracks
+        .iter()
+        .map(|track| track.duration_seconds.unwrap_or(0))
+        .sum::<u32>();
+    format!(
+        "id=\"{}\" name=\"{}\" owner=\"{}\" public=\"false\" songCount=\"{}\" duration=\"{}\" created=\"{}\" changed=\"{}\"{}{}",
+        xml_escape(&playlist.id.0),
+        xml_escape(&playlist.name),
+        xml_escape(&config.username),
+        tracks.len(),
+        duration,
+        unix_rfc3339(playlist.created_unix),
+        unix_rfc3339(playlist.changed_unix),
+        optional_attr("comment", playlist.comment.as_deref()),
+        optional_attr(
+            "coverArt",
+            tracks
+                .first()
+                .and_then(|track| track.cover_art_id.as_ref())
+                .map(|id| id.0.as_str())
+        )
+    )
+}
+
+fn render_playlists(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    playlists: Vec<(Playlist, Vec<Track>)>,
+) -> SubsonicResponse {
+    match format {
+        ResponseFormat::Xml => {
+            let mut body = String::from("<playlists>");
+            for (playlist, tracks) in playlists {
+                body.push_str(&format!(
+                    "<playlist {} />",
+                    playlist_metadata_xml(config, &playlist, &tracks)
+                ));
+            }
+            body.push_str("</playlists>");
+            SubsonicResponse::Xml(wrap_xml(&body))
+        }
+        ResponseFormat::Json => SubsonicResponse::Json(wrap_json(json!({
+            "playlists": {
+                "playlist": playlists
+                    .iter()
+                    .map(|(playlist, tracks)| playlist_metadata_json(config, playlist, tracks))
+                    .collect::<Vec<_>>()
+            }
+        }))),
+    }
+}
+
+fn render_playlist(
+    format: ResponseFormat,
+    config: &SubsonicConfig,
+    playlist: Playlist,
+    tracks: Vec<Track>,
+) -> SubsonicResponse {
+    match format {
+        ResponseFormat::Xml => {
+            let mut body = format!(
+                "<playlist {}>",
+                playlist_metadata_xml(config, &playlist, &tracks)
+            );
+            for track in &tracks {
+                body.push_str(&render_song_xml(track, None).replacen("<song", "<entry", 1));
+            }
+            body.push_str("</playlist>");
+            SubsonicResponse::Xml(wrap_xml(&body))
+        }
+        ResponseFormat::Json => {
+            let mut metadata = playlist_metadata_json(config, &playlist, &tracks);
+            metadata
+                .as_object_mut()
+                .expect("playlist metadata object")
+                .insert(
+                    "entry".to_string(),
+                    json!(
+                        tracks
+                            .iter()
+                            .map(|track| render_song_json(track, None))
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            SubsonicResponse::Json(wrap_json(json!({ "playlist": metadata })))
+        }
+    }
+}
+
+fn unix_rfc3339(unix: i64) -> String {
+    let days = unix.div_euclid(86_400);
+    let seconds = unix.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    if month <= 2 {
+        year += 1;
+    }
+    let hour = seconds / 3_600;
+    let minute = seconds % 3_600 / 60;
+    let second = seconds % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 fn sort_albums(albums: &mut [protocol::Album], list_type: &str) {
@@ -989,18 +1371,27 @@ fn xml_escape(input: &str) -> String {
 mod tests {
     use super::*;
     use client::Result;
-    use protocol::{Album, AlbumId, BackendResponse, CoverArtId, StreamDescriptor, Track, TrackId};
+    use protocol::{
+        Album, AlbumId, BackendResponse, CoverArtId, Playlist, PlaylistId, StreamDescriptor, Track,
+        TrackId,
+    };
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use std::time::SystemTime;
 
     struct MockBackend {
         albums: Vec<Album>,
         tracks: Vec<Track>,
+        playlists: Mutex<Vec<Playlist>>,
     }
 
     impl MockBackend {
         fn new(albums: Vec<Album>, tracks: Vec<Track>) -> Self {
-            Self { albums, tracks }
+            Self {
+                albums,
+                tracks,
+                playlists: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -1025,6 +1416,76 @@ mod tests {
             unimplemented!()
         }
 
+        async fn playlists(&self) -> Result<BackendResponse> {
+            Ok(BackendResponse::Playlists(
+                self.playlists.lock().unwrap().clone(),
+            ))
+        }
+
+        async fn playlist(&self, playlist_id: &str) -> Result<BackendResponse> {
+            self.playlists
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|playlist| playlist.id.0 == playlist_id)
+                .cloned()
+                .map(BackendResponse::Playlist)
+                .ok_or_else(|| Error::InvalidRequest("playlist not found".to_string()))
+        }
+
+        async fn create_playlist(
+            &self,
+            name: &str,
+            track_ids: Vec<TrackId>,
+        ) -> Result<BackendResponse> {
+            let mut playlists = self.playlists.lock().unwrap();
+            let playlist = Playlist {
+                id: PlaylistId(format!("playlist-{}", playlists.len() + 1)),
+                name: name.to_string(),
+                comment: None,
+                track_ids,
+                created_unix: 1_700_000_000,
+                changed_unix: 1_700_000_000,
+            };
+            playlists.push(playlist.clone());
+            Ok(BackendResponse::Playlist(playlist))
+        }
+
+        async fn update_playlist(
+            &self,
+            playlist_id: &str,
+            name: Option<String>,
+            comment: Option<String>,
+            track_ids: Option<Vec<TrackId>>,
+        ) -> Result<BackendResponse> {
+            let mut playlists = self.playlists.lock().unwrap();
+            let playlist = playlists
+                .iter_mut()
+                .find(|playlist| playlist.id.0 == playlist_id)
+                .ok_or_else(|| Error::InvalidRequest("playlist not found".to_string()))?;
+            if let Some(name) = name {
+                playlist.name = name;
+            }
+            if let Some(comment) = comment {
+                playlist.comment = (!comment.is_empty()).then_some(comment);
+            }
+            if let Some(track_ids) = track_ids {
+                playlist.track_ids = track_ids;
+            }
+            playlist.changed_unix += 1;
+            Ok(BackendResponse::Playlist(playlist.clone()))
+        }
+
+        async fn delete_playlist(&self, playlist_id: &str) -> Result<BackendResponse> {
+            let mut playlists = self.playlists.lock().unwrap();
+            let before = playlists.len();
+            playlists.retain(|playlist| playlist.id.0 != playlist_id);
+            if playlists.len() == before {
+                return Err(Error::InvalidRequest("playlist not found".to_string()));
+            }
+            Ok(BackendResponse::Empty)
+        }
+
         async fn artist(&self, _artist_id: &str) -> Result<BackendResponse> {
             unimplemented!()
         }
@@ -1039,8 +1500,13 @@ mod tests {
             Ok(BackendResponse::Tracks(self.tracks.clone()))
         }
 
-        async fn track(&self, _track_id: &str) -> Result<BackendResponse> {
-            unimplemented!()
+        async fn track(&self, track_id: &str) -> Result<BackendResponse> {
+            self.tracks
+                .iter()
+                .find(|track| track.id.0 == track_id)
+                .cloned()
+                .map(BackendResponse::Track)
+                .ok_or_else(|| Error::InvalidRequest("track not found".to_string()))
         }
 
         async fn resolve_id(&self, _id: &str) -> Result<BackendResponse> {
@@ -1268,5 +1734,106 @@ mod tests {
         assert_eq!(songs[0]["albumId"], "album-a");
         assert_eq!(songs[0]["type"], "music");
         assert_eq!(songs[0]["size"], 2048);
+    }
+
+    #[tokio::test]
+    async fn playlist_routes_preserve_repeated_parameters_and_original_removal_indexes() {
+        let backend = MockBackend::new(
+            Vec::new(),
+            vec![
+                sample_track("track-1", "First", "Artist", "Album"),
+                sample_track("track-2", "Second", "Artist", "Album"),
+            ],
+        );
+        let config = SubsonicConfig {
+            bind: "127.0.0.1:4040".to_string(),
+            endpoint: String::new(),
+            ticket: None,
+            secret: None,
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            relay: None,
+        };
+
+        let created = handle_request(
+            &config,
+            &backend,
+            request(
+                "/rest/createPlaylist",
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("name", "Road Trip"),
+                    ("songId", "track-1"),
+                    ("songId", "track-1"),
+                    ("songId", "track-2"),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+        let SubsonicResponse::Json(created) = created else {
+            panic!("expected json");
+        };
+        let created: serde_json::Value = serde_json::from_str(&created).unwrap();
+        let entries = created["subsonic-response"]["playlist"]["entry"]
+            .as_array()
+            .unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["id"], "track-1");
+        assert_eq!(entries[1]["id"], "track-2");
+
+        let updated = handle_request(
+            &config,
+            &backend,
+            request(
+                "/rest/updatePlaylist",
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("playlistId", "playlist-1"),
+                    ("name", "Renamed"),
+                    ("comment", ""),
+                    ("songIndexToRemove", "0"),
+                    ("songIdToAdd", "track-1"),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+        let SubsonicResponse::Json(updated) = updated else {
+            panic!("expected json");
+        };
+        let updated: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        let playlist = &updated["subsonic-response"]["playlist"];
+        assert_eq!(playlist["name"], "Renamed");
+        assert_eq!(playlist["comment"], serde_json::Value::Null);
+        assert_eq!(playlist["entry"][0]["id"], "track-2");
+        assert_eq!(playlist["entry"][1]["id"], "track-1");
+        assert_eq!(playlist["created"], "2023-11-14T22:13:20Z");
+
+        let public = handle_request(
+            &config,
+            &backend,
+            request(
+                "/rest/updatePlaylist",
+                &[
+                    ("u", "user"),
+                    ("p", "pass"),
+                    ("f", "json"),
+                    ("playlistId", "playlist-1"),
+                    ("public", "true"),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+        let SubsonicResponse::Json(public) = public else {
+            panic!("expected json");
+        };
+        let public: serde_json::Value = serde_json::from_str(&public).unwrap();
+        assert_eq!(public["subsonic-response"]["error"]["code"], 50);
     }
 }

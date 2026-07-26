@@ -30,6 +30,7 @@ class DesktopInner extends NativeFixtureClient {
         ],
       };
     else if (request === "ListTracks") response = { Tracks: tracks };
+    else if (request === "ListPlaylists") response = { Playlists: [] };
     else response = { Starred: { artists: [], albums: [], tracks: [] } };
     return Promise.resolve(JSON.stringify(response));
   }

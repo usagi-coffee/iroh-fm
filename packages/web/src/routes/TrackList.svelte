@@ -5,6 +5,7 @@
   import { page } from "$app/state";
 
   import AlbumActionsModal from "$lib/modals/AlbumActionsModal.svelte";
+  import PlaylistPickerModal from "$lib/modals/PlaylistPickerModal.svelte";
   import { modal } from "$lib/modals/index.js";
   import SnippetModal from "$lib/modals/Snippet.svelte";
   import { App } from "$lib/runes/App.svelte.js";
@@ -14,6 +15,11 @@
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
   import HeartIcon from "virtual:icons/ri/heart-line";
+  import AddIcon from "virtual:icons/ri/play-list-add-line";
+  import DownIcon from "virtual:icons/ri/arrow-down-line";
+  import DragIcon from "virtual:icons/ri/draggable";
+  import RemoveIcon from "virtual:icons/ri/delete-bin-line";
+  import UpIcon from "virtual:icons/ri/arrow-up-line";
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import SearchIcon from "virtual:icons/ri/search-line";
@@ -27,9 +33,20 @@
    * @property {string} query
    * @property {(value: string) => void} onquery
    * @property {(track: import('$lib/runes/Track.svelte.js').Track) => void} [onplay]
+   * @property {import('$lib/runes/Track.svelte.js').Track[]} [queueTracks]
+   * @property {import('@iroh-fm/client/types').Playlist | null} [playlist]
    */
   /** @type {Props} */
-  const { tracks, items, query, onquery, onplay = () => {} } = $props();
+  const {
+    tracks,
+    items,
+    query,
+    onquery,
+    onplay = () => {},
+    queueTracks = tracks,
+    playlist = null,
+  } = $props();
+  let draggedTrackId = "";
   const ROW_HEIGHT_REM = 1.75;
   let rowHeight = $state(ROW_HEIGHT_REM * 16);
   const bufferSize = $derived(rowHeight * 24);
@@ -153,11 +170,9 @@
   function playTrackFromList(track) {
     console.info(`[player] track-list play invoked: trackId=${track.id}`);
     onplay(track);
-    let queue = tracks;
+    let queue = queueTracks;
     if (query.trim()) {
-      queue = App.library.getFilteredTracks();
       onquery("");
-      void App.library.focusTrack(track);
     }
     void App.player.playFromTrackList(track, queue);
   }
@@ -180,11 +195,19 @@
     void modal(SnippetModal, {
       snippet: TrackActions,
       track,
+      playlist,
       labelledBy: "track-actions-title",
       preventContextMenu: true,
       class: "w-full max-w-md overflow-hidden border border-surface1 bg-crust p-2 shadow-float",
     }).catch(
       (error) => (App.connection.error = friendlyError(error, "Could not open track actions.")),
+    );
+  }
+
+  /** @param {import('$lib/runes/Track.svelte.js').Track[]} selected */
+  function openPlaylistPicker(selected) {
+    void modal(PlaylistPickerModal, { tracks: selected }).catch(
+      (error) => (App.connection.error = friendlyError(error, "Could not open playlists.")),
     );
   }
 
@@ -354,6 +377,22 @@
               onclick={() => (App.library.selectedTrackId = item.track.id)}
               ondblclick={() => playTrackFromList(item.track)}
               oncontextmenu={(event) => openTrackActions(item.track, event)}
+              draggable={Boolean(playlist && !query.trim())}
+              ondragstart={(event) => {
+                draggedTrackId = item.track.id;
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+              }}
+              ondragover={(event) => {
+                if (draggedTrackId && playlist && !query.trim()) event.preventDefault();
+              }}
+              ondrop={(event) => {
+                event.preventDefault();
+                if (!playlist || !draggedTrackId || query.trim()) return;
+                const index = playlist.track_ids.indexOf(item.track.id);
+                if (index >= 0) void App.library.movePlaylistTrack(playlist, draggedTrackId, index);
+                draggedTrackId = "";
+              }}
+              ondragend={() => (draggedTrackId = "")}
               onkeydown={(event) => {
                 if (event.key === "Enter") playTrackFromList(item.track);
                 else if (event.key === " ") {
@@ -399,7 +438,9 @@
                 {item.track.album}
               </div>
               <div class="flex min-w-0 items-center gap-2 pr-2">
-                <span class="text-teal truncate">{item.track.title}</span><button
+                  {#if playlist && !query.trim()}<DragIcon
+                    class="text-overlay0 shrink-0 cursor-grab"
+                  />{/if}<span class="text-teal truncate">{item.track.title}</span><button
                   type="button"
                   onclick={(event) => App.library.toggleStar(item.track, event)}
                   class="text-overlay0 hover:text-pink ml-auto hidden shrink-0 group-hover:block {App.library.starredTrackIds.has(
@@ -465,4 +506,67 @@
       ? "Unstar"
       : "Star"}</button
   >
+  <button
+    type="button"
+    onclick={() => {
+      dismiss();
+      openPlaylistPicker([track]);
+    }}
+    class="text-subtext0 hover:bg-surface0 hover:text-text flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
+    ><AddIcon class="text-sm" />Add to playlist</button
+  >
+  {#if playlist}
+    {const index = $derived(playlist.track_ids.indexOf(track.id))}
+    <div class="border-surface0 grid grid-cols-2 border-t">
+      <button
+        type="button"
+        disabled={index <= 0}
+        onclick={() => {
+          dismiss();
+          void App.library.movePlaylistTrack(playlist, track.id, 0);
+        }}
+        class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+        ><UpIcon />Move to top</button
+      >
+      <button
+        type="button"
+        disabled={index <= 0}
+        onclick={() => {
+          dismiss();
+          void App.library.movePlaylistTrack(playlist, track.id, index - 1);
+        }}
+        class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+        ><UpIcon />Move up</button
+      >
+      <button
+        type="button"
+        disabled={index < 0 || index >= playlist.track_ids.length - 1}
+        onclick={() => {
+          dismiss();
+          void App.library.movePlaylistTrack(playlist, track.id, index + 1);
+        }}
+        class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+        ><DownIcon />Move down</button
+      >
+      <button
+        type="button"
+        disabled={index < 0 || index >= playlist.track_ids.length - 1}
+        onclick={() => {
+          dismiss();
+          void App.library.movePlaylistTrack(playlist, track.id, playlist.track_ids.length - 1);
+        }}
+        class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+        ><DownIcon />Move to bottom</button
+      >
+    </div>
+    <button
+      type="button"
+      onclick={() => {
+        dismiss();
+        void App.library.removePlaylistTrack(playlist, track.id);
+      }}
+      class="text-red hover:bg-surface0 flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
+      ><RemoveIcon class="text-sm" />Remove from playlist</button
+    >
+  {/if}
 {/snippet}

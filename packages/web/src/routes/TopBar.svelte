@@ -4,8 +4,11 @@
   import { page } from "$app/state";
 
   import ConfirmModal from "$lib/modals/ConfirmModal.svelte";
+  import PlaylistNameModal from "$lib/modals/PlaylistNameModal.svelte";
+  import SnippetModal from "$lib/modals/Snippet.svelte";
   import { modal } from "$lib/modals/index.js";
   import { App } from "$lib/runes/App.svelte.js";
+  import { longPress } from "$lib/ui/long-press.js";
   import { connectionAddressLabel, formatBytes, friendlyError } from "$lib/utils.js";
 
   import RelayIcon from "virtual:icons/ri/base-station-line";
@@ -19,6 +22,9 @@
   import MinimizeIcon from "virtual:icons/ri/subtract-line";
   import ConnectingIcon from "virtual:icons/ri/wifi-line";
   import OfflineIcon from "virtual:icons/ri/wifi-off-line";
+  import AddIcon from "virtual:icons/ri/add-line";
+  import LeftIcon from "virtual:icons/ri/arrow-left-line";
+  import RightIcon from "virtual:icons/ri/arrow-right-line";
 
   /** @typedef {{ updateReady: boolean, onupdate: () => void }} Props */
   /** @type {Props} */
@@ -49,6 +55,43 @@
       App.connection.error = friendlyError(error, "Could not open the disconnect dialog.");
     }
   }
+
+  async function createPlaylist() {
+    const name = await modal(PlaylistNameModal, {
+      title: "Create playlist",
+      submitLabel: "CREATE",
+    });
+    if (!name) return;
+    const playlist = await App.library.createPlaylist(name);
+    if (playlist) await goto(resolve(`/playlists/${playlist.id}`));
+  }
+
+  /** @param {import('@iroh-fm/client/types').Playlist} playlist @param {MouseEvent} [event] */
+  function openPlaylistActions(playlist, event) {
+    event?.preventDefault();
+    void modal(SnippetModal, {
+      snippet: PlaylistActions,
+      playlist,
+      labelledBy: "playlist-tab-actions-title",
+      class: "border-surface1 bg-crust shadow-float w-full max-w-xs border p-2",
+    });
+  }
+
+  /** @param {string} activePath */
+  function playlistNav(activePath) {
+    return (/** @type {HTMLElement} */ element) => {
+      const active = element.querySelector(`[href="${CSS.escape(activePath)}"]`);
+      if (active instanceof HTMLElement)
+        requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
+      const wheel = (/** @type {WheelEvent} */ event) => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+        event.preventDefault();
+        element.scrollLeft += event.deltaY;
+      };
+      element.addEventListener("wheel", wheel, { passive: false });
+      return () => element.removeEventListener("wheel", wheel);
+    };
+  }
 </script>
 
 <header
@@ -71,7 +114,11 @@
     class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
     ><img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-6" /></a
   >
-  <nav class="flex h-full min-w-0 items-stretch">
+  <nav
+    {@attach playlistNav(path)}
+    class="scrollbar-none flex h-full min-w-0 flex-1 items-stretch overflow-x-auto overscroll-x-contain"
+    aria-label="Library"
+  >
     <a
       href={resolve("/tracks")}
       onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}
@@ -96,13 +143,46 @@
       )
         ? 'bg-surface0 text-pink'
         : 'text-overlay1'}">STARRED</a
+      >
+    {#each App.library.playlists as playlist (playlist.id)}
+      <a
+        href={resolve(`/playlists/${playlist.id}`)}
+        {@attach longPress(() => openPlaylistActions(playlist))}
+        draggable="true"
+        oncontextmenu={(event) => openPlaylistActions(playlist, event)}
+        ondragstart={(event) => {
+          event.dataTransfer?.setData("text/iroh-playlist-id", playlist.id);
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+        }}
+        ondragover={(event) => event.preventDefault()}
+        ondrop={(event) => {
+          event.preventDefault();
+          const id = event.dataTransfer?.getData("text/iroh-playlist-id");
+          const from = App.library.playlists.find((item) => item.id === id);
+          if (from) void App.library.movePlaylist(from, App.library.playlists.indexOf(playlist));
+        }}
+        class="border-surface0 hover:bg-surface0 grid max-w-40 shrink-0 place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
+          `/playlists/${playlist.id}`,
+        )
+          ? 'bg-surface0 text-teal'
+          : 'text-overlay1'}"
+        title={`${playlist.name} — right-click for ordering actions`}
+        ><span class="max-w-32 truncate">{playlist.name}</span></a
+      >
+    {/each}
+    <button
+      type="button"
+      onclick={createPlaylist}
+      class="border-surface0 text-overlay1 hover:bg-surface0 hover:text-mauve grid w-9 shrink-0 place-items-center border-r"
+      title="Create playlist"
+      aria-label="Create playlist"><AddIcon class="text-sm" /></button
     >
   </nav>
   <div
     data-tauri-drag-region={desktop ? "" : undefined}
     ondblclick={() => desktop && windowCommand("toggleMaximize")}
     role="presentation"
-    class="h-full min-w-4 flex-1"
+    class="h-full min-w-2 shrink-0"
   ></div>
   <div class="flex h-full min-w-0 items-center">
     <div
@@ -189,3 +269,57 @@
       >{/if}
   </div>
 </header>
+
+{#snippet PlaylistActions(
+  /** @type {{ dismiss: () => void, playlist: import('@iroh-fm/client/types').Playlist }} */ {
+    dismiss,
+    playlist,
+  },
+)}
+  {const index = $derived(App.library.playlists.findIndex((item) => item.id === playlist.id))}
+  <p id="playlist-tab-actions-title" class="text-text truncate px-3 py-3 text-sm font-semibold">
+    {playlist.name}
+  </p>
+  <div class="grid grid-cols-2">
+    <button
+      type="button"
+      disabled={index <= 0}
+      onclick={() => {
+        dismiss();
+        void App.library.movePlaylist(playlist, 0);
+      }}
+      class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+      ><LeftIcon />First</button
+    >
+    <button
+      type="button"
+      disabled={index <= 0}
+      onclick={() => {
+        dismiss();
+        void App.library.movePlaylist(playlist, index - 1);
+      }}
+      class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+      ><LeftIcon />Left</button
+    >
+    <button
+      type="button"
+      disabled={index < 0 || index >= App.library.playlists.length - 1}
+      onclick={() => {
+        dismiss();
+        void App.library.movePlaylist(playlist, index + 1);
+      }}
+      class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+      ><RightIcon />Right</button
+    >
+    <button
+      type="button"
+      disabled={index < 0 || index >= App.library.playlists.length - 1}
+      onclick={() => {
+        dismiss();
+        void App.library.movePlaylist(playlist, App.library.playlists.length - 1);
+      }}
+      class="text-subtext0 hover:bg-surface0 disabled:text-overlay0 flex items-center gap-2 px-3 py-3 text-xs"
+      ><RightIcon />Last</button
+    >
+  </div>
+{/snippet}

@@ -5,14 +5,13 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use client::{Error, IrohConfig, Result};
 use iroh::{EndpointAddr, EndpointId, RelayUrl, SecretKey};
 use iroh_tickets::endpoint::EndpointTicket;
-use serde::Deserialize;
 use subsonic::{
     Backend, RemoteBackend, RequestContext, SubsonicConfig, SubsonicResponse, handle_request,
 };
@@ -35,17 +34,6 @@ async fn main() -> ExitCode {
 struct AppState {
     config: SubsonicConfig,
     backend: RemoteBackend,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawQuery {
-    u: Option<String>,
-    p: Option<String>,
-    t: Option<String>,
-    s: Option<String>,
-    f: Option<String>,
-    id: Option<String>,
-    query: Option<String>,
 }
 
 async fn run() -> Result<()> {
@@ -72,6 +60,11 @@ async fn run() -> Result<()> {
             "random"
         }
     );
+    if config.secret.is_none() {
+        eprintln!(
+            "[subsonic] warning: no --secret supplied; playlist ownership is tied to this adapter's Endpoint ID and will not survive a restart with a new random identity"
+        );
+    }
     let backend = connect_backend_with_retry(&config, backend_addr).await;
     let bind = config.bind.clone();
     let state = AppState { config, backend };
@@ -141,34 +134,36 @@ async fn connect_backend_with_retry(
 async fn rest_handler(
     State(state): State<AppState>,
     Path(rest): Path<String>,
-    Query(query): Query<RawQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     let normalized = normalize_rest_path(&rest);
-    let format = match query.f.as_deref() {
+    let query = raw_query
+        .as_deref()
+        .map(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let value = |key: &str| {
+        query
+            .iter()
+            .find_map(|(candidate, value)| (candidate == key).then_some(value.as_str()))
+    };
+    let format = match value("f") {
         Some("json") => ResponseFormat::Json,
         _ => ResponseFormat::Xml,
     };
-    let auth_mode = if query.t.is_some() && query.s.is_some() {
+    let auth_mode = if value("t").is_some() && value("s").is_some() {
         "token"
-    } else if query.p.is_some() {
+    } else if value("p").is_some() {
         "password"
     } else {
         "none"
     };
     let request = RequestContext {
         path: normalized,
-        query: [
-            query.u.map(|v| ("u".to_string(), v)),
-            query.p.map(|v| ("p".to_string(), v)),
-            query.t.map(|v| ("t".to_string(), v)),
-            query.s.map(|v| ("s".to_string(), v)),
-            query.f.map(|v| ("f".to_string(), v)),
-            query.id.map(|v| ("id".to_string(), v)),
-            query.query.map(|v| ("query".to_string(), v)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
+        query,
     };
     eprintln!(
         "[subsonic] request path={} format={} auth={} id={:?} query={:?}",
@@ -436,4 +431,5 @@ fn print_usage() {
     println!(
         "  subsonic --bind 127.0.0.1:4040 (--ticket <endpoint-ticket> | --endpoint <server-endpoint-id> [--relay <relay-url>]) [--secret <secret-key>]"
     );
+    println!("  Use a stable --secret to preserve playlist ownership across restarts.");
 }

@@ -355,6 +355,7 @@ export class Connection {
     this.app.library.artists = data.artists;
     this.app.library.replaceTracks(tracks, cachedIds);
     this.app.library.starred = data.starred;
+    this.app.library.playlists = data.playlists ?? [];
 
     // Search metadata and starred/list indexes are intentionally paid for while
     // the startup loader still owns the screen.
