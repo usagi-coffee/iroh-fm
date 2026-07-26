@@ -77,7 +77,7 @@ test("does not restore stale track focus after playing an album", async ({ page 
   await expect(page.getByRole("row")).toHaveCount(3);
 
   await page.getByRole("button", { name: "Play Track 001" }).click();
-  await page.getByRole("link", { name: "STARRED", exact: true }).click();
+  await page.getByRole("link", { name: "Starred", exact: true }).click();
   await page.getByRole("link", { name: "TRACKS", exact: true }).click();
   await expect(page.locator('[data-track-id="track-1"]')).toHaveAttribute("aria-selected", "true");
 

@@ -33,6 +33,7 @@
   import EditIcon from "virtual:icons/ri/edit-line";
   import LeftIcon from "virtual:icons/ri/arrow-left-line";
   import RightIcon from "virtual:icons/ri/arrow-right-line";
+  import StarIcon from "virtual:icons/ri/star-line";
 
   /** @typedef {{ updateReady: boolean, onupdate: () => void }} Props */
   /** @type {Props} */
@@ -222,12 +223,14 @@
     >
     <a
       href={resolve("/starred")}
-      class="border-surface0 hover:bg-surface0 grid place-items-center border-r px-3 font-semibold whitespace-nowrap transition {path.endsWith(
+      class="border-surface0 hover:bg-surface0 grid w-9 shrink-0 place-items-center border-r font-semibold transition {path.endsWith(
         '/starred',
       )
         ? 'bg-surface0 text-pink'
-        : 'text-overlay1'}">STARRED</a
-      >
+        : 'text-overlay1'}"
+      title="Starred"
+      aria-label="Starred"><StarIcon class="text-sm" /></a
+    >
     {#each App.library.playlists as playlist (playlist.id)}
       <a
         href={resolve(`/playlists/${playlist.id}`)}

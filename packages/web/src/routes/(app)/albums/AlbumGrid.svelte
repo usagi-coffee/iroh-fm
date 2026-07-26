@@ -13,7 +13,7 @@
   import AddIcon from "virtual:icons/ri/add-line";
   import CachedIcon from "virtual:icons/ri/check-line";
   import DownloadIcon from "virtual:icons/ri/download-line";
-  import HeartIcon from "virtual:icons/ri/heart-line";
+  import StarIcon from "virtual:icons/ri/star-line";
   import GridIcon from "virtual:icons/ri/layout-grid-line";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import SubtractIcon from "virtual:icons/ri/subtract-line";
@@ -321,7 +321,7 @@
                       ? 'text-pink pointer-events-auto translate-y-0 opacity-100'
                       : 'text-subtext0 pointer-events-none translate-y-1 opacity-0'}"
                     title={starred ? "Unstar album" : "Star album"}
-                    ><HeartIcon class="text-xs" /></button
+                    ><StarIcon class="text-xs" /></button
                   >
                   <button
                     type="button"

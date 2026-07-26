@@ -15,7 +15,7 @@
   import VirtualList from "$lib/ui/VirtualList.svelte";
   import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
 
-  import HeartIcon from "virtual:icons/ri/heart-line";
+  import StarIcon from "virtual:icons/ri/star-line";
   import AddIcon from "virtual:icons/ri/play-list-add-line";
   import DownIcon from "virtual:icons/ri/arrow-down-line";
   import DragIcon from "virtual:icons/ri/draggable";
@@ -461,7 +461,9 @@
                   )
                     ? 'text-pink !block'
                     : ''}"
-                  aria-label="Toggle favorite"><HeartIcon class="text-2xs" /></button
+                  aria-label={App.library.starredTrackIds.has(item.track.id)
+                    ? "Unstar track"
+                    : "Star track"}><StarIcon class="text-2xs" /></button
                 ><span class="text-4xs text-overlay0 tablet-xl:hidden truncate">
                   · {item.track.artist}</span
                 >
@@ -515,7 +517,7 @@
       void App.library.toggleStar(track);
     }}
     class="text-subtext0 hover:bg-surface0 hover:text-text flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
-    ><HeartIcon class="text-sm" />{App.library.starredTrackIds.has(track.id)
+    ><StarIcon class="text-sm" />{App.library.starredTrackIds.has(track.id)
       ? "Unstar"
       : "Star"}</button
   >

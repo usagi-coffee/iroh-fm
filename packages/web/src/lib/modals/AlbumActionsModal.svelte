@@ -6,7 +6,7 @@
   import { formatBytes, formatTime } from "$lib/utils.js";
 
   import DownloadIcon from "virtual:icons/ri/download-line";
-  import HeartIcon from "virtual:icons/ri/heart-line";
+  import StarIcon from "virtual:icons/ri/star-line";
   import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
 
   import Cover from "../../routes/Cover.svelte";
@@ -86,7 +86,7 @@
     onclick={toggleStar}
     disabled={!album}
     class="text-subtext0 hover:bg-surface0 hover:text-text disabled:text-overlay0 flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
-    ><HeartIcon class="text-sm" />{starred ? "Unstar album" : "Star album"}</button
+    ><StarIcon class="text-sm" />{starred ? "Unstar album" : "Star album"}</button
   >
   <button
     type="button"

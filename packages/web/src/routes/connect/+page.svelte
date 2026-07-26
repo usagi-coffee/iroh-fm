@@ -15,6 +15,7 @@
   import QrIcon from "virtual:icons/ri/qr-scan-2-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
   import SearchIcon from "virtual:icons/ri/search-line";
+  import StarIcon from "virtual:icons/ri/star-line";
   import PreviousIcon from "virtual:icons/ri/skip-back-fill";
   import NextIcon from "virtual:icons/ri/skip-forward-fill";
 
@@ -180,7 +181,7 @@
         <img src={asset("/pwa-icon-192.png")} alt="" class="size-6 rounded-md" />
       </div>
       <span class="border-surface0 bg-surface0 border-r px-4 py-2 font-semibold">TRACKS</span><span
-        class="text-overlay1 px-4 font-semibold">STARRED</span
+        class="text-overlay1 grid w-9 place-items-center"><StarIcon class="text-sm" /></span
       ><span class="text-overlay0 ml-auto px-4 font-mono">REMOTE LIBRARY</span>
     </header>
     <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(21rem,1fr)]">
