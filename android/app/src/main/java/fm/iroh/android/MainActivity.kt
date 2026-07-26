@@ -294,6 +294,7 @@ class MainActivity : ComponentActivity() {
             "cacheTrack",
             "cachedTrackIds",
             "cacheStats",
+            "clearCache",
             "setMemoryCacheSize",
         )
         val task = Runnable {
@@ -439,6 +440,14 @@ class MainActivity : ComponentActivity() {
             JSONObject()
                 .put("tracks", JSONObject().put("count", it.count).put("size", it.size))
                 .put("covers", JSONObject().put("count", 0).put("size", 0))
+        }
+        "clearCache" -> {
+            when (val kind = payload.getString("kind")) {
+                "tracks" -> NativeAudioCache.clearOfflineTracks()
+                "covers" -> Unit
+                else -> error("unknown offline cache kind: $kind")
+            }
+            JSONObject()
         }
         "setMemoryCacheSize" -> {
             NativeAudioCache.resizeMemoryCache(payload.getLong("bytes"))

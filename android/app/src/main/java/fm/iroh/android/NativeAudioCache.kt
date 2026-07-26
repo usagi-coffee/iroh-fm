@@ -461,6 +461,10 @@ object NativeAudioCache {
         return Stats(completeKeys, offlineCache.cacheSpace)
     }
 
+    fun clearOfflineTracks() {
+        for (key in offlineCache.keys.toList()) offlineCache.removeResource(key)
+    }
+
     /** Downloads a complete track into the RAM LRU without writing it to disk. */
     fun prefetchTrack(
         clientHandle: Long,
