@@ -27,3 +27,23 @@ test("redirects connected users away from connection setup", async ({ page }) =>
 
   await expect(page).toHaveURL(/\/tracks$/);
 });
+
+test("explains protocol version mismatches on the connect page", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("iroh-fm-ticket", "e2e-ticket");
+    localStorage.setItem("iroh-fm-secret", "e2e-secret");
+    localStorage.setItem(
+      "iroh-fm-e2e-bootstrap-error",
+      "unknown variant `ListPlaylists`, expected one of `GetLibrarySummary`, `ListTracks`",
+    );
+  });
+  await page.goto("/connect");
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("Connection failed.");
+  await expect(alert).toContainText("unknown variant `ListPlaylists`");
+  await expect(alert).toContainText("Protocol version mismatch.");
+  await expect(alert).toContainText(
+    "Upgrade both to the newest iroh.fm version, then try again.",
+  );
+});

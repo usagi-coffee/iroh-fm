@@ -141,6 +141,8 @@ export class FixtureClient {
   playlists = [];
 
   bootstrap() {
+    const bootstrapError = localStorage.getItem("iroh-fm-e2e-bootstrap-error");
+    if (bootstrapError) throw new Error(bootstrapError);
     const library = fixtureLibrary();
     return Promise.resolve({
       summary: {

@@ -108,6 +108,12 @@ export function friendlyError(error, fallback) {
   return message.replace(/^Error:\s*/i, "") || fallback;
 }
 
+/** @param {unknown} error */
+export function isProtocolVersionMismatch(error) {
+  const message = friendlyError(error, "");
+  return /\bunknown variant\b[\s\S]*\bexpected\b/i.test(message);
+}
+
 /** @param {import('@iroh-fm/client/types').ConnectionInfo} info */
 export function connectionAddressLabel(info) {
   if (!info.address) return "CONNECTING";

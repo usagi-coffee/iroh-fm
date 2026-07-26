@@ -5,7 +5,7 @@
   import { modal } from "$lib/modals/index.js";
   import SnippetModal from "$lib/modals/Snippet.svelte";
   import { App } from "$lib/runes/App.svelte.js";
-  import { friendlyError } from "$lib/utils.js";
+  import { friendlyError, isProtocolVersionMismatch } from "$lib/utils.js";
 
   import ArrowIcon from "virtual:icons/ri/arrow-right-line";
   import CloseIcon from "virtual:icons/ri/close-line";
@@ -49,6 +49,7 @@
   let showSecret = $state(false);
   let ticketLinkCopied = $state(false);
   let endpointCopied = $state(false);
+  const protocolVersionMismatch = $derived(isProtocolVersionMismatch(App.connection.error));
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let ticketCopiedTimer;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -434,9 +435,19 @@
 
         {#if App.connection.error}<div
             class="border-red bg-red/10 text-red border-l-2 px-3 py-2 text-xs leading-5"
+            role="alert"
           >
-            <strong>Connection failed.</strong>
-            {App.connection.error}
+            <p>
+              <strong>Connection failed.</strong>
+              {App.connection.error}
+            </p>
+            {#if protocolVersionMismatch}
+              <p class="border-red/25 mt-2 border-t pt-2">
+                <strong>Protocol version mismatch.</strong>
+                The app and server use different protocol versions. Upgrade both to the newest
+                iroh.fm version, then try again.
+              </p>
+            {/if}
           </div>{/if}
         <div>
           <button
