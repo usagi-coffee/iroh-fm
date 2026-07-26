@@ -1,6 +1,6 @@
 <script>
   import { goto } from "$app/navigation";
-  import { asset, resolve } from "$app/paths";
+  import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
   import ConfirmModal from "$lib/modals/ConfirmModal.svelte";
@@ -186,12 +186,6 @@
           ? "Connected directly — use cached music only"
           : "Connecting — use cached music only",
   )}
-  <a
-    href={resolve("/tracks")}
-    onclick={() => App.library.requestTrackFocus(App.player.currentTrack)}
-    class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
-    ><img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-6" /></a
-  >
   <nav
     {@attach playlistNav(path)}
     class="scrollbar-none flex h-full min-w-0 flex-1 items-stretch overflow-x-auto overscroll-x-contain"
