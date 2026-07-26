@@ -156,6 +156,11 @@ class DesktopInner extends NativeFixtureClient {
     });
   }
 
+  clearCache(kind) {
+    if (kind === "tracks") this.nativeCache.clear();
+    return Promise.resolve();
+  }
+
   prioritizeAudio() {}
   free() {}
 }
@@ -166,6 +171,7 @@ export class ClientCore {
   static buildInfo() {
     return Promise.resolve({
       platform: "Desktop",
+      commit: __BUILD_COMMIT__,
       epoch: __DESKTOP_EPOCH__,
       epochCommit: __DESKTOP_EPOCH_COMMIT__,
     });

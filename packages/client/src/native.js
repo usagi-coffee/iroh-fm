@@ -359,6 +359,18 @@ export class NativeMusicClient {
     return nativeRequest("cacheStats");
   }
 
+  /** @param {'tracks' | 'covers'} kind */
+  async clearCache(kind) {
+    if (kind !== "tracks" && kind !== "covers")
+      throw new Error(`unknown offline cache kind: ${kind}`);
+    if (kind === "covers") {
+      await Promise.allSettled(this.coverRequests.values());
+      for (const url of this.coverUrls.values()) URL.revokeObjectURL(url);
+      this.coverUrls.clear();
+    }
+    await nativeRequest("clearCache", { kind });
+  }
+
   /** @param {number} bytes */
   setMemoryCacheSize(bytes) {
     return nativeRequest("setMemoryCacheSize", { bytes });

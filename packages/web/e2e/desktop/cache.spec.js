@@ -57,3 +57,15 @@ test("clears the orange marker when Desktop evicts an LRU track", async ({ page 
   await expect(secondTrack.locator('[title="In memory cache"]')).toBeVisible();
   await expect(firstTrack.locator('[title="In memory cache"]')).toHaveCount(0);
 });
+
+test("clears the Desktop offline track cache from settings", async ({ page }) => {
+  await page.evaluate(() => {
+    globalThis.__IROH_FM_E2E_DESKTOP__.nativeCache.set("track-1", 320_044);
+  });
+  await page.getByRole("link", { name: "Connection settings" }).click();
+
+  await expect(page.getByText("1 · 313 KiB")).toBeVisible();
+  await page.getByRole("button", { name: "CLEAR TRACKS" }).click();
+  await page.getByRole("button", { name: "CLEAR", exact: true }).click();
+  await expect(page.getByText("0 · 0 B")).toHaveCount(2);
+});

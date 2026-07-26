@@ -27,6 +27,8 @@ export class Settings {
     quota: 0,
     persisted: false,
     supported: false,
+    clearing: "",
+    error: "",
   });
   /** @type {Promise<string>} */
   draftEndpointId = $state(this.endpointIdForSecret(this.#secret));
@@ -181,6 +183,23 @@ export class Settings {
       await navigator.storage.persist();
     } finally {
       this.storage.requesting = false;
+      await this.refreshStorageInfo();
+    }
+  };
+
+  /** @param {'tracks' | 'covers'} kind */
+  clearOfflineCache = async (kind) => {
+    const client = App.connection.client;
+    if (!client || this.storage.clearing) return;
+    this.storage.clearing = kind;
+    this.storage.error = "";
+    try {
+      await client.clearCache(kind);
+      if (kind === "tracks") await App.library.refreshCachedTracks();
+    } catch (error) {
+      this.storage.error = friendlyError(error, `Could not clear the offline ${kind} cache.`);
+    } finally {
+      this.storage.clearing = "";
       await this.refreshStorageInfo();
     }
   };

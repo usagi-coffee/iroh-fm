@@ -51,12 +51,19 @@ function trackCacheRequest(remoteId, trackId) {
   return new Request(url);
 }
 
-/** @param {string} name */
-async function cacheUsage(name) {
+/**
+ * @param {string} name
+ * @param {string} [remoteId]
+ */
+async function cacheUsage(name, remoteId) {
   if (!("caches" in globalThis)) return { count: 0, size: 0 };
   try {
     const cache = await globalThis.caches.open(name);
-    const requests = await cache.keys();
+    const requests = (await cache.keys()).filter(
+      (request) =>
+        remoteId === undefined ||
+        new URL(request.url).searchParams.get("server") === String(remoteId),
+    );
     let size = 0;
     for (const request of requests) {
       const response = await cache.match(request);
@@ -66,6 +73,26 @@ async function cacheUsage(name) {
   } catch {
     return { count: 0, size: 0 };
   }
+}
+
+/**
+ * @param {string} name
+ * @param {string} remoteId
+ */
+async function clearCacheEntries(name, remoteId) {
+  if (!("caches" in globalThis)) return;
+  const cache = await globalThis.caches.open(name);
+  const requests = (await cache.keys()).filter(
+    (request) => new URL(request.url).searchParams.get("server") === String(remoteId),
+  );
+  await Promise.all(requests.map((request) => cache.delete(request)));
+}
+
+/** @param {'tracks' | 'covers'} kind */
+function persistentCacheName(kind) {
+  if (kind === "tracks") return TRACK_CACHE_NAME;
+  if (kind === "covers") return COVER_CACHE_NAME;
+  throw new Error(`unknown offline cache kind: ${kind}`);
 }
 
 export class TrackMemoryCache {
@@ -286,7 +313,28 @@ export class MusicClient {
 
   async cacheStats() {
     if (typeof this.inner.cacheStats === "function") return this.inner.cacheStats();
-    return MusicClient.cacheStats();
+    const [tracks, covers] = await Promise.all([
+      cacheUsage(TRACK_CACHE_NAME, this.remoteId),
+      cacheUsage(COVER_CACHE_NAME, this.remoteId),
+    ]);
+    return { tracks, covers };
+  }
+
+  /** @param {'tracks' | 'covers'} kind */
+  async clearCache(kind) {
+    const cacheName = persistentCacheName(kind);
+    if (kind === "covers") {
+      const pendingUrls = [...this.coverCache.values()];
+      this.coverCache.clear();
+      for (const result of await Promise.allSettled(pendingUrls)) {
+        if (result.status === "fulfilled") URL.revokeObjectURL(result.value);
+      }
+    }
+    if (typeof this.inner.clearCache === "function") {
+      await this.inner.clearCache(kind);
+      return;
+    }
+    await clearCacheEntries(cacheName, this.remoteId);
   }
 
   get endpointId() {

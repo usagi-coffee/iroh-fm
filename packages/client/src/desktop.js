@@ -218,6 +218,11 @@ class DesktopInner {
     return invoke("desktop_cache_stats", { handle: this.handle });
   }
 
+  /** @param {'tracks' | 'covers'} kind */
+  clearCache(kind) {
+    return invoke("desktop_clear_cache", { handle: this.handle, kind });
+  }
+
   /** @param {number} bytes */
   setMemoryCacheSize(bytes) {
     return invoke("desktop_set_memory_cache_size", { handle: this.handle, bytes });

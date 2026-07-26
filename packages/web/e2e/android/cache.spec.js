@@ -52,3 +52,13 @@ test("discards stale native playback states after resume", async ({ page }) => {
   await expect(currentTrack).toHaveText("First Light");
   await expect(page.getByRole("slider", { name: "Playback position" })).toHaveValue("0");
 });
+
+test("clears the Android offline track cache from settings", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("iroh-fm-e2e-track-cache-count", "2"));
+  await page.getByRole("link", { name: "Connection settings" }).click();
+
+  await expect(page.getByText("2 · 625 KiB")).toBeVisible();
+  await page.getByRole("button", { name: "CLEAR TRACKS" }).click();
+  await page.getByRole("button", { name: "CLEAR", exact: true }).click();
+  await expect(page.getByText("0 · 0 B")).toHaveCount(2);
+});

@@ -88,6 +88,7 @@ export class ClientCore extends fixtureCore(AndroidMusicClient) {
   static buildInfo() {
     return Promise.resolve({
       platform: "Android",
+      commit: __BUILD_COMMIT__,
       epoch: __ANDROID_EPOCH__,
       epochCommit: __ANDROID_EPOCH_COMMIT__,
     });

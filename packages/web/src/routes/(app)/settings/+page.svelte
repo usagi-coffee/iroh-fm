@@ -2,6 +2,8 @@
   import { resolve } from "$app/paths";
 
   import { App } from "$lib/runes/App.svelte.js";
+  import ConfirmModal from "$lib/modals/ConfirmModal.svelte";
+  import { modal } from "$lib/modals/index.js";
   import {
     MAX_MEMORY_CACHE_MIB,
     MIN_MEMORY_CACHE_MIB,
@@ -12,6 +14,7 @@
 
   import CloseIcon from "virtual:icons/ri/close-line";
   import CopyIcon from "virtual:icons/ri/file-copy-line";
+  import DeleteIcon from "virtual:icons/ri/delete-bin-line";
 
   import { ClientCore } from "@iroh-fm/client/core";
 
@@ -65,6 +68,22 @@
       forcingUpdate = false;
       App.connection.error = friendlyError(error, "Could not reset the application update cache.");
     }
+  }
+
+  /** @param {'tracks' | 'covers'} kind */
+  async function clearOfflineCache(kind) {
+    const tracks = kind === "tracks";
+    const count = tracks ? settings.storage.tracks : settings.storage.covers;
+    const size = tracks ? settings.storage.trackSize : settings.storage.coverSize;
+    const confirmed = await modal(ConfirmModal, {
+      title: `Clear offline ${kind}?`,
+      message: `Remove ${count} cached ${kind} (${formatBytes(size)}) for this server? They can be downloaded again later.`,
+      confirmLabel: "CLEAR",
+      cancelLabel: "CANCEL",
+      eyebrow: "Offline cache",
+      danger: true,
+    });
+    if (confirmed) await settings.clearOfflineCache(kind);
   }
 </script>
 
@@ -248,14 +267,39 @@
             <p class="text-text mt-1 text-xs">
               {settings.storage.tracks} · {formatBytes(settings.storage.trackSize)}
             </p>
+            <button
+              type="button"
+              onclick={() => clearOfflineCache("tracks")}
+              disabled={settings.storage.loading ||
+                Boolean(settings.storage.clearing) ||
+                settings.storage.tracks === 0}
+              class="text-4xs text-red hover:text-maroon mt-2 inline-flex items-center gap-1.5 font-mono disabled:opacity-35"
+              ><DeleteIcon class="text-xs" />{settings.storage.clearing === "tracks"
+                ? "CLEARING…"
+                : "CLEAR TRACKS"}</button
+            >
           </div>
           <div class="pl-3">
             <p class="text-4xs text-overlay0 font-mono uppercase">Covers</p>
             <p class="text-text mt-1 text-xs">
               {settings.storage.covers} · {formatBytes(settings.storage.coverSize)}
             </p>
+            <button
+              type="button"
+              onclick={() => clearOfflineCache("covers")}
+              disabled={settings.storage.loading ||
+                Boolean(settings.storage.clearing) ||
+                settings.storage.covers === 0}
+              class="text-4xs text-red hover:text-maroon mt-2 inline-flex items-center gap-1.5 font-mono disabled:opacity-35"
+              ><DeleteIcon class="text-xs" />{settings.storage.clearing === "covers"
+                ? "CLEARING…"
+                : "CLEAR COVERS"}</button
+            >
           </div>
         </div>
+        {#if settings.storage.error}
+          <p class="text-3xs text-red mt-2" role="alert">{settings.storage.error}</p>
+        {/if}
         <div class="border-surface0 mt-3 flex items-center justify-between gap-3 border-t pt-3">
           <div class="min-w-0">
             <p class="text-3xs text-subtext0">

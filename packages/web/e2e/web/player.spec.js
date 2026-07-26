@@ -143,6 +143,10 @@ test("filters tracks by title", async ({ page }) => {
 test("edits client settings through the settings model", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "web", "Native clients use platform-owned settings.");
 
+  await page.evaluate(() => {
+    localStorage.setItem("iroh-fm-e2e-track-cache-count", "2");
+    localStorage.setItem("iroh-fm-e2e-cover-cache-count", "3");
+  });
   await page.getByRole("link", { name: "Connection settings" }).click();
   await expect(page.getByRole("heading", { name: "Client settings" })).toBeVisible();
 
@@ -154,6 +158,20 @@ test("edits client settings through the settings model", async ({ page }, testIn
   const memoryCache = page.getByRole("spinbutton", { name: "Memory cache size in MiB" });
   await memoryCache.fill("64");
   await expect(memoryCache).toHaveValue("64");
+
+  await expect(page.getByText("2 · 625 KiB")).toBeVisible();
+  await expect(page.getByText("3 · 3.0 KiB")).toBeVisible();
+
+  await page.getByRole("button", { name: "CLEAR TRACKS" }).click();
+  await expect(page.getByRole("heading", { name: "Clear offline tracks?" })).toBeVisible();
+  await page.getByRole("button", { name: "CLEAR", exact: true }).click();
+  await expect(page.getByText("0 · 0 B")).toBeVisible();
+  await expect(page.getByText("3 · 3.0 KiB")).toBeVisible();
+
+  await page.getByRole("button", { name: "CLEAR COVERS" }).click();
+  await expect(page.getByRole("heading", { name: "Clear offline covers?" })).toBeVisible();
+  await page.getByRole("button", { name: "CLEAR", exact: true }).click();
+  await expect(page.getByText("0 · 0 B")).toHaveCount(2);
 });
 
 test("shows resolved album covers immediately after remounting", async ({ page }) => {

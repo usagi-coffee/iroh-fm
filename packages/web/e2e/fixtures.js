@@ -195,6 +195,24 @@ export class FixtureClient {
     return Boolean(result.cached);
   }
 
+  cacheStats() {
+    const configuredTrackCount = localStorage.getItem("iroh-fm-e2e-track-cache-count");
+    const trackCount =
+      configuredTrackCount === null ? this.cached.size : Number(configuredTrackCount) || 0;
+    const coverCount = Number(localStorage.getItem("iroh-fm-e2e-cover-cache-count")) || 0;
+    return Promise.resolve({
+      tracks: { count: trackCount, size: trackCount * TRACK_BYTES },
+      covers: { count: coverCount, size: coverCount * 1_024 },
+    });
+  }
+
+  /** @param {'tracks' | 'covers'} kind */
+  clearCache(kind) {
+    localStorage.setItem(`iroh-fm-e2e-${kind === "tracks" ? "track" : "cover"}-cache-count`, "0");
+    if (kind === "tracks") this.cached.clear();
+    return Promise.resolve();
+  }
+
   request() {
     return Promise.resolve({});
   }
