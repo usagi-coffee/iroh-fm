@@ -395,12 +395,13 @@ export class Player {
   }
 
   get playbackVolume() {
-    return this.volume;
+    return Math.sqrt(this.volume);
   }
 
   /** @param {string | number} value */
   set playbackVolume(value) {
-    this.changeVolume(value);
+    const sliderPosition = Math.min(1, Math.max(0, Number(value)));
+    this.changeVolume(sliderPosition ** 2);
   }
 
   toggleRepeat() {

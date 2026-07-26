@@ -108,6 +108,15 @@ test("seeks five seconds right and left with the keyboard", async ({ page }) => 
   await expect.poll(async () => Number(await position.inputValue())).toBeLessThan(moved - 4);
 });
 
+test("gives lower volumes more slider range", async ({ page }) => {
+  const volume = page.getByRole("slider", { name: "Volume" });
+
+  await volume.fill("0.5");
+
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("iroh-fm-volume"))).toBe("0.25");
+  await expect(volume).toHaveValue("0.5");
+});
+
 test("filters tracks by title", async ({ page }) => {
   await page.getByPlaceholder("Filter artist, title, album…").fill("nebula");
   await expect(page).toHaveURL(/\/tracks\?query=nebula$/);
