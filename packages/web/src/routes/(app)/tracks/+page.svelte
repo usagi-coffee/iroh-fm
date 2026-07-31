@@ -14,7 +14,12 @@
   const tracks = $derived(App.library.getFilteredTracks(false, query));
   const items = $derived(App.library.getTrackListItems(tracks));
   /** @type {string | null} */
-  let albumFocusTrackId = $state(null);
+  let albumFocusTrackId = $derived(
+    App.library.pendingTrackFocusId ??
+      page.state.focusTrackId ??
+      App.player.currentTrack?.id ??
+      null,
+  );
   let albumFocusRequest = $state(0);
 
   /** @param {string} value */

@@ -319,6 +319,11 @@ test("centers the playing album without shifting after navigation", async ({ pag
   });
   expect(Math.abs(offsets.at(-1))).toBeLessThan(15);
   expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1);
+
+  await page.getByRole("link", { name: "TRACKS", exact: true }).click();
+  const sidebarPlayingAlbum = page.locator(`[data-album-id="${albumId}"]`);
+  await expect(sidebarPlayingAlbum).toBeVisible();
+  await expect.poll(() => albumCenterOffset(sidebarPlayingAlbum)).toBeLessThan(15);
 });
 
 test("centers the sidebar for explicit track and album-header play clicks", async ({
