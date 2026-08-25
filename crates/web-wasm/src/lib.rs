@@ -5,8 +5,8 @@ use futures_util::{
     future::{AbortHandle, Abortable},
 };
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, TransportAddr, endpoint::Connection,
-    endpoint::presets,
+    Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
+    endpoint::{Connection, default_relay_mode, presets},
 };
 use iroh_tickets::endpoint::EndpointTicket;
 use js_sys::Uint8Array;
@@ -316,6 +316,10 @@ impl IrohFmClient {
     ) -> Result<IrohFmClient, JsError> {
         let remote_id = address.id.to_string();
         let mut builder = Endpoint::builder(presets::N0);
+        let target_relays = address.relay_urls().cloned().collect::<Vec<_>>();
+        if !target_relays.is_empty() {
+            builder = builder.relay_mode(relay_mode_with_n0_fallback(target_relays));
+        }
         if let Some(secret) = secret.filter(|secret| !secret.trim().is_empty()) {
             let secret = SecretKey::from_str(secret.trim())
                 .map_err(|error| js_error(format!("invalid client secret: {error}")))?;
@@ -340,6 +344,12 @@ impl IrohFmClient {
         send.finish().map_err(to_js_error)?;
         read_response(&mut recv).await
     }
+}
+
+fn relay_mode_with_n0_fallback(target_relays: Vec<RelayUrl>) -> RelayMode {
+    let relay_map = RelayMode::custom(target_relays).relay_map();
+    relay_map.extend(&default_relay_mode().relay_map());
+    RelayMode::Custom(relay_map)
 }
 
 async fn write_json<T: serde::Serialize>(
@@ -402,5 +412,16 @@ mod tests {
         assert_eq!(details.relays.len(), 2);
         assert!(details.relays.iter().any(|url| url.contains("one.example")));
         assert!(details.relays.iter().any(|url| url.contains("two.example")));
+    }
+
+    #[test]
+    fn ticket_relays_are_configured_with_n0_fallbacks() {
+        let custom: RelayUrl = "https://relay.example".parse().unwrap();
+        let relay_map = relay_mode_with_n0_fallback(vec![custom.clone()]).relay_map();
+
+        assert!(relay_map.contains(&custom));
+        for fallback in default_relay_mode().relay_map().urls::<Vec<_>>() {
+            assert!(relay_map.contains(&fallback));
+        }
     }
 }

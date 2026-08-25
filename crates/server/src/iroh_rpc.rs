@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, fmt::Write as _};
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
-    endpoint::{Connection, RecvStream, SendStream, presets},
+    endpoint::{Connection, RecvStream, SendStream, default_relay_mode, presets},
 };
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, TrackId};
@@ -69,7 +69,8 @@ impl RemoteClient {
             "[server-rpc-client] local endpoint startup remote_addr={:?}",
             addr
         );
-        let endpoint = endpoint_builder(&config).bind().await?;
+        let target_relays = addr.relay_urls().cloned().collect();
+        let endpoint = endpoint_builder(&config, target_relays).bind().await?;
         eprintln!(
             "[server-rpc-client] local endpoint ready local_endpoint={}",
             endpoint.id()
@@ -249,7 +250,7 @@ impl RemoteClient {
 }
 
 pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Result<ServerHandle> {
-    let endpoint = endpoint_builder(config)
+    let endpoint = endpoint_builder(config, Vec::new())
         .alpns(vec![IROH_ALPN.to_vec()])
         .bind()
         .await?;
@@ -454,7 +455,7 @@ fn peer_policy_label(peers: &BTreeSet<EndpointId>) -> String {
     label
 }
 
-fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
+fn endpoint_builder(config: &IrohConfig, target_relays: Vec<RelayUrl>) -> iroh::endpoint::Builder {
     let mut builder = Endpoint::builder(presets::N0).address_lookup(MdnsAddressLookup::builder());
     if let Some(secret) = &config.secret {
         let secret = SecretKey::from_str(secret)
@@ -468,8 +469,16 @@ fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
             .map_err(|error| Error::InvalidRequest(format!("invalid --relay: {error}")))
             .expect("validated relay");
         builder = builder.relay_mode(RelayMode::custom([relay]));
+    } else if !target_relays.is_empty() {
+        builder = builder.relay_mode(relay_mode_with_n0_fallback(target_relays));
     }
     builder
+}
+
+fn relay_mode_with_n0_fallback(target_relays: Vec<RelayUrl>) -> RelayMode {
+    let relay_map = RelayMode::custom(target_relays).relay_map();
+    relay_map.extend(&default_relay_mode().relay_map());
+    RelayMode::Custom(relay_map)
 }
 
 async fn write_json<T: serde::Serialize>(

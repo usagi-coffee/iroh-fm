@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
-    endpoint::{Connection, RecvStream, presets},
+    endpoint::{Connection, RecvStream, default_relay_mode, presets},
 };
 #[cfg(not(target_os = "android"))]
 use iroh_mdns_address_lookup::MdnsAddressLookup;
@@ -127,7 +127,8 @@ impl Client {
 
     pub async fn connect_addr_with_config(addr: EndpointAddr, config: IrohConfig) -> Result<Self> {
         rpc_log!("[client-rpc] local endpoint startup remote_addr={addr:?}");
-        let builder = endpoint_builder(&config);
+        let target_relays = addr.relay_urls().cloned().collect();
+        let builder = endpoint_builder(&config, target_relays);
         rpc_log!(
             "[client-rpc] local endpoint bind task spawned mdns={}",
             if cfg!(target_os = "android") {
@@ -322,7 +323,7 @@ pub struct ConnectionInfo {
     pub received_bytes: u64,
 }
 
-fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
+fn endpoint_builder(config: &IrohConfig, target_relays: Vec<RelayUrl>) -> iroh::endpoint::Builder {
     let mut builder = Endpoint::builder(presets::N0);
     #[cfg(not(target_os = "android"))]
     {
@@ -340,8 +341,16 @@ fn endpoint_builder(config: &IrohConfig) -> iroh::endpoint::Builder {
             .map_err(|error| Error::InvalidRequest(format!("invalid --relay: {error}")))
             .expect("validated relay");
         builder = builder.relay_mode(RelayMode::custom([relay]));
+    } else if !target_relays.is_empty() {
+        builder = builder.relay_mode(relay_mode_with_n0_fallback(target_relays));
     }
     builder
+}
+
+fn relay_mode_with_n0_fallback(target_relays: Vec<RelayUrl>) -> RelayMode {
+    let relay_map = RelayMode::custom(target_relays).relay_map();
+    relay_map.extend(&default_relay_mode().relay_map());
+    RelayMode::Custom(relay_map)
 }
 
 async fn write_json<T: serde::Serialize>(
