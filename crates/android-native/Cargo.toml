@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 base64 = "0.22"
 client = { path = "../client" }
 iroh.workspace = true
-iroh-dns = "1.0.3"
+iroh-dns = "1.1.0"
 iroh-tickets.workspace = true
 jni = "0.21"
 protocol = { path = "../protocol" }
