@@ -1,10 +1,11 @@
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeSet, fmt::Write as _};
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
-    endpoint::{Connection, RecvStream, SendStream, default_relay_mode, presets},
+    endpoint::{BindOpts, Connection, RecvStream, SendStream, default_relay_mode, presets},
 };
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::{BackendRequest, BackendResponse, IROH_ALPN, StreamDescriptor, TrackId};
@@ -250,13 +251,29 @@ impl RemoteClient {
 }
 
 pub async fn spawn_iroh_server(server: MusicServer, config: &IrohConfig) -> Result<ServerHandle> {
-    let endpoint = endpoint_builder(config, Vec::new())
-        .alpns(vec![IROH_ALPN.to_vec()])
-        .bind()
-        .await?;
+    spawn_iroh_server_with_port(server, config, None).await
+}
+
+pub async fn spawn_iroh_server_with_port(
+    server: MusicServer,
+    config: &IrohConfig,
+    port: Option<u16>,
+) -> Result<ServerHandle> {
+    if port == Some(0) {
+        return Err(Error::InvalidRequest(
+            "UDP port must be between 1 and 65535".to_string(),
+        ));
+    }
+    let builder = endpoint_builder(config, Vec::new());
+    let builder = match port {
+        Some(port) => bind_server_port(builder, port),
+        None => builder,
+    };
+    let endpoint = builder.alpns(vec![IROH_ALPN.to_vec()]).bind().await?;
     eprintln!(
-        "[server-rpc] listening endpoint={} relay={} peers={}",
+        "[server-rpc] listening endpoint={} udp_port={} relay={} peers={}",
         endpoint.id(),
+        port.map_or_else(|| "<ephemeral>".to_string(), |port| port.to_string()),
         config.relay.as_deref().unwrap_or("<none>"),
         peer_policy_label(&config.peers)
     );
@@ -475,6 +492,18 @@ fn endpoint_builder(config: &IrohConfig, target_relays: Vec<RelayUrl>) -> iroh::
     builder
 }
 
+fn bind_server_port(builder: iroh::endpoint::Builder, port: u16) -> iroh::endpoint::Builder {
+    builder
+        .clear_ip_transports()
+        .bind_addr((Ipv4Addr::UNSPECIFIED, port))
+        .expect("IPv4 wildcard address is valid")
+        .bind_addr_with_opts(
+            (Ipv6Addr::UNSPECIFIED, port),
+            BindOpts::default().set_is_required(false),
+        )
+        .expect("IPv6 wildcard address is valid")
+}
+
 fn relay_mode_with_n0_fallback(target_relays: Vec<RelayUrl>) -> RelayMode {
     let relay_map = RelayMode::custom(target_relays).relay_map();
     relay_map.extend(&default_relay_mode().relay_map());
@@ -533,5 +562,31 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::ResolveId { .. } => "ResolveId",
         BackendRequest::Search { .. } => "Search",
         BackendRequest::OpenStream { .. } => "OpenStream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::UdpSocket;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn server_can_bind_all_ip_sockets_to_a_fixed_port() {
+        let reservation = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("reserve UDP port");
+        let port = reservation.local_addr().expect("reserved address").port();
+        drop(reservation);
+
+        let builder = Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled);
+        let endpoint = bind_server_port(builder, port)
+            .bind()
+            .await
+            .expect("bind endpoint to fixed port");
+        let sockets = endpoint.bound_sockets();
+
+        assert!(sockets.iter().any(std::net::SocketAddr::is_ipv4));
+        assert!(sockets.iter().all(|addr| addr.port() == port));
+
+        endpoint.close().await;
     }
 }

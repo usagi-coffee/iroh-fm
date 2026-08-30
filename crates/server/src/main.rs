@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use iroh::{EndpointId, RelayUrl};
 use iroh_tickets::endpoint::EndpointTicket;
-use server::{BackendRequest, IrohConfig, MusicServer, ServerConfig, spawn_iroh_server};
+use server::{BackendRequest, IrohConfig, MusicServer, ServerConfig, spawn_iroh_server_with_port};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -24,7 +24,7 @@ async fn run() -> server::Result<()> {
         return Ok(());
     }
 
-    let (music_dir, iroh) = parse_config(args.into_iter())?;
+    let (music_dir, iroh, port) = parse_config(args.into_iter())?;
     if let Some(secret) = &iroh.secret {
         let _ = iroh::SecretKey::from_str(secret)
             .map_err(|error| server::Error::InvalidRequest(format!("invalid --secret: {error}")))?;
@@ -40,7 +40,7 @@ async fn run() -> server::Result<()> {
     let config = ServerConfig::new(music_dir);
     let server = MusicServer::load(config)?;
     let summary = server.handle(BackendRequest::GetLibrarySummary)?;
-    let handle = spawn_iroh_server(server, &iroh).await?;
+    let handle = spawn_iroh_server_with_port(server, &iroh, port).await?;
     // A browser can only reach an iroh endpoint through a relay. Wait until
     // the endpoint has one before printing the shareable ticket so the static
     // web client always receives usable dialing information.
@@ -56,6 +56,9 @@ async fn run() -> server::Result<()> {
     let ticket = EndpointTicket::from(ticket_addr);
     println!("server backend ready: {summary:?}");
     println!("endpoint={endpoint}");
+    if let Some(port) = port {
+        println!("udp_port={port}");
+    }
     println!("ticket={ticket}");
     if iroh.peers.is_empty() {
         println!("peers=open");
@@ -81,9 +84,10 @@ async fn run() -> server::Result<()> {
 
 fn parse_config(
     args: impl Iterator<Item = String>,
-) -> server::Result<(std::path::PathBuf, IrohConfig)> {
+) -> server::Result<(std::path::PathBuf, IrohConfig, Option<u16>)> {
     let mut music_dir = None;
     let mut iroh = IrohConfig::default();
+    let mut port = None;
     let mut args = args.peekable();
 
     while let Some(arg) = args.next() {
@@ -91,6 +95,10 @@ fn parse_config(
             "--music-dir" => music_dir = args.next().map(Into::into),
             "--secret" => iroh.secret = Some(args.next().ok_or_else(missing_value)?),
             "--relay" => iroh.relay = Some(args.next().ok_or_else(missing_value)?),
+            "--port" => {
+                let value = args.next().ok_or_else(missing_value)?;
+                port = Some(parse_udp_port(&value)?);
+            }
             "--peer" => {
                 let peer = EndpointId::from_str(&args.next().ok_or_else(missing_value)?).map_err(
                     |error| server::Error::InvalidRequest(format!("invalid --peer: {error}")),
@@ -108,7 +116,16 @@ fn parse_config(
     let music_dir = music_dir.ok_or_else(|| {
         server::Error::InvalidRequest("expected --music-dir /path/to/music".to_string())
     })?;
-    Ok((music_dir, iroh))
+    Ok((music_dir, iroh, port))
+}
+
+fn parse_udp_port(value: &str) -> server::Result<u16> {
+    match value.parse::<u16>() {
+        Ok(0) | Err(_) => Err(server::Error::InvalidRequest(format!(
+            "invalid --port: expected an integer from 1 to 65535, got {value}"
+        ))),
+        Ok(port) => Ok(port),
+    }
 }
 
 fn missing_value() -> server::Error {
@@ -118,6 +135,35 @@ fn missing_value() -> server::Error {
 fn print_usage() {
     println!("usage:");
     println!(
-        "  server --music-dir /path/to/music [--secret <secret-key>] [--relay <relay-url>] [--peer <endpoint-id> ...]"
+        "  server --music-dir /path/to/music [--secret <secret-key>] [--relay <relay-url>] [--port <udp-port>] [--peer <endpoint-id> ...]"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_optional_udp_port() {
+        let (_, _, port) = parse_config(
+            ["--music-dir", "/music", "--port", "50608"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .expect("parse config");
+
+        assert_eq!(port, Some(50608));
+    }
+
+    #[test]
+    fn rejects_ephemeral_udp_port() {
+        let error = parse_config(
+            ["--music-dir", "/music", "--port", "0"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .expect_err("port zero must be rejected");
+
+        assert!(error.to_string().contains("1 to 65535"));
+    }
 }

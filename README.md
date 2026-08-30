@@ -63,9 +63,12 @@ For a stable server identity, a custom relay, or a client allowlist:
 iroh-fm \
   --music-dir /path/to/music \
   --secret your-server-secret \
+  --port 50608 \
   --relay https://relay.example.com \
   --peer allowed-client-endpoint-id
 ```
+
+`--port` pins the iroh UDP sockets to that port instead of choosing an ephemeral one. Use it together with `--secret` when you need direct addresses in an existing ticket to remain valid after a server restart, and allow that UDP port through the host firewall.
 
 `--peer` is repeatable. Leave it out to accept any client that has the server ticket. The web player can generate and retain its own client secret; its endpoint ID is available in Settings for allowlisting.
 

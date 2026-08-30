@@ -9,7 +9,9 @@ pub mod stream;
 pub use config::ServerConfig;
 pub use error::{Error, Result};
 pub use index::{CoverArtSource, LibraryIndex};
-pub use iroh_rpc::{IrohConfig, RemoteClient, ServerHandle, spawn_iroh_server};
+pub use iroh_rpc::{
+    IrohConfig, RemoteClient, ServerHandle, spawn_iroh_server, spawn_iroh_server_with_port,
+};
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
     IROH_ALPN, Playlist, PlaylistId, ResolvedId, SearchQuery, StreamDescriptor, Track, TrackId,
