@@ -8,21 +8,7 @@
   const { overlay } = $props();
 </script>
 
-{#if Updater.androidRestartRequired}
-  <div
-    class:fixed={overlay}
-    class:top-0={overlay}
-    class:left-0={overlay}
-    class:z-50={overlay}
-    class="border-yellow/40 bg-crust text-yellow flex min-h-9 w-full items-center justify-center gap-3 border-b px-3 py-2 text-center"
-    role="status"
-  >
-    <RefreshIcon class="text-sm" />
-    <span class="text-3xs font-mono font-bold tracking-[.08em] uppercase"
-      >UPDATE INSTALLED — RESTART THE APP</span
-    >
-  </div>
-{:else if Updater.nativeUpgrade}
+{#if Updater.nativeUpgrade}
   <div
     class:fixed={overlay}
     class:top-0={overlay}

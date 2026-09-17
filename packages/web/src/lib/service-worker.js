@@ -435,8 +435,7 @@ export function subscribeToServiceWorkerStatus(listener) {
   };
 }
 
-/** @param {{ reload?: boolean }} [options] */
-export async function activateServiceWorkerUpdate({ reload = true } = {}) {
+export async function activateServiceWorkerUpdate() {
   if (DEVELOPMENT || nativeUpgrade) return false;
   try {
     let remoteBuild;
@@ -464,11 +463,10 @@ export async function activateServiceWorkerUpdate({ reload = true } = {}) {
     const controlled = waitForController(worker);
     await approve(worker);
     await controlled;
-    if (reload) location.reload();
+    location.reload();
     return true;
   } catch (error) {
     logError("activation:fallback", error);
-    if (!reload) return false;
     try {
       await remoteVersion();
     } catch (networkError) {

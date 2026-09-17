@@ -11,7 +11,6 @@ import { ClientCore } from "@iroh-fm/client/core";
 class UpdateManager {
   ready = $state(false);
   dismissed = $state(false);
-  androidRestartRequired = $state(false);
   applying = $state(false);
   /** @type {ReturnType<typeof currentNativeRequirement>} */
   nativeUpgrade = $state(null);
@@ -47,13 +46,7 @@ class UpdateManager {
     if (this.applying) return;
     this.applying = true;
     try {
-      const native = await this.build;
-      const reload = native?.platform !== "Android";
-      if (!(await activateServiceWorkerUpdate({ reload }))) this.applying = false;
-      else if (!reload) {
-        this.applying = false;
-        this.androidRestartRequired = true;
-      }
+      if (!(await activateServiceWorkerUpdate())) this.applying = false;
     } catch (error) {
       this.applying = false;
       console.error("[web-update] activation failed", error);
