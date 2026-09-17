@@ -258,6 +258,9 @@ test("keeps track positions stable when reversing a deep scroll", async ({ page 
   await viewport.hover();
   await page.mouse.wheel(0, 16_000);
   await page.waitForTimeout(200);
+  const initialScrollTop = await viewport.evaluate((element) => element.scrollTop);
+  expect(initialScrollTop).toBeGreaterThan(10_000);
+  let previousScrollTop = initialScrollTop;
   const positions = new Map();
   for (const delta of [-1400, -1400, -1400, ...Array(40).fill(-20)]) {
     await page.mouse.wheel(0, delta);
@@ -267,6 +270,7 @@ test("keeps track positions stable when reversing a deep scroll", async ({ page 
       const rect = element.getBoundingClientRect();
       const rows = [...element.querySelectorAll("[data-list-index]")];
       return {
+        scrollTop: element.scrollTop,
         topGap: rows[0].getBoundingClientRect().top - rect.top,
         bottomGap: rect.bottom - rows.at(-1).getBoundingClientRect().bottom,
         positions: rows.map((row) => [
@@ -275,6 +279,8 @@ test("keeps track positions stable when reversing a deep scroll", async ({ page 
         ]),
       };
     });
+    expect(sample.scrollTop).toBeLessThanOrEqual(previousScrollTop);
+    previousScrollTop = sample.scrollTop;
     expect(sample.topGap).toBeLessThanOrEqual(0);
     expect(sample.bottomGap).toBeLessThanOrEqual(0);
     for (const [index, position] of sample.positions) {
@@ -282,6 +288,7 @@ test("keeps track positions stable when reversing a deep scroll", async ({ page 
       positions.set(index, position);
     }
   }
+  expect(previousScrollTop).toBeLessThan(initialScrollTop - 4500);
 });
 
 test("allows virtualized track and album lists to reach their bottom edge", async ({
