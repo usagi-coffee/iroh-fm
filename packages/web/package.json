@@ -17,6 +17,7 @@
     "check": "bun run build:wasm && bun run check:prepared",
     "check:prepared": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
     "check:watch": "bun run generate:types && svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
+    "test:service-worker": "node --test scripts/service-worker.test.js",
     "test:e2e": "bun run generate:types && playwright test",
     "test:e2e:ui": "bun run generate:types && playwright test --ui",
     "desktop": "tauri",

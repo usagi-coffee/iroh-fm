@@ -52,15 +52,25 @@ self.addEventListener("install", (event) => {
         files: SHELL_FILES.length,
         metadata: METADATA,
       });
+      let shellReady = false;
       try {
         const cache = await caches.open(CACHE_NAME);
-        await cacheShell(cache);
-        await verifyShell(cache);
+        // A new worker can share the active worker's build/cache. Never
+        // re-download or delete a complete offline shell during reinstallation.
+        shellReady = await verifyShell(cache).then(
+          () => true,
+          () => false,
+        );
+        if (!shellReady) {
+          await cacheShell(cache);
+          await verifyShell(cache);
+          shellReady = true;
+        }
         const approved = await approvedShell();
         log("install:ready", { cache: CACHE_NAME, approved });
       } catch (error) {
         logError("install:failed", error, { cache: CACHE_NAME });
-        await caches.delete(CACHE_NAME).catch(() => {});
+        if (!shellReady) await caches.delete(CACHE_NAME).catch(() => {});
         throw error;
       }
     })(),
@@ -155,6 +165,9 @@ async function cacheShell(cache) {
 
 async function verifyShell(cache) {
   if (ENTRYPOINTS.length < 2) throw new Error("the application entrypoints are missing");
+  for (const path of SHELL_FILES) {
+    if (!(await cache.match(path))) throw new Error(`the application resource is missing: ${path}`);
+  }
   for (const path of FALLBACKS) {
     const response = await cache.match(path);
     if (!response) throw new Error(`the application document is missing: ${path}`);
