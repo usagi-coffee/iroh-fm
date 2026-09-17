@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature"
+  short_description: "Implementuj funkcje z pełną weryfikacją"
+  default_prompt: "Use $feature to implement and verify this feature."

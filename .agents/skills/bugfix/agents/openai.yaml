@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bugfix"
+  short_description: "Naprawiaj błędy z testem regresyjnym"
+  default_prompt: "Use $bugfix to diagnose, fix, and verify this bug."
