@@ -12,6 +12,13 @@ export function longPress(open, delay = 500) {
     /** @type {{ x: number, y: number } | undefined} */
     let origin;
     let opened = false;
+    let dragDisabled = false;
+
+    const restoreDrag = () => {
+      if (!dragDisabled) return;
+      element.draggable = true;
+      dragDisabled = false;
+    };
 
     const clear = () => {
       clearTimeout(timer);
@@ -20,7 +27,17 @@ export function longPress(open, delay = 500) {
     };
     /** @param {PointerEvent} event */
     const start = (event) => {
-      if (event.pointerType === "mouse" || event.button !== 0) return;
+      if (event.pointerType === "mouse") {
+        restoreDrag();
+        return;
+      }
+      if (event.button !== 0) return;
+      // Native touch dragging can cancel the pointer before the hold timer fires.
+      // Keep it disabled through release; a later mouse press restores desktop dragging.
+      if (element.draggable) {
+        element.draggable = false;
+        dragDisabled = true;
+      }
       clear();
       opened = false;
       origin = { x: event.clientX, y: event.clientY };
@@ -55,6 +72,7 @@ export function longPress(open, delay = 500) {
     element.addEventListener("contextmenu", suppressContextMenu, true);
     return () => {
       clear();
+      restoreDrag();
       element.removeEventListener("pointerdown", start);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", clear);

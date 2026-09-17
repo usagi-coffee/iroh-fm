@@ -6,6 +6,32 @@ test.beforeEach(async ({ page }) => {
   await prepareLibrary(page);
 });
 
+test("touch holds open album and track actions instead of starting a playlist drag", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  const targets = [
+    page.getByRole("button", { name: /^Play album / }).first(),
+    page.locator('[data-track-id="track-1"]'),
+  ];
+  for (const target of targets) {
+    await target.dispatchEvent("pointerdown", {
+      pointerType: "touch",
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    await expect(target).toHaveAttribute("draggable", "false");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await target.dispatchEvent("pointerup", { pointerType: "touch" });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await target.dispatchEvent("pointerdown", { pointerType: "mouse", button: 0 });
+    await expect(target).toHaveAttribute("draggable", "true");
+    await target.dispatchEvent("pointerup", { pointerType: "mouse" });
+  }
+});
+
 test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) => {
   await page.getByRole("button", { name: "Create playlist" }).click();
   await expect(page).toHaveURL(/\/playlists\/playlist-1$/);
