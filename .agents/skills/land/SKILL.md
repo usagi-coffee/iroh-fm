@@ -16,7 +16,11 @@ First, rebase the current branch onto it.
 git fetch local && GIT_EDITOR=true git rebase local/master
 ```
 
-If Git reports a conflict, resolve the conflict and stop only if cannot be resolved cleanly.
+Now there are a few scenarios:
+
+1. It rebases cleanly.
+2. Git reports `cannot rebase: Your index contains uncommitted changes.` - commit the changes properly then retry the rebase.
+3. Git reports a conflict, resolve the conflict and stop only if cannot be resolved cleanly.
 
 After the rebase succeeds, merge fast-forward onto `local/master`:
 
