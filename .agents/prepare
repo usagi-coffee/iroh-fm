@@ -1,0 +1,8 @@
+#!/bin/sh
+
+set -eu
+
+if [ -f package.json ]; then
+  bun install --frozen-lockfile
+fi
+
