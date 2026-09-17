@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 use std::str::FromStr;
 
-use iroh::{EndpointId, RelayUrl};
+use iroh::{EndpointAddr, EndpointId, RelayUrl, Watcher};
 use iroh_tickets::endpoint::EndpointTicket;
 use server::{BackendRequest, IrohConfig, MusicServer, ServerConfig, spawn_iroh_server_with_port};
 
@@ -29,10 +29,12 @@ async fn run() -> server::Result<()> {
         let _ = iroh::SecretKey::from_str(secret)
             .map_err(|error| server::Error::InvalidRequest(format!("invalid --secret: {error}")))?;
     }
-    if let Some(relay) = &iroh.relay {
-        let _ = iroh::RelayUrl::from_str(relay)
-            .map_err(|error| server::Error::InvalidRequest(format!("invalid --relay: {error}")))?;
-    }
+    let relay = iroh
+        .relay
+        .as_deref()
+        .map(RelayUrl::from_str)
+        .transpose()
+        .map_err(|error| server::Error::InvalidRequest(format!("invalid --relay: {error}")))?;
     for peer in &iroh.peers {
         let _ = peer;
     }
@@ -41,19 +43,11 @@ async fn run() -> server::Result<()> {
     let server = MusicServer::load(config)?;
     let summary = server.handle(BackendRequest::GetLibrarySummary)?;
     let handle = spawn_iroh_server_with_port(server, &iroh, port).await?;
-    // A browser can only reach an iroh endpoint through a relay. Wait until
-    // the endpoint has one before printing the shareable ticket so the static
-    // web client always receives usable dialing information.
-    handle.endpoint.online().await;
+    // Binding is sufficient for LAN service. `online()` waits for a relay and
+    // can block forever without WAN access, even while the listener is usable.
+    let mut addresses = handle.endpoint.watch_addr();
     let endpoint = handle.endpoint.id();
-    let mut ticket_addr = handle.endpoint.addr();
-    if let Some(relay) = iroh.relay.as_deref() {
-        ticket_addr =
-            ticket_addr.with_relay_url(RelayUrl::from_str(relay).map_err(|error| {
-                server::Error::InvalidRequest(format!("invalid --relay: {error}"))
-            })?);
-    }
-    let ticket = EndpointTicket::from(ticket_addr);
+    let mut ticket = endpoint_ticket(addresses.get(), relay.as_ref());
     println!("server backend ready: {summary:?}");
     println!("endpoint={endpoint}");
     if let Some(port) = port {
@@ -75,11 +69,39 @@ async fn run() -> server::Result<()> {
     if let Some(relay) = iroh.relay.as_deref() {
         println!("relay={relay}");
     }
-    tokio::signal::ctrl_c().await?;
+    eprintln!(
+        "LAN connections do not require a relay. Browser connections require a reachable relay; \
+         updated tickets will be printed as addresses change."
+    );
+    let shutdown = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown);
+    let shutdown_result = loop {
+        tokio::select! {
+            result = &mut shutdown => break result,
+            address = addresses.updated() => {
+                let Ok(address) = address else {
+                    break Ok(());
+                };
+                let updated = endpoint_ticket(address, relay.as_ref());
+                if updated != ticket {
+                    ticket = updated;
+                    println!("ticket={ticket}");
+                }
+            }
+        }
+    };
     handle.endpoint.close().await;
     handle.task.abort();
+    shutdown_result?;
 
     Ok(())
+}
+
+fn endpoint_ticket(mut address: EndpointAddr, relay: Option<&RelayUrl>) -> EndpointTicket {
+    if let Some(relay) = relay {
+        address = address.with_relay_url(relay.clone());
+    }
+    EndpointTicket::from(address)
 }
 
 fn parse_config(
@@ -142,6 +164,31 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tickets_preserve_lan_addresses_before_and_after_relay_discovery() {
+        let id = iroh::SecretKey::from_bytes(&[7; 32]).public();
+        let lan = "192.168.1.10:50608".parse().unwrap();
+        let address = EndpointAddr::new(id).with_ip_addr(lan);
+        let initial = endpoint_ticket(address.clone(), None);
+        assert_eq!(initial.endpoint_addr(), &address);
+        assert_eq!(initial.endpoint_addr().relay_urls().count(), 0);
+
+        let relay: RelayUrl = "https://relay.example.com".parse().unwrap();
+        let discovered = endpoint_ticket(address.clone().with_relay_url(relay.clone()), None);
+        let configured = endpoint_ticket(address, Some(&relay));
+        assert_eq!(configured, discovered);
+        assert_eq!(
+            discovered
+                .endpoint_addr()
+                .ip_addrs()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![lan]
+        );
+        assert_eq!(discovered.endpoint_addr().relay_urls().next(), Some(&relay));
+        assert_ne!(initial, discovered);
+    }
 
     #[test]
     fn parses_optional_udp_port() {

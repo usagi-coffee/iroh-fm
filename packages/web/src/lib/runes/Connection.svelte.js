@@ -1,4 +1,11 @@
-import { albumSort, cleanRelays, friendlyError, trackSort } from "$lib/utils.js";
+import { nativeBuildInfo } from "$lib/runtime.js";
+import {
+  albumSort,
+  cleanRelays,
+  friendlyError,
+  hasConnectionAddress,
+  trackSort,
+} from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
@@ -12,6 +19,7 @@ export class Connection {
   secret = $state("");
   clientEndpointId = $state("");
   identityLoading = $state(true);
+  native = $state(false);
   connecting = $state(false);
   connectionStep = $state("Connecting to the iroh server…");
   connectionProgress = $state(5);
@@ -37,6 +45,7 @@ export class Connection {
   }
 
   async prepareIdentity() {
+    this.native = Boolean(await nativeBuildInfo);
     this.loadLocalState();
     this.importConnectionHash(location.hash);
     await this.initializeIdentity();
@@ -290,7 +299,7 @@ export class Connection {
   /** @param {boolean} [forceTicket] */
   canConnect(forceTicket = false) {
     if (forceTicket) return Boolean(this.ticket.trim());
-    return this.endpoint.trim() ? cleanRelays(this.relays).length > 0 : Boolean(this.ticket.trim());
+    return hasConnectionAddress(this.ticket, this.endpoint, this.relays, this.native);
   }
 
   /** @param {number} operation */

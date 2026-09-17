@@ -41,7 +41,7 @@ Point it at your music library:
 iroh-fm --music-dir /path/to/music
 ```
 
-The server scans and indexes the library, watches it for changes, and prints an iroh endpoint ticket. Open the [iroh-fm web player](https://usagi-coffee.github.io/iroh-fm/), paste the ticket, and connect.
+The server scans and indexes the library, watches it for changes, and prints an iroh endpoint ticket. For the [iroh-fm web player](https://usagi-coffee.github.io/iroh-fm/), wait for relay connectivity and use the latest printed ticket; the first startup ticket may contain only LAN addresses usable by native clients. Paste the ticket into the web player and connect.
 
 To prepare a link that opens the library directly, place the server ticket in the URL fragment:
 
@@ -68,7 +68,11 @@ iroh-fm \
   --peer allowed-client-endpoint-id
 ```
 
-`--port` pins the iroh UDP sockets to that port instead of choosing an ephemeral one. Use it together with `--secret` when you need direct addresses in an existing ticket to remain valid after a server restart, and allow that UDP port through the host firewall.
+`--port` pins the iroh UDP sockets to that port instead of choosing an ephemeral one. Use it together with `--secret` and a stable LAN IP (for example, a DHCP reservation) when you need direct addresses in an existing ticket to remain valid after a server restart, and allow that UDP port through the host firewall.
+
+The server starts serving and prints a ticket without waiting for a relay. Desktop and Android can use the ticket's LAN IP addresses even when the internet or relay is unavailable; on Android, use the full ticket because mDNS discovery is disabled. Devices must be able to reach one another on the LAN (guest Wi-Fi/client isolation can prevent this).
+
+New `ticket=` lines are printed when the server's advertised addresses change, including when a relay becomes available. Use the latest ticket when sharing with remote or browser clients. A startup ticket may contain only local addresses; browser/PWA connections still require a reachable relay, even on the same LAN. A configured `--relay` URL is included in tickets but does not guarantee that the relay is connected.
 
 `--peer` is repeatable. Leave it out to accept any client that has the server ticket. The web player can generate and retain its own client secret; its endpoint ID is available in Settings for allowlisting.
 

@@ -1,3 +1,4 @@
+import { nativeBuildInfo } from "$lib/runtime.js";
 import {
   activateServiceWorkerUpdate,
   currentNativeRequirement,
@@ -5,8 +6,6 @@ import {
   subscribeToNativeUpgrade,
   subscribeToServiceWorkerUpdates,
 } from "$lib/service-worker.js";
-
-import { ClientCore } from "@iroh-fm/client/core";
 
 class UpdateManager {
   ready = $state(false);
@@ -16,7 +15,7 @@ class UpdateManager {
   nativeUpgrade = $state(null);
   /** @type {"web" | ReturnType<typeof currentNativeRequirement>} */
   block = $state(null);
-  build = ClientCore.buildInfo();
+  build = nativeBuildInfo;
   start = this.build.then(async (build) => {
     const requirement = currentNativeRequirement(build);
     const worker = await ensure_service_worker(build);

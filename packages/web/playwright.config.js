@@ -26,6 +26,7 @@ export default defineConfig({
     {
       name: "web",
       testMatch: [
+        "connection.spec.js",
         "web/player.spec.js",
         "web/cache.spec.js",
         "web/auth.spec.js",
@@ -39,7 +40,7 @@ export default defineConfig({
     },
     {
       name: "desktop",
-      testMatch: ["web/player.spec.js", "desktop/cache.spec.js"],
+      testMatch: ["connection.spec.js", "web/player.spec.js", "desktop/cache.spec.js"],
       use: {
         ...browser,
         baseURL: "http://127.0.0.1:4174",
@@ -48,7 +49,7 @@ export default defineConfig({
     },
     {
       name: "android",
-      testMatch: ["web/player.spec.js", "android/cache.spec.js"],
+      testMatch: ["connection.spec.js", "web/player.spec.js", "android/cache.spec.js"],
       use: {
         ...devices["Pixel 7"],
         baseURL: "http://127.0.0.1:4175",

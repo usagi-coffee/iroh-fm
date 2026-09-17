@@ -31,6 +31,17 @@ export function cleanRelays(values) {
 }
 
 /**
+ * @param {string} ticket
+ * @param {string} endpoint
+ * @param {string[]} relays
+ * @param {boolean} native
+ */
+export function hasConnectionAddress(ticket, endpoint, relays, native) {
+  if (!endpoint.trim()) return Boolean(ticket.trim());
+  return native || cleanRelays(relays).length > 0;
+}
+
+/**
  * @template {import('@iroh-fm/client/types').TrackData} T
  * @param {T[]} list
  * @param {string} term

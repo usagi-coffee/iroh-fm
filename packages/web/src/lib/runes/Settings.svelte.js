@@ -2,7 +2,7 @@ import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
 import { App } from "$lib/runes/App.svelte.js";
-import { cleanRelays, friendlyError } from "$lib/utils.js";
+import { friendlyError, hasConnectionAddress } from "$lib/utils.js";
 
 import { ClientCore } from "@iroh-fm/client/core";
 
@@ -33,7 +33,7 @@ export class Settings {
   /** @type {Promise<string>} */
   draftEndpointId = $state(this.endpointIdForSecret(this.#secret));
   canSave = $derived(
-    Boolean(this.endpoint.trim() ? cleanRelays(this.relays).length : this.#ticket.trim()) &&
+    hasConnectionAddress(this.#ticket, this.endpoint, this.relays, App.connection.native) &&
       !App.connection.connecting,
   );
   ticketParseGeneration = 0;
