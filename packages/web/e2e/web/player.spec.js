@@ -241,6 +241,49 @@ test("keeps album scrolling stable and centers a selected album track", async ({
     .toBeLessThan(2);
 });
 
+test("keeps track positions stable when reversing a deep scroll", async ({ page }, testInfo) => {
+  test.skip(
+    testInfo.project.name === "desktop",
+    "The Desktop fixture does not expose the generated large library.",
+  );
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.evaluate(() => {
+    localStorage.setItem("iroh-fm-e2e-album-count", "500");
+    localStorage.setItem("iroh-fm-e2e-cover-delay", "1000");
+  });
+  await page.reload();
+  await expect(page.getByText("500 / 500", { exact: true })).toBeVisible();
+
+  const viewport = page.locator("section.bg-base [data-virtual-viewport]");
+  await viewport.hover();
+  await page.mouse.wheel(0, 16_000);
+  await page.waitForTimeout(200);
+  const positions = new Map();
+  for (const delta of [-1400, -1400, -1400, ...Array(40).fill(-20)]) {
+    await page.mouse.wheel(0, delta);
+    // Let covers start loading while continuing to move the render window.
+    await page.waitForTimeout(170);
+    const sample = await viewport.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const rows = [...element.querySelectorAll("[data-list-index]")];
+      return {
+        topGap: rows[0].getBoundingClientRect().top - rect.top,
+        bottomGap: rect.bottom - rows.at(-1).getBoundingClientRect().bottom,
+        positions: rows.map((row) => [
+          Number(row.getAttribute("data-list-index")),
+          row.getBoundingClientRect().top - rect.top + element.scrollTop,
+        ]),
+      };
+    });
+    expect(sample.topGap).toBeLessThanOrEqual(0);
+    expect(sample.bottomGap).toBeLessThanOrEqual(0);
+    for (const [index, position] of sample.positions) {
+      if (positions.has(index)) expect(Math.abs(position - positions.get(index))).toBeLessThan(1);
+      positions.set(index, position);
+    }
+  }
+});
+
 test("allows virtualized track and album lists to reach their bottom edge", async ({
   page,
 }, testInfo) => {

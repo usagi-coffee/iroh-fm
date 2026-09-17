@@ -263,7 +263,7 @@ export class FixtureClient {
   }
 
   async coverUrl() {
-    await delay(40);
+    await delay(Number(localStorage.getItem("iroh-fm-e2e-cover-delay")) || 40);
     return COVER_URL;
   }
 

@@ -217,13 +217,11 @@
 >
   {#if typeof coverSource === "string" && !imageFailed}
     {@render image(coverSource)}
-  {:else}
+  {:else if coverSource && !imageFailed}
+    <!-- Mount the boundary when loading starts, so its initial pending state
+         isolates cover I/O from scroll-driven render updates. -->
     <svelte:boundary>
-      {#if coverSource && !imageFailed}
-        {@render image(await coverSource)}
-      {:else}
-        {@render fallback()}
-      {/if}
+      {@render image(await coverSource)}
 
       {#snippet pending()}
         {@render fallback()}
@@ -233,6 +231,8 @@
         {@render fallback()}
       {/snippet}
     </svelte:boundary>
+  {:else}
+    {@render fallback()}
   {/if}
 </div>
 
