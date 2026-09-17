@@ -13,7 +13,7 @@ only lands the current change: do not review, retest, or otherwise modify it bef
 First, rebase the current branch onto it.
 
 ```sh
-GIT_EDITOR=true git rebase local/master
+git fetch local && GIT_EDITOR=true git rebase local/master
 ```
 
 If Git reports a conflict, resolve the conflict and stop only if cannot be resolved cleanly.
