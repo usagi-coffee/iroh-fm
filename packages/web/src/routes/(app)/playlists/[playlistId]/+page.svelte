@@ -1,13 +1,13 @@
 <script>
   import { SvelteURLSearchParams } from "svelte/reactivity";
 
-  import { replaceState } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
-  import { App } from "$lib/runes/App.svelte.js";
-
   import TrackList from "../../../TrackList.svelte";
+
+  import { App } from "#lib/runes/App.svelte.js";
 
   const playlist = $derived(App.library.playlistById.get(page.params.playlistId ?? "") ?? null);
   const params = $derived(new SvelteURLSearchParams(page.url.search));
@@ -20,12 +20,12 @@
   function updateQuery(value) {
     if (value) params.set("query", value);
     else params.delete("query");
-    replaceState(
+
+    void goto(
       `${page.url.pathname}${params.size ? `?${params}` : ""}${page.url.hash}`,
-      page.state,
+      { shallow: true, replace: true, state: page.state },
     );
   }
-
 </script>
 
 {#if playlist}
@@ -37,9 +37,11 @@
     <div>
       <p class="text-3xs text-red font-mono tracking-wider uppercase">Playlist not found</p>
       <h1 class="text-text mt-2 text-xl font-semibold">This playlist is unavailable.</h1>
-      <p class="text-overlay1 mt-2 text-sm">It may have been deleted or belongs to another client.</p>
+      <p class="text-overlay1 mt-2 text-sm">
+        It may have been deleted or belongs to another client.
+      </p>
       <a
-        href={resolve("/tracks")}
+        href={resolve("tracks")}
         class="border-surface1 text-mauve hover:bg-surface0 mt-6 inline-block border px-4 py-2 text-xs"
         >Go to Tracks</a
       >

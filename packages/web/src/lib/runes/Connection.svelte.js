@@ -1,13 +1,13 @@
-import { nativeBuildInfo } from "$lib/runtime.js";
+import { ClientCore } from "@iroh-fm/client/core";
+
+import { nativeBuildInfo } from "#lib/runtime.js";
 import {
   albumSort,
   cleanRelays,
   friendlyError,
   hasConnectionAddress,
   trackSort,
-} from "$lib/utils.js";
-
-import { ClientCore } from "@iroh-fm/client/core";
+} from "#lib/utils.js";
 
 export class Connection {
   #startupTransport = Promise.withResolvers();
@@ -39,7 +39,7 @@ export class Connection {
   autoConnectAttempted = false;
   startupTransportReady = this.#startupTransport.promise;
 
-  /** @param {import('$lib/runes/App.svelte.js').Application} app */
+  /** @param {import('#lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
   }

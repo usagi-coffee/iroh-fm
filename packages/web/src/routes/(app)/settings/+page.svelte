@@ -1,21 +1,21 @@
 <script>
   import { resolve } from "$app/paths";
 
-  import ConfirmModal from "$lib/modals/ConfirmModal.svelte";
-  import { modal } from "$lib/modals/index.js";
-  import { App } from "$lib/runes/App.svelte.js";
+  import CloseIcon from "virtual:icons/ri/close-line";
+  import DeleteIcon from "virtual:icons/ri/delete-bin-line";
+  import CopyIcon from "virtual:icons/ri/file-copy-line";
+
+  import ConfirmModal from "#lib/modals/ConfirmModal.svelte";
+  import { modal } from "#lib/modals/index.js";
+  import { App } from "#lib/runes/App.svelte.js";
   import {
     MAX_MEMORY_CACHE_MIB,
     MIN_MEMORY_CACHE_MIB,
     Settings,
-  } from "$lib/runes/Settings.svelte.js";
-  import { nativeBuildInfo as sharedNativeBuildInfo } from "$lib/runtime.js";
-  import { forceServiceWorkerUpdate, subscribeToServiceWorkerStatus } from "$lib/service-worker.js";
-  import { formatBytes, friendlyError } from "$lib/utils.js";
-
-  import CloseIcon from "virtual:icons/ri/close-line";
-  import DeleteIcon from "virtual:icons/ri/delete-bin-line";
-  import CopyIcon from "virtual:icons/ri/file-copy-line";
+  } from "#lib/runes/Settings.svelte.js";
+  import { nativeBuildInfo as sharedNativeBuildInfo } from "#lib/runtime.js";
+  import { forceServiceWorkerUpdate, subscribeToServiceWorkerStatus } from "#lib/service-worker.js";
+  import { formatBytes, friendlyError } from "#lib/utils.js";
 
   const settings = new Settings();
   let showSecret = $state(false);
@@ -102,7 +102,7 @@
         <h1 class="mt-1 text-lg font-semibold">Client settings</h1>
       </div>
       <a
-        href={resolve("/tracks")}
+        href={resolve("tracks")}
         class="text-overlay1 hover:bg-surface0 hover:text-text grid size-8 place-items-center"
         aria-label="Close settings"><CloseIcon class="text-base" /></a
       >
@@ -203,20 +203,27 @@
                 onclick={copyDraftEndpoint}
                 disabled={!settings.secret.trim()}
                 class="text-3xs text-mauve hover:text-pink disabled:text-overlay0 flex items-center gap-1.5 font-mono"
-                ><CopyIcon class="text-xs" />{endpointCopied ? "COPIED" : "COPY"}</button
               >
+                <CopyIcon class="text-xs" />
+                {endpointCopied ? "COPIED" : "COPY"}
+              </button>
             </div>
-            <code class="text-2xs text-subtext0 block font-mono leading-5 break-all"
-              >{settings.secret.trim()
+
+            <code class="text-2xs text-subtext0 block font-mono leading-5 break-all">
+              {settings.secret.trim()
                 ? await settings.draftEndpointId
-                : "Generated automatically when settings are saved"}</code
-            >
-            {#snippet pending()}<code class="text-2xs text-overlay0 block font-mono leading-5"
+                : "Generated automatically when settings are saved"}
+            </code>
+
+            {#snippet pending()}
+              <code class="text-2xs text-overlay0 block font-mono leading-5"
                 >Calculating endpoint ID…</code
-              >{/snippet}
-            {#snippet failed()}<code class="text-2xs text-red block font-mono leading-5"
-                >Invalid client secret</code
-              >{/snippet}
+              >
+            {/snippet}
+
+            {#snippet failed()}
+              <code class="text-2xs text-red block font-mono leading-5">Invalid client secret</code>
+            {/snippet}
           </svelte:boundary>
         </div>
       </div>
@@ -273,10 +280,10 @@
                 Boolean(settings.storage.clearing) ||
                 settings.storage.tracks === 0}
               class="text-4xs text-red hover:text-maroon mt-2 inline-flex items-center gap-1.5 font-mono disabled:opacity-35"
-              ><DeleteIcon class="text-xs" />{settings.storage.clearing === "tracks"
-                ? "CLEARING…"
-                : "CLEAR TRACKS"}</button
             >
+              <DeleteIcon class="text-xs" />
+              {settings.storage.clearing === "tracks" ? "CLEARING…" : "CLEAR TRACKS"}
+            </button>
           </div>
           <div class="pl-3">
             <p class="text-4xs text-overlay0 font-mono uppercase">Covers</p>
@@ -290,10 +297,10 @@
                 Boolean(settings.storage.clearing) ||
                 settings.storage.covers === 0}
               class="text-4xs text-red hover:text-maroon mt-2 inline-flex items-center gap-1.5 font-mono disabled:opacity-35"
-              ><DeleteIcon class="text-xs" />{settings.storage.clearing === "covers"
-                ? "CLEARING…"
-                : "CLEAR COVERS"}</button
             >
+              <DeleteIcon class="text-xs" />
+              {settings.storage.clearing === "covers" ? "CLEARING…" : "CLEAR COVERS"}
+            </button>
           </div>
         </div>
         {#if settings.storage.error}
@@ -405,7 +412,7 @@
       class="border-surface0 bg-mantle sticky bottom-0 flex shrink-0 justify-end gap-2 border-t px-5 py-3"
     >
       <a
-        href={resolve("/tracks")}
+        href={resolve("tracks")}
         class="border-surface1 text-3xs text-subtext0 hover:bg-surface0 border px-4 py-2 font-mono"
         >CANCEL</a
       ><button

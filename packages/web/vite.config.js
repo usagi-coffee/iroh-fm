@@ -59,11 +59,9 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     sveltekit({
-      vitePlugin: {
-        inspector: {
-          toggleKeyCombo: "control-shift",
-          holdMode: true,
-        },
+      inspector: {
+        toggleKeyCombo: "control-shift",
+        holdMode: true,
       },
       compilerOptions: {
         // Force runes mode for the project, except for libraries. Can be removed in svelte 6.

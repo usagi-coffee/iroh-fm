@@ -3,9 +3,9 @@ import { SvelteSet } from "svelte/reactivity";
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { Track } from "$lib/runes/Track.svelte.js";
-import { createTrackListItems } from "$lib/track-list-items.js";
-import { filterTracks, friendlyError, indexTracksForSearch } from "$lib/utils.js";
+import { Track } from "#lib/runes/Track.svelte.js";
+import { createTrackListItems } from "#lib/track-list-items.js";
+import { filterTracks, friendlyError, indexTracksForSearch } from "#lib/utils.js";
 
 export class Library {
   summary = $state.raw({ artist_count: 0, album_count: 0, track_count: 0 });
@@ -108,7 +108,7 @@ export class Library {
   /** @type {string | null} */
   pendingTrackFocusId = $state(null);
 
-  /** @param {import('$lib/runes/App.svelte.js').Application} app */
+  /** @param {import('#lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
   }
@@ -181,6 +181,7 @@ export class Library {
     const tracks = playlist.track_ids
       .map((id) => this.tracksById.get(id))
       .filter((track) => track && (!this.offlineOnly || track.cached));
+
     return /** @type {Track[]} */ (tracks);
   }
 
@@ -356,7 +357,7 @@ export class Library {
   /** @param {Track} track */
   async focusTrack(track) {
     this.requestTrackFocus(track);
-    await goto(resolve("/tracks"));
+    await goto(resolve("tracks"));
   }
 
   /** Album cache state is derived exclusively from its individual track files. */

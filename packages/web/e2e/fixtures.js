@@ -160,7 +160,10 @@ export class FixtureClient {
       ],
       tracks: library.tracks,
       starred: { artists: [], albums: [], tracks: [] },
-      playlists: this.playlists.map((playlist) => ({ ...playlist, track_ids: [...playlist.track_ids] })),
+      playlists: this.playlists.map((playlist) => ({
+        ...playlist,
+        track_ids: [...playlist.track_ids],
+      })),
     });
   }
 

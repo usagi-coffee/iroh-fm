@@ -1,5 +1,5 @@
 <script>
-  import SnippetModal from "$lib/modals/Snippet.svelte";
+  import SnippetModal from "#lib/modals/Snippet.svelte";
 
   /**
    * @typedef {Object} Props

@@ -2,10 +2,10 @@
   import { goto } from "$app/navigation";
   import { asset, resolve } from "$app/paths";
 
-  import { modal } from "$lib/modals/index.js";
-  import SnippetModal from "$lib/modals/Snippet.svelte";
-  import { App } from "$lib/runes/App.svelte.js";
-  import { friendlyError, isProtocolVersionMismatch } from "$lib/utils.js";
+  import { modal } from "#lib/modals/index.js";
+  import SnippetModal from "#lib/modals/Snippet.svelte";
+  import { App } from "#lib/runes/App.svelte.js";
+  import { friendlyError, isProtocolVersionMismatch } from "#lib/utils.js";
 
   import ArrowIcon from "virtual:icons/ri/arrow-right-line";
   import CloseIcon from "virtual:icons/ri/close-line";
@@ -85,12 +85,12 @@
   }
 
   async function copyTicketLink() {
-    if (!(await App.connection.copyTicketLink())) return;
+    if (!await App.connection.copyTicketLink()) return;
     showCopied("ticket");
   }
 
   async function copyEndpointId() {
-    if (!(await App.connection.copyEndpointId())) return;
+    if (!await App.connection.copyEndpointId()) return;
     showCopied("endpoint");
   }
 
@@ -112,7 +112,7 @@
   }
 
   async function connect() {
-    if (await App.connection.connect(loginTab === "ticket")) await goto(resolve("/tracks"));
+    if (await App.connection.connect(loginTab === "ticket")) await goto(resolve('tracks'));
   }
 
   /**
@@ -176,9 +176,17 @@
     class="tablet-xl:flex absolute inset-0 hidden flex-col opacity-65 select-none"
     aria-hidden="true"
   >
-    <header class="border-surface0 bg-crust text-2xs flex h-9 shrink-0 items-center border-b">
-      <div class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r">
-        <img src={asset("/pwa-icon-192.png")} alt="" class="size-6 rounded-md" />
+    <header
+      class="border-surface0 bg-crust text-2xs flex h-9 shrink-0 items-center border-b"
+    >
+      <div
+        class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
+      >
+        <img
+          src={asset('pwa-icon-192.png')}
+          alt=""
+          class="size-6 rounded-md"
+        />
       </div>
       <span class="border-surface0 bg-surface0 border-r px-4 py-2 font-semibold">TRACKS</span><span
         class="text-overlay1 grid w-9 place-items-center"><StarIcon class="text-sm" /></span
@@ -258,7 +266,12 @@
     >
       <div class="border-surface0 bg-mantle border-b px-5 pt-5">
         <div class="mb-5 flex items-start gap-3">
-          <img src={asset("/pwa-icon-192.png")} alt="iroh.fm" class="size-12 rounded-xl" />
+          <img
+            src={asset('pwa-icon-192.png')}
+            alt="iroh.fm"
+            class="size-12 rounded-xl"
+          />
+
           <div class="min-w-0 flex-1">
             <div class="flex min-w-0 items-center">
               <h1 class="text-text text-base font-semibold">iroh.fm</h1>
@@ -396,7 +409,7 @@
                 class="border-surface1 bg-mantle focus:border-mauve h-10 w-full border px-3 pr-14 font-mono text-xs outline-none"
               /><button
                 type="button"
-                onclick={() => (showSecret = !showSecret)}
+                onclick={() => showSecret = !showSecret}
                 class="text-3xs text-overlay1 hover:text-mauve absolute inset-y-0 right-3 font-mono"
                 >{showSecret ? "HIDE" : "SHOW"}</button
               >
@@ -421,8 +434,10 @@
                 onclick={copyEndpointId}
                 disabled={!App.connection.clientEndpointId}
                 class="text-3xs text-mauve hover:text-pink disabled:text-overlay0 flex items-center gap-1.5 font-mono"
-                ><CopyIcon class="text-xs" />{endpointCopied ? "COPIED" : "COPY"}</button
               >
+                <CopyIcon class="text-xs" />
+                {endpointCopied ? "COPIED" : "COPY"}
+              </button>
             </div>
           </div>
           <div class="border-surface0 bg-mantle/70 border px-3 py-2.5">
@@ -457,12 +472,17 @@
               App.connection.connecting ||
               App.connection.identityLoading}
             class="bg-mauve text-crust hover:bg-pink flex h-11 w-full items-center justify-center gap-3 font-mono text-xs font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
-            >{#if App.connection.connecting}<span
-                class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
-              ></span>{App.connection.connectionStep}{:else}CONNECT <ArrowIcon
-                class="text-sm"
-              />{/if}</button
           >
+            {#if App.connection.connecting}
+              <span
+                class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
+              ></span>
+
+              {App.connection.connectionStep}
+            {:else}
+              CONNECT <ArrowIcon class="text-sm" />
+            {/if}
+          </button>
         </div>
       </div>
     </form>
@@ -471,13 +491,11 @@
 
 {#snippet QrScanner(/** @type {{ dismiss: (value: string | null) => void }} */ { dismiss })}
   {let error = $state("")}
-  {const scan = $derived(
-    createQrScanner(
-      dismiss,
-      (reason) => (error = friendlyError(reason, "Could not start the camera.")),
-    ),
-  )}
-  <div class="border-surface0 bg-mantle flex items-center justify-between border-b px-4 py-3">
+  {const scan = $derived(createQrScanner(dismiss, (reason) => error = friendlyError(reason, "Could not start the camera.")))}
+
+  <div
+    class="border-surface0 bg-mantle flex items-center justify-between border-b px-4 py-3"
+  >
     <div>
       <h2 id="qr-title" class="text-sm font-semibold">Scan server ticket</h2>
       <p class="text-3xs text-overlay1 mt-0.5">Point the camera at a ticket QR code</p>

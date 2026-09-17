@@ -1,4 +1,6 @@
-import { build, version } from "$service-worker";
+import { version } from "$app/env";
+import { immutable } from "$app/manifest";
+import { self } from "$app/service-worker";
 
 const WEB_BUILD = __BUILD_VERSION__;
 const CACHE_NAME = `iroh-fm-shell-${WEB_BUILD}`;
@@ -20,6 +22,7 @@ const DATA_CACHES = new Set([
 ]);
 const SHELL_CACHE_PREFIXES = ["iroh-fm-shell-", "iroh-fm-"];
 const SCOPE_PATH = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+/** @param {string} path */
 const scoped = (path) => {
   if (!SCOPE_PATH || path.startsWith(`${SCOPE_PATH}/`)) return path;
   return path === "/" ? `${SCOPE_PATH}/` : `${SCOPE_PATH}${path}`;
@@ -34,7 +37,7 @@ const STATIC_FILES = [
   "/pwa-maskable-192.png",
   "/pwa-maskable-512.png",
 ];
-const SHELL_FILES = [...new Set([...build, ...STATIC_FILES, "/"].map(scoped).concat(FALLBACKS))];
+const SHELL_FILES = [...new Set([...immutable.map(({ path }) => `/${path}`), ...STATIC_FILES, "/"].map(scoped).concat(FALLBACKS))];
 const ENTRYPOINTS = SHELL_FILES.filter((path) =>
   /\/_app\/immutable\/entry\/(?:start|app)\.[^/]+\.js$/.test(path),
 );
@@ -153,6 +156,7 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+/** @param {Cache} cache */
 async function cacheShell(cache) {
   for (const path of SHELL_FILES) {
     try {
@@ -163,6 +167,7 @@ async function cacheShell(cache) {
   }
 }
 
+/** @param {Cache} cache */
 async function verifyShell(cache) {
   if (ENTRYPOINTS.length < 2) throw new Error("the application entrypoints are missing");
   for (const path of SHELL_FILES) {
@@ -187,6 +192,7 @@ async function cleanOldShells() {
   return old;
 }
 
+/** @param {string} name */
 function isShellCache(name) {
   return (
     name !== STATE_CACHE_NAME &&
@@ -265,10 +271,15 @@ function registrationBuild(worker) {
   return new URL(worker.scriptURL).searchParams.get("build") ?? undefined;
 }
 
+/** @param {string} event */
 function log(event, details = {}) {
   console.info(LOG_PREFIX, event, details);
 }
 
+/**
+ * @param {string} event
+ * @param {unknown} error
+ */
 function logError(event, error, details = {}) {
   console.error(LOG_PREFIX, event, {
     ...details,

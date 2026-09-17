@@ -5,14 +5,14 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
-  import { App } from "$lib/runes/App.svelte.js";
-  import { Updater } from "$lib/runes/Updater.svelte.js";
-
   import CloseIcon from "virtual:icons/ri/close-line";
 
   import PlayerBar from "../PlayerBar.svelte";
   import TopBar from "../TopBar.svelte";
   import UpdateNotice from "../UpdateNotice.svelte";
+
+  import { App } from "#lib/runes/App.svelte.js";
+  import { Updater } from "#lib/runes/Updater.svelte.js";
 
   /** @typedef {import('./$types').LayoutProps} Props */
   /** @type {Props} */
@@ -37,6 +37,7 @@
         event.preventDefault();
         return;
       }
+
       if (
         event.defaultPrevented ||
         event.isComposing ||
@@ -45,15 +46,15 @@
         event.altKey
       )
         return;
-
       const route =
         event.key === "F1"
-          ? resolve("/tracks")
+          ? resolve("tracks")
           : event.key === "F2"
-            ? resolve("/albums")
+            ? resolve("albums")
             : event.key === "F3"
-              ? resolve("/starred")
+              ? resolve("starred")
               : null;
+
       if (route) {
         event.preventDefault();
         if (!event.repeat) void goto(route);
@@ -73,10 +74,12 @@
       if (event.key.length === 1 && App.connection.client) {
         event.preventDefault();
         App.library.trackFilterFocusPending = true;
-        const path = resolve("/tracks");
+
+        const path = resolve("tracks");
         const params = new SvelteURLSearchParams(
           page.url.pathname.replace(/\/$/, "") === path.replace(/\/$/, "") ? page.url.search : "",
         );
+
         params.set("query", `${params.get("query") ?? ""}${event.key}`);
         void goto(`${path}?${params}`);
       }
@@ -101,6 +104,7 @@
     role="status"
   >
     <span>{App.connection.error}</span>
+
     <button type="button" onclick={() => (App.connection.error = "")} aria-label="Dismiss error"
       ><CloseIcon class="text-sm" /></button
     >

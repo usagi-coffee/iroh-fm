@@ -1,14 +1,14 @@
 <script>
-  import SnippetModal from "$lib/modals/Snippet.svelte";
-  import { App } from "$lib/runes/App.svelte.js";
-
   import AddIcon from "virtual:icons/ri/add-line";
   import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
+
+  import SnippetModal from "#lib/modals/Snippet.svelte";
+  import { App } from "#lib/runes/App.svelte.js";
 
   /**
    * @typedef {Object} Props
    * @property {(result?: unknown) => void} dismiss
-   * @property {import('$lib/runes/Track.svelte.js').Track[]} tracks
+   * @property {import('#lib/runes/Track.svelte.js').Track[]} tracks
    */
   /** @type {Props} */
   const { dismiss, tracks } = $props();
@@ -40,7 +40,10 @@
 {#snippet Content()}
   <div class="border-surface0 bg-mantle border-b px-4 py-3">
     <h2 id="playlist-picker-title" class="text-text text-sm font-semibold">Add to playlist</h2>
-    <p class="text-3xs text-overlay0 mt-1">{tracks.length} {tracks.length === 1 ? "track" : "tracks"}</p>
+    <p class="text-3xs text-overlay0 mt-1">
+      {tracks.length}
+      {tracks.length === 1 ? "track" : "tracks"}
+    </p>
   </div>
   <div class="max-h-64 overflow-y-auto p-2">
     {#each App.library.playlists as playlist (playlist.id)}
@@ -49,8 +52,7 @@
         disabled={busy}
         onclick={() => add(playlist)}
         class="text-subtext0 hover:bg-surface0 hover:text-text flex w-full items-center gap-3 px-3 py-3 text-left text-xs"
-        ><PlaylistIcon class="text-sm" /><span class="min-w-0 flex-1 truncate"
-          >{playlist.name}</span
+        ><PlaylistIcon class="text-sm" /><span class="min-w-0 flex-1 truncate">{playlist.name}</span
         ><span class="text-3xs text-overlay0">{playlist.track_ids.length}</span></button
       >
     {/each}

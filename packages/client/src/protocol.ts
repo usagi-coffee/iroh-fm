@@ -60,10 +60,7 @@ export async function getPlaylist(request: Request, playlistId: string) {
 }
 
 export async function createPlaylist(request: Request, name: string, trackIds: string[] = []) {
-  return variant(
-    await request({ CreatePlaylist: { name, track_ids: trackIds } }),
-    "Playlist",
-  );
+  return variant(await request({ CreatePlaylist: { name, track_ids: trackIds } }), "Playlist");
 }
 
 export async function updatePlaylist(

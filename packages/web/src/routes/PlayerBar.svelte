@@ -1,7 +1,4 @@
 <script>
-  import { App } from "$lib/runes/App.svelte.js";
-  import { formatTime } from "$lib/utils.js";
-
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import RepeatIcon from "virtual:icons/ri/repeat-line";
@@ -11,6 +8,9 @@
   import VolumeIcon from "virtual:icons/ri/volume-up-line";
 
   import Cover from "./Cover.svelte";
+
+  import { App } from "#lib/runes/App.svelte.js";
+  import { formatTime } from "#lib/utils.js";
 
   const track = $derived(App.player.currentTrack);
   const duration = $derived(App.player.duration || track?.duration_seconds || 0);

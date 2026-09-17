@@ -1,40 +1,40 @@
 <script>
   import { untrack } from "svelte";
 
-  import { replaceState } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
 
-  import AlbumActionsModal from "$lib/modals/AlbumActionsModal.svelte";
-  import PlaylistPickerModal from "$lib/modals/PlaylistPickerModal.svelte";
-  import { modal } from "$lib/modals/index.js";
-  import SnippetModal from "$lib/modals/Snippet.svelte";
-  import { App } from "$lib/runes/App.svelte.js";
-  import { immediateTauriWheelScroll } from "$lib/ui/immediate-wheel-scroll.js";
-  import { longPress } from "$lib/ui/long-press.js";
-  import { setPlaylistTracksDrag } from "$lib/ui/playlist-drag.js";
-  import VirtualList from "$lib/ui/VirtualList.svelte";
-  import { formatBytes, formatTime, friendlyError } from "$lib/utils.js";
-
-  import StarIcon from "virtual:icons/ri/star-line";
-  import AddIcon from "virtual:icons/ri/play-list-add-line";
   import DownIcon from "virtual:icons/ri/arrow-down-line";
-  import DragIcon from "virtual:icons/ri/draggable";
-  import RemoveIcon from "virtual:icons/ri/delete-bin-line";
   import UpIcon from "virtual:icons/ri/arrow-up-line";
+  import RemoveIcon from "virtual:icons/ri/delete-bin-line";
+  import DragIcon from "virtual:icons/ri/draggable";
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
+  import AddIcon from "virtual:icons/ri/play-list-add-line";
   import SearchIcon from "virtual:icons/ri/search-line";
+  import StarIcon from "virtual:icons/ri/star-line";
 
   import Cover from "./Cover.svelte";
 
+  import AlbumActionsModal from "#lib/modals/AlbumActionsModal.svelte";
+  import { modal } from "#lib/modals/index.js";
+  import PlaylistPickerModal from "#lib/modals/PlaylistPickerModal.svelte";
+  import SnippetModal from "#lib/modals/Snippet.svelte";
+  import { App } from "#lib/runes/App.svelte.js";
+  import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
+  import { longPress } from "#lib/ui/long-press.js";
+  import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
+  import VirtualList from "#lib/ui/VirtualList.svelte";
+  import { formatBytes, formatTime, friendlyError } from "#lib/utils.js";
+
   /**
    * @typedef {Object} Props
-   * @property {import('$lib/runes/Track.svelte.js').Track[]} tracks
-   * @property {ReturnType<import('$lib/runes/Library.svelte.js').Library['getTrackListItems']>} items
+   * @property {import('#lib/runes/Track.svelte.js').Track[]} tracks
+   * @property {ReturnType<import('#lib/runes/Library.svelte.js').Library['getTrackListItems']>} items
    * @property {string} query
    * @property {(value: string) => void} onquery
-   * @property {(track: import('$lib/runes/Track.svelte.js').Track) => void} [onplay]
-   * @property {import('$lib/runes/Track.svelte.js').Track[]} [queueTracks]
+   * @property {(track: import('#lib/runes/Track.svelte.js').Track) => void} [onplay]
+   * @property {import('#lib/runes/Track.svelte.js').Track[]} [queueTracks]
    * @property {import('@iroh-fm/client/types').Playlist | null} [playlist]
    */
   /** @type {Props} */
@@ -172,7 +172,7 @@
 
   /**
    * @param {DragEvent} event
-   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {import('#lib/runes/Track.svelte.js').Track} track
    */
   function startTrackDrag(event, track) {
     draggedTrackId = track.id;
@@ -220,9 +220,7 @@
     const target = playlist.track_ids.indexOf(trackId);
     if (from >= 0 && target >= 0 && from !== target) {
       const index =
-        edge === "top"
-          ? target - (from < target ? 1 : 0)
-          : target + (from > target ? 1 : 0);
+        edge === "top" ? target - (from < target ? 1 : 0) : target + (from > target ? 1 : 0);
       void App.library.movePlaylistTrack(playlist, draggedTrackId, index);
     }
     draggedTrackId = "";
@@ -233,7 +231,7 @@
     dragOverTrackId = "";
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track} track */
+  /** @param {import('#lib/runes/Track.svelte.js').Track} track */
   function playTrackFromList(track) {
     console.info(`[player] track-list play invoked: trackId=${track.id}`);
     onplay(track);
@@ -246,7 +244,7 @@
     void App.player.playFromTrackList(track, queue);
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks */
+  /** @param {import('#lib/runes/Track.svelte.js').Track[]} albumTracks */
   function playAlbumFromList(albumTracks) {
     const albumTrackIds = new Set(albumTracks.map((track) => track.id));
     const first = tracks.find((track) => albumTrackIds.has(track.id));
@@ -255,7 +253,7 @@
   }
 
   /**
-   * @param {import('$lib/runes/Track.svelte.js').Track} track
+   * @param {import('#lib/runes/Track.svelte.js').Track} track
    * @param {MouseEvent} [event]
    */
   function openTrackActions(track, event) {
@@ -273,7 +271,7 @@
     );
   }
 
-  /** @param {import('$lib/runes/Track.svelte.js').Track[]} selected */
+  /** @param {import('#lib/runes/Track.svelte.js').Track[]} selected */
   function openPlaylistPicker(selected) {
     void modal(PlaylistPickerModal, { tracks: selected }).catch(
       (error) => (App.connection.error = friendlyError(error, "Could not open playlists.")),
@@ -282,7 +280,7 @@
 
   /**
    * @param {import('@iroh-fm/client/types').Album | undefined} album
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} albumTracks
    * @param {string} title
    * @param {string} cacheKey
    * @param {MouseEvent} [event]
@@ -329,7 +327,8 @@
       if (target instanceof HTMLElement) {
         initialFocusPending = false;
         App.library.pendingTrackFocusId = null;
-        if (page.state.focusTrackId) replaceState(page.url, {});
+        if (page.state.focusTrackId)
+          void goto(page.url.href, { shallow: true, replace: true, state: {} });
         return;
       }
       positioned = false;
@@ -416,7 +415,7 @@
                   item.album?.id ?? item.key,
                   event,
                 )}
-              class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full select-none items-center gap-2 border-y px-2 text-left transition"
+              class="border-surface1 bg-mantle hover:bg-surface0 flex h-7 w-full items-center gap-2 border-y px-2 text-left transition select-none"
               aria-label={`Play album ${item.title}`}
             >
               <Cover
@@ -465,7 +464,7 @@
                   App.library.selectedTrackId = item.track.id;
                 }
               }}
-              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] relative grid h-7 select-none grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none focus:ring-1 focus:ring-inset {playing
+              class="group border-surface0/35 text-track focus:ring-mauve tablet-xl:grid-cols-[2.25rem_minmax(7rem,.55fr)_minmax(10rem,1fr)_minmax(7rem,.5fr)_3.2rem] relative grid h-7 grid-cols-[2rem_minmax(0,1fr)_3.2rem] items-center border-b px-2 transition outline-none select-none focus:ring-1 focus:ring-inset {playing
                 ? 'bg-mauve/15'
                 : selected
                   ? 'bg-surface0'
@@ -511,20 +510,20 @@
                 {item.track.album}
               </div>
               <div class="flex min-w-0 items-center gap-2 pr-2">
-                  {#if playlist && !query.trim()}<button
-                      type="button"
-                      draggable="true"
-                      onclick={(event) => event.stopPropagation()}
-                      ondragstart={(event) => {
-                        event.stopPropagation();
-                        startTrackDrag(event, item.track);
-                      }}
-                      ondragend={endTrackDrag}
-                      class="text-overlay0 hover:text-teal shrink-0 cursor-grab bg-transparent p-0 active:cursor-grabbing"
-                      title={`Drag ${item.track.title} to reorder`}
-                      aria-label={`Drag ${item.track.title} to reorder`}
-                      data-playlist-drag-handle><DragIcon /></button
-                    >{/if}<span class="text-teal truncate">{item.track.title}</span><button
+                {#if playlist && !query.trim()}<button
+                    type="button"
+                    draggable="true"
+                    onclick={(event) => event.stopPropagation()}
+                    ondragstart={(event) => {
+                      event.stopPropagation();
+                      startTrackDrag(event, item.track);
+                    }}
+                    ondragend={endTrackDrag}
+                    class="text-overlay0 hover:text-teal shrink-0 cursor-grab bg-transparent p-0 active:cursor-grabbing"
+                    title={`Drag ${item.track.title} to reorder`}
+                    aria-label={`Drag ${item.track.title} to reorder`}
+                    data-playlist-drag-handle><DragIcon /></button
+                  >{/if}<span class="text-teal truncate">{item.track.title}</span><button
                   type="button"
                   onclick={(event) => App.library.toggleStar(item.track, event)}
                   class="text-overlay0 hover:text-pink ml-auto hidden shrink-0 group-hover:block {App.library.starredTrackIds.has(
@@ -554,7 +553,7 @@
 </section>
 
 {#snippet TrackActions(
-  /** @type {{ dismiss: (result?: unknown) => void, track: import('$lib/runes/Track.svelte.js').Track }} */ {
+  /** @type {{ dismiss: (result?: unknown) => void, track: import('#lib/runes/Track.svelte.js').Track }} */ {
     dismiss,
     track,
   },

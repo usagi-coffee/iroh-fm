@@ -2,9 +2,9 @@
   import { invalidate } from "$app/navigation";
   import { asset } from "$app/paths";
 
-  import { App } from "$lib/runes/App.svelte.js";
-  import { Updater } from "$lib/runes/Updater.svelte.js";
-  import { connectionAddressLabel, formatBytes } from "$lib/utils.js";
+  import { App } from "#lib/runes/App.svelte.js";
+  import { Updater } from "#lib/runes/Updater.svelte.js";
+  import { connectionAddressLabel, formatBytes } from "#lib/utils.js";
 
   import DatabaseIcon from "virtual:icons/ri/database-2-line";
 
@@ -38,7 +38,7 @@
             {await App.connection.startupTransportReady}
             <svelte:boundary>
               {const guarded = ready.then(() => invalidate("app:connection"))}
-              {@render children(void (await guarded))}
+              {@render children(void await guarded)}
 
               {#snippet pending()}
                 {@render loading({
@@ -81,14 +81,14 @@
 </div>
 
 {#snippet nativeBlocked(/** @type {{ platform: string, releaseUrl: string }} */ requirement)}
-  <div class="bg-base text-text grid h-dvh place-items-center p-6">
-    <div class="border-yellow/40 bg-crust w-full max-w-md border p-5 text-center">
-      <h1 class="text-yellow text-sm font-semibold">
-        Your {requirement.platform} application is out of date
-      </h1>
-      <p class="text-overlay1 mt-2 text-xs leading-5">
-        This web version requires a newer {requirement.platform} application before it can start.
-      </p>
+  <div
+    class="bg-base text-text grid h-dvh place-items-center p-6"
+  >
+    <div
+      class="border-yellow/40 bg-crust w-full max-w-md border p-5 text-center"
+    >
+      <h1 class="text-yellow text-sm font-semibold">Your {requirement.platform} application is out of date</h1>
+      <p class="text-overlay1 mt-2 text-xs leading-5">This web version requires a newer {requirement.platform} application before it can start.</p>
       <a
         href={requirement.releaseUrl}
         target="_blank"
@@ -117,9 +117,18 @@
 {/snippet}
 
 {#snippet loading(/** @type {{ text: string, step: number }} */ { text, step })}
-  <div class="bg-base text-text grid h-dvh place-items-center p-6">
-    <div class="flex w-full max-w-56 flex-col items-center gap-4 text-center">
-      <img src={asset("/pwa-icon-192.png")} alt="" class="size-12 rounded-xl" />
+  <div
+    class="bg-base text-text grid h-dvh place-items-center p-6"
+  >
+    <div
+      class="flex w-full max-w-56 flex-col items-center gap-4 text-center"
+    >
+      <img
+        src={asset('pwa-icon-192.png')}
+        alt=""
+        class="size-12 rounded-xl"
+      />
+
       <div>
         <p class="text-sm font-semibold">Preparing the player</p>
         <p class="text-2xs text-overlay1 mt-1">{text}</p>
@@ -132,7 +141,10 @@
         aria-valuemax="9"
         aria-valuenow={step}
       >
-        <div class="bg-mauve h-full" style={`width:${(step / 9) * 100}%`}></div>
+        <div
+          class="bg-mauve h-full"
+          style={`width:${step / 9 * 100}%`}
+        ></div>
       </div>
       {#if App.connection.loadingClient ?? App.connection.client}
         <div
@@ -169,8 +181,12 @@
 {/snippet}
 
 {#snippet startupFailed(/** @type {unknown} */ error)}
-  <div class="bg-base text-text grid h-dvh place-items-center p-6">
-    <div class="border-red/40 bg-crust w-full max-w-sm border p-5 text-center">
+  <div
+    class="bg-base text-text grid h-dvh place-items-center p-6"
+  >
+    <div
+      class="border-red/40 bg-crust w-full max-w-sm border p-5 text-center"
+    >
       <h1 class="text-red text-sm font-semibold">The application encountered an error</h1>
       <p class="text-overlay1 mt-2 text-xs leading-5 break-words">{String(error)}</p>
       <button

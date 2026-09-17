@@ -1,6 +1,5 @@
+import type { Track } from "#lib/runes/Track.svelte.js";
 import type { Album } from "@iroh-fm/client/types";
-
-import type { Track } from "$lib/runes/Track.svelte.js";
 
 function albumItem(
   albumKey: string,

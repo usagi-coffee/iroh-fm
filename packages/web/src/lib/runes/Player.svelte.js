@@ -1,8 +1,8 @@
 import { tick, untrack } from "svelte";
 
-import { friendlyError } from "$lib/utils.js";
-
 import { subscribeNativePlayerState } from "@iroh-fm/client/core";
+
+import { friendlyError } from "#lib/utils.js";
 
 const NATIVE_STATE_MAX_AGE_MS = 200;
 
@@ -12,9 +12,9 @@ export class Player {
   audioSrc = $state("");
   /** @type {Awaited<ReturnType<import('@iroh-fm/client').MusicClient['trackSource']>> | null} */
   audioSource = $state(null);
-  /** @type {import('$lib/runes/Track.svelte.js').Track | null} */
+  /** @type {import('#lib/runes/Track.svelte.js').Track | null} */
   currentTrack = $state(null);
-  /** @type {import('$lib/runes/Track.svelte.js').Track[]} */
+  /** @type {import('#lib/runes/Track.svelte.js').Track[]} */
   queue = $state.raw([]);
   playing = $state(false);
   audioLoading = $state(false);
@@ -36,7 +36,7 @@ export class Player {
   /** @type {string | null} */
   nativePlayPendingTrackId = null;
 
-  /** @param {import('$lib/runes/App.svelte.js').Application} app */
+  /** @param {import('#lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
     subscribeNativePlayerState((/** @type {any} */ state) => this.applyNativeState(state));
@@ -66,8 +66,8 @@ export class Player {
   }
 
   /**
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} albumTracks
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} sourceQueue
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} albumTracks
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} sourceQueue
    */
   async playAlbumTracks(albumTracks, sourceQueue) {
     const albumTrackIds = new Set(albumTracks.map((track) => track.id));
@@ -76,8 +76,8 @@ export class Player {
   }
 
   /**
-   * @param {import('$lib/runes/Track.svelte.js').Track} track
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} queue
+   * @param {import('#lib/runes/Track.svelte.js').Track} track
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} queue
    * @param {number} generation
    */
   prefetchNext(track, queue, generation) {
@@ -108,8 +108,8 @@ export class Player {
   }
 
   /**
-   * @param {import('$lib/runes/Track.svelte.js').Track} track
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} [sourceQueue]
+   * @param {import('#lib/runes/Track.svelte.js').Track} track
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} [sourceQueue]
    */
   async play(track, sourceQueue = this.app.library.tracks) {
     const client = this.app.connection.client;
@@ -248,8 +248,8 @@ export class Player {
   }
 
   /**
-   * @param {import('$lib/runes/Track.svelte.js').Track} track
-   * @param {import('$lib/runes/Track.svelte.js').Track[]} queue
+   * @param {import('#lib/runes/Track.svelte.js').Track} track
+   * @param {import('#lib/runes/Track.svelte.js').Track[]} queue
    */
   async playFromTrackList(track, queue) {
     this.app.library.selectedTrackId = track.id;

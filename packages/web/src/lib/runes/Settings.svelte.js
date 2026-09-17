@@ -1,10 +1,10 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { App } from "$lib/runes/App.svelte.js";
-import { friendlyError, hasConnectionAddress } from "$lib/utils.js";
-
 import { ClientCore } from "@iroh-fm/client/core";
+
+import { App } from "#lib/runes/App.svelte.js";
+import { friendlyError, hasConnectionAddress } from "#lib/utils.js";
 
 export const MIN_MEMORY_CACHE_MIB = 32;
 export const MAX_MEMORY_CACHE_MIB = Math.round(ClientCore.memoryCacheMaxSize() / 1024 / 1024);
@@ -228,6 +228,6 @@ export class Settings {
     if (App.starredKey) localStorage.setItem("iroh-fm-starred-key", App.starredKey);
     else localStorage.removeItem("iroh-fm-starred-key");
     localStorage.removeItem("iroh-fm-loved-key");
-    if (await App.connection.connect()) await goto(resolve("/tracks"));
+    if (await App.connection.connect()) await goto(resolve("tracks"));
   };
 }

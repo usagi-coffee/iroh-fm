@@ -1,9 +1,9 @@
-import { dev } from "$app/environment";
-import { asset } from "$app/paths";
+import { dev } from "$app/env";
+import { resolve } from "$app/paths";
 
 const PAGE_BUILD = __BUILD_VERSION__;
-const WORKER_URL = asset("/service-worker.js");
-const VERSION_URL = asset("/_app/version.json");
+const WORKER_URL = `${resolve("")}service-worker.js`;
+const VERSION_URL = `${resolve("")}_app/version.json`;
 const CHECK_INTERVAL_MS = 60_000;
 const TIMEOUT_MS = 10_000;
 const INSTALL_TIMEOUT_MS = 60_000;
@@ -11,6 +11,7 @@ const DEVELOPMENT =
   dev ||
   (typeof location !== "undefined" &&
     ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname));
+
 const MEDIA_CACHES = new Set([
   "iroh-fm-cover-art-v1",
   "iroh-fm-cover-art-v2",
@@ -243,7 +244,7 @@ async function installBuild(build) {
 /** @param {string} build */
 async function register(build) {
   const registration = await navigator.serviceWorker.register(workerUrl(build), {
-    type: "classic",
+    type: "module",
     updateViaCache: "none",
   });
   log("registration:resolved", { build, ...registrationState(registration) });

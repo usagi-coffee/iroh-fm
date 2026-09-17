@@ -43,7 +43,5 @@ test("explains protocol version mismatches on the connect page", async ({ page }
   await expect(alert).toContainText("Connection failed.");
   await expect(alert).toContainText("unknown variant `ListPlaylists`");
   await expect(alert).toContainText("Protocol version mismatch.");
-  await expect(alert).toContainText(
-    "Upgrade both to the newest iroh.fm version, then try again.",
-  );
+  await expect(alert).toContainText("Upgrade both to the newest iroh.fm version, then try again.");
 });

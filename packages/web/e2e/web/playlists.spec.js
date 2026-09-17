@@ -83,13 +83,9 @@ test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) 
       targetPosition: { x: 20, y: 26 },
     });
   await expect(page.getByRole("row").nth(2)).toHaveAttribute("data-track-id", "track-3");
-  await page
-    .getByRole("link", { name: "Playlist (1)", exact: true })
-    .click({ button: "right" });
+  await page.getByRole("link", { name: "Playlist (1)", exact: true }).click({ button: "right" });
   await page.getByRole("button", { name: "Cache playlist" }).click();
-  await page
-    .getByRole("link", { name: "Playlist (1)", exact: true })
-    .click({ button: "right" });
+  await page.getByRole("link", { name: "Playlist (1)", exact: true }).click({ button: "right" });
   await expect(page.getByRole("button", { name: "Playlist cached" })).toBeDisabled();
   await page.keyboard.press("Escape");
 
@@ -98,9 +94,7 @@ test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) 
     page.locator("footer").getByTitle("Show currently playing track").first(),
   ).toHaveText("Nebula Drift");
 
-  await page
-    .getByRole("link", { name: "Playlist (1)", exact: true })
-    .click({ button: "right" });
+  await page.getByRole("link", { name: "Playlist (1)", exact: true }).click({ button: "right" });
   await expect(page.getByRole("button", { name: "First", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Last", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Rename", exact: true }).click();

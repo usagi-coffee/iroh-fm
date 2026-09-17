@@ -1,7 +1,7 @@
 <script>
   import { untrack } from "svelte";
 
-  import SnippetModal from "$lib/modals/Snippet.svelte";
+  import SnippetModal from "#lib/modals/Snippet.svelte";
 
   /** @typedef {{ dismiss: (name: string | null) => void, title: string, initialName?: string, submitLabel?: string }} Props */
   /** @type {Props} */
@@ -43,7 +43,7 @@
         {@attach focusName}
         bind:value={name}
         maxlength="200"
-        class="border-surface1 bg-mantle text-text mt-2 w-full border px-3 py-2 text-sm outline-none focus:border-mauve"
+        class="border-surface1 bg-mantle text-text focus:border-mauve mt-2 w-full border px-3 py-2 text-sm outline-none"
       />
     </div>
     <div class="border-surface0 bg-mantle flex justify-end gap-2 border-t px-5 py-3">

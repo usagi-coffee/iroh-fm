@@ -14,7 +14,7 @@ export function setPlaylistTracksDrag(event, tracks, preview = {}) {
   );
   event.dataTransfer.setData(
     "text/plain",
-    tracks.length === 1 ? tracks[0]?.id ?? "" : `${tracks.length} tracks`,
+    tracks.length === 1 ? (tracks[0]?.id ?? "") : `${tracks.length} tracks`,
   );
   const dragImage = createDragImage(
     preview.label ?? (tracks.length === 1 ? "Track" : `${tracks.length} tracks`),

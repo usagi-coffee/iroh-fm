@@ -1,11 +1,11 @@
-import { nativeBuildInfo } from "$lib/runtime.js";
+import { nativeBuildInfo } from "#lib/runtime.js";
 import {
   activateServiceWorkerUpdate,
   currentNativeRequirement,
   ensure_service_worker,
   subscribeToNativeUpgrade,
   subscribeToServiceWorkerUpdates,
-} from "$lib/service-worker.js";
+} from "#lib/service-worker.js";
 
 class UpdateManager {
   ready = $state(false);

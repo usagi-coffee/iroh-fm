@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#lib": "./src/lib/index.js",
+    "#lib/*": "./src/lib/*"
+  },
   "scripts": {
     "generate:types": "bun run --cwd ../client generate:types",
     "build:wasm": "bun run --cwd ../client build:wasm",
@@ -15,7 +19,7 @@
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "bun run build:wasm && bun run check:prepared",
-    "check:prepared": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
+    "check:prepared": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json && tsc --noEmit -p src/service-worker/tsconfig.json",
     "check:watch": "bun run generate:types && svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
     "test:service-worker": "node --test scripts/service-worker.test.js",
     "test:e2e": "bun run generate:types && playwright test",
@@ -34,15 +38,15 @@
   "devDependencies": {
     "@iconify-json/ri": "^1.2.10",
     "@playwright/test": "1.57.0",
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.63.0",
+    "@sveltejs/adapter-static": "^4.0.0-next.0",
+    "@sveltejs/kit": "^3.0.0-next.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.1.14",
     "@tauri-apps/cli": "^2.11.4",
     "oxlint": "^1.74.0",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "https://pkg.pr.new/svelte@18558",
-    "svelte-check": "^4.6.0",
+    "svelte-check": "^4.7.5",
     "tailwindcss": "^4.1.14",
     "typescript": "^6.0.3",
     "unplugin-icons": "^23.0.1",

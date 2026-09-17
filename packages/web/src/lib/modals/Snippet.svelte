@@ -1,5 +1,5 @@
 <script>
-  import { focusModal } from "$lib/modals/index.js";
+  import { focusModal } from "#lib/modals/index.js";
 
   /**
    * @typedef {Object} Props

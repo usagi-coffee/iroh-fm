@@ -1,8 +1,8 @@
 <script>
-  import { Updater } from "$lib/runes/Updater.svelte.js";
-
   import CloseIcon from "virtual:icons/ri/close-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
+
+  import { Updater } from "#lib/runes/Updater.svelte.js";
 
   /** @type {{ overlay: boolean }} */
   const { overlay } = $props();
