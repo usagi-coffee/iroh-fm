@@ -7,6 +7,7 @@ export type { BackendResponse } from "./generated/BackendResponse.js";
 export type { CoverArtBytes } from "./generated/CoverArtBytes.js";
 export type { CoverArtId } from "./generated/CoverArtId.js";
 export type { ConnectionInfo } from "./generated/ConnectionInfo.js";
+export type { LibrarySnapshot } from "./generated/LibrarySnapshot.js";
 export type { LibrarySummary } from "./generated/LibrarySummary.js";
 export type { Playlist } from "./generated/Playlist.js";
 export type { PlaylistId } from "./generated/PlaylistId.js";

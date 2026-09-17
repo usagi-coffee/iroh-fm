@@ -168,6 +168,9 @@ impl MusicServer {
                     track_count: library.track_count(),
                 }))
             }
+            BackendRequest::GetLibrarySnapshot { if_revision } => {
+                Ok(library_snapshot_response(&library, if_revision.as_deref()))
+            }
             BackendRequest::ListArtists => Ok(BackendResponse::Artists(
                 library.artists.values().cloned().collect(),
             )),
@@ -814,6 +817,16 @@ impl MusicServer {
     }
 }
 
+fn library_snapshot_response(library: &LibraryIndex, if_revision: Option<&str>) -> BackendResponse {
+    if if_revision == Some(library.revision()) {
+        BackendResponse::LibraryNotModified {
+            revision: library.revision().to_string(),
+        }
+    } else {
+        BackendResponse::LibrarySnapshot(library.snapshot())
+    }
+}
+
 fn make_cover_thumbnail(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(COVER_SOURCE_MAX_DIMENSION);
@@ -1216,6 +1229,21 @@ mod tests {
     use image::GenericImageView;
 
     use super::*;
+
+    #[test]
+    fn library_snapshot_is_conditional_on_the_content_revision() {
+        let library = LibraryIndex::default();
+        let revision = library.revision().to_string();
+
+        assert!(matches!(
+            library_snapshot_response(&library, Some(&revision)),
+            BackendResponse::LibraryNotModified { revision: returned } if returned == revision
+        ));
+        assert!(matches!(
+            library_snapshot_response(&library, Some("stale")),
+            BackendResponse::LibrarySnapshot(snapshot) if snapshot.revision == revision
+        ));
+    }
 
     fn cached_cover(id: &str, size: usize) -> CoverArtBytes {
         CoverArtBytes {

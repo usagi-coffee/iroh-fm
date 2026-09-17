@@ -10,7 +10,8 @@
   },
   "scripts": {
     "generate:types": "cargo test -p protocol -p client export_bindings",
-    "build:wasm": "bun run generate:types && bun run build.js"
+    "build:wasm": "bun run generate:types && bun run build.js",
+    "test": "bun test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0"

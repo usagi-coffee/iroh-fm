@@ -384,6 +384,7 @@ async fn read_response(recv: &mut iroh::endpoint::RecvStream) -> Result<BackendR
 fn request_name(request: &BackendRequest) -> &'static str {
     match request {
         BackendRequest::GetLibrarySummary => "GetLibrarySummary",
+        BackendRequest::GetLibrarySnapshot { .. } => "GetLibrarySnapshot",
         BackendRequest::ListArtists => "ListArtists",
         BackendRequest::ListAlbums => "ListAlbums",
         BackendRequest::ListTracks => "ListTracks",

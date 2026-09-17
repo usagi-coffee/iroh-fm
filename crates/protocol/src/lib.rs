@@ -132,6 +132,10 @@ pub enum ResolvedId {
 #[ts(export)]
 pub enum BackendRequest {
     GetLibrarySummary,
+    GetLibrarySnapshot {
+        #[serde(default)]
+        if_revision: Option<String>,
+    },
     ListArtists,
     ListAlbums,
     ListTracks,
@@ -207,12 +211,25 @@ pub struct LibrarySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct LibrarySnapshot {
+    pub revision: String,
+    pub summary: LibrarySummary,
+    pub artists: Vec<Artist>,
+    pub albums: Vec<Album>,
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum BackendResponse {
     Error {
         message: String,
     },
     LibrarySummary(LibrarySummary),
+    LibrarySnapshot(LibrarySnapshot),
+    LibraryNotModified {
+        revision: String,
+    },
     Empty,
     Artists(Vec<Artist>),
     Albums(Vec<Album>),
@@ -268,6 +285,32 @@ mod tests {
                     "artist_count": 1,
                     "album_count": 2,
                     "track_count": 3
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn conditional_library_snapshot_keeps_its_wire_shape() {
+        let request: BackendRequest = serde_json::from_value(serde_json::json!({
+            "GetLibrarySnapshot": { "if_revision": "library-v1-deadbeef" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            BackendRequest::GetLibrarySnapshot {
+                if_revision: Some(revision)
+            } if revision == "library-v1-deadbeef"
+        ));
+
+        let response = BackendResponse::LibraryNotModified {
+            revision: "library-v1-deadbeef".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "LibraryNotModified": {
+                    "revision": "library-v1-deadbeef"
                 }
             })
         );

@@ -492,12 +492,12 @@ impl LibraryBuilder {
             cache_hits,
             cache_misses
         );
-        Ok(LibraryIndex {
-            artists: self.artists,
-            albums: self.albums,
-            tracks: self.tracks,
-            cover_arts: self.cover_arts,
-        })
+        Ok(LibraryIndex::new(
+            self.artists,
+            self.albums,
+            self.tracks,
+            self.cover_arts,
+        ))
     }
 
     fn merge(&mut self, other: LibraryBuilder) {

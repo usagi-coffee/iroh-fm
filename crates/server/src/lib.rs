@@ -14,7 +14,8 @@ pub use iroh_rpc::{
 };
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
-    IROH_ALPN, Playlist, PlaylistId, ResolvedId, SearchQuery, StreamDescriptor, Track, TrackId,
+    IROH_ALPN, LibrarySnapshot, Playlist, PlaylistId, ResolvedId, SearchQuery, StreamDescriptor,
+    Track, TrackId,
 };
 pub use scanner::scan_music_dir;
 pub use server::MusicServer;

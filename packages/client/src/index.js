@@ -483,7 +483,10 @@ export class MusicClient {
   }
 
   async bootstrap(starredKey = "") {
-    return bootstrapProtocol(this.request.bind(this), starredKey);
+    return bootstrapProtocol(this.request.bind(this), starredKey, {
+      serverId: this.remoteId,
+      clientId: this.endpointId,
+    });
   }
 
   /**
