@@ -6,6 +6,7 @@ const WORKER_URL = `${resolve("")}service-worker.js`;
 const VERSION_URL = `${resolve("")}_app/version.json`;
 const CHECK_INTERVAL_MS = 60_000;
 const TIMEOUT_MS = 10_000;
+const DESKTOP_STARTUP_TIMEOUT_MS = 3_000;
 const INSTALL_TIMEOUT_MS = 60_000;
 const DEVELOPMENT =
   dev ||
@@ -116,6 +117,19 @@ export async function ensure_service_worker(build) {
     return noUpdate();
   }
 
+  const startup = startServiceWorker(build);
+  if (build?.platform !== "Desktop") return startup;
+  // The hosted page is already loaded, possibly from the active worker's
+  // offline shell. Do not hold the native player behind a stalled update check.
+  return withTimeout(startup, "Service worker startup timed out.", DESKTOP_STARTUP_TIMEOUT_MS)
+    .catch((error) => {
+      logError("startup:continuing", error);
+      return noUpdate();
+    });
+}
+
+/** @param {any} build */
+async function startServiceWorker(build) {
   nativeBuild = build ?? null;
   startMonitor();
   const registration = await getRegistration();
