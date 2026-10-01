@@ -1,9 +1,9 @@
 import { browser } from "$app/env";
 import { resolve } from "$app/paths";
 
-import { redirect } from "@sveltejs/kit";
-
 import { App } from "#lib/runes/App.svelte.js";
+
+import { redirect } from "@sveltejs/kit";
 
 /** @type {import('./$types').PageLoad} */
 export function load({ depends }) {

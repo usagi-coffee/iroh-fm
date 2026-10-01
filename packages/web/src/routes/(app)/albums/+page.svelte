@@ -1,7 +1,7 @@
 <script>
-  import AlbumGrid from "./AlbumGrid.svelte";
-
   import { App } from "#lib/runes/App.svelte.js";
+
+  import AlbumGrid from "./AlbumGrid.svelte";
 </script>
 
 <div class="contents" data-album-library>

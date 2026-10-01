@@ -1,10 +1,10 @@
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
-import { ClientCore } from "@iroh-fm/client/core";
-
 import { App } from "#lib/runes/App.svelte.js";
 import { friendlyError, hasConnectionAddress } from "#lib/utils.js";
+
+import { ClientCore } from "@iroh-fm/client/core";
 
 export const MIN_MEMORY_CACHE_MIB = 32;
 export const MAX_MEMORY_CACHE_MIB = Math.round(ClientCore.memoryCacheMaxSize() / 1024 / 1024);

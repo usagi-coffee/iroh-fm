@@ -5,9 +5,9 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
-  import TrackList from "../../../TrackList.svelte";
-
   import { App } from "#lib/runes/App.svelte.js";
+
+  import TrackList from "../../../TrackList.svelte";
 
   const playlist = $derived(App.library.playlistById.get(page.params.playlistId ?? "") ?? null);
   const params = $derived(new SvelteURLSearchParams(page.url.search));
@@ -21,10 +21,11 @@
     if (value) params.set("query", value);
     else params.delete("query");
 
-    void goto(
-      `${page.url.pathname}${params.size ? `?${params}` : ""}${page.url.hash}`,
-      { shallow: true, replace: true, state: page.state },
-    );
+    void goto(`${page.url.pathname}${params.size ? `?${params}` : ""}${page.url.hash}`, {
+      shallow: true,
+      replace: true,
+      state: page.state,
+    });
   }
 </script>
 

@@ -5,14 +5,14 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
+  import { App } from "#lib/runes/App.svelte.js";
+  import { Updater } from "#lib/runes/Updater.svelte.js";
+
   import CloseIcon from "virtual:icons/ri/close-line";
 
   import PlayerBar from "../PlayerBar.svelte";
   import TopBar from "../TopBar.svelte";
   import UpdateNotice from "../UpdateNotice.svelte";
-
-  import { App } from "#lib/runes/App.svelte.js";
-  import { Updater } from "#lib/runes/Updater.svelte.js";
 
   /** @typedef {import('./$types').LayoutProps} Props */
   /** @type {Props} */

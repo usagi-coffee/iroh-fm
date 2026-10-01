@@ -1,9 +1,9 @@
 <script>
-  import AddIcon from "virtual:icons/ri/add-line";
-  import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
-
   import SnippetModal from "#lib/modals/Snippet.svelte";
   import { App } from "#lib/runes/App.svelte.js";
+
+  import AddIcon from "virtual:icons/ri/add-line";
+  import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
 
   /**
    * @typedef {Object} Props

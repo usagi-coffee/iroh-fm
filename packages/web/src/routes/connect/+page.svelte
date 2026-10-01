@@ -15,9 +15,9 @@
   import QrIcon from "virtual:icons/ri/qr-scan-2-line";
   import RefreshIcon from "virtual:icons/ri/refresh-line";
   import SearchIcon from "virtual:icons/ri/search-line";
-  import StarIcon from "virtual:icons/ri/star-line";
   import PreviousIcon from "virtual:icons/ri/skip-back-fill";
   import NextIcon from "virtual:icons/ri/skip-forward-fill";
+  import StarIcon from "virtual:icons/ri/star-line";
 
   const DEMO_TRACKS = [
     ["01", "Nacre", "Anywhere Between", "Still Light", "3:42"],
@@ -85,12 +85,12 @@
   }
 
   async function copyTicketLink() {
-    if (!await App.connection.copyTicketLink()) return;
+    if (!(await App.connection.copyTicketLink())) return;
     showCopied("ticket");
   }
 
   async function copyEndpointId() {
-    if (!await App.connection.copyEndpointId()) return;
+    if (!(await App.connection.copyEndpointId())) return;
     showCopied("endpoint");
   }
 
@@ -112,7 +112,7 @@
   }
 
   async function connect() {
-    if (await App.connection.connect(loginTab === "ticket")) await goto(resolve('tracks'));
+    if (await App.connection.connect(loginTab === "ticket")) await goto(resolve("tracks"));
   }
 
   /**
@@ -176,17 +176,9 @@
     class="tablet-xl:flex absolute inset-0 hidden flex-col opacity-65 select-none"
     aria-hidden="true"
   >
-    <header
-      class="border-surface0 bg-crust text-2xs flex h-9 shrink-0 items-center border-b"
-    >
-      <div
-        class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r"
-      >
-        <img
-          src={asset('pwa-icon-192.png')}
-          alt=""
-          class="size-6 rounded-md"
-        />
+    <header class="border-surface0 bg-crust text-2xs flex h-9 shrink-0 items-center border-b">
+      <div class="border-surface0 grid h-full w-10 shrink-0 place-items-center border-r">
+        <img src={asset("pwa-icon-192.png")} alt="" class="size-6 rounded-md" />
       </div>
       <span class="border-surface0 bg-surface0 border-r px-4 py-2 font-semibold">TRACKS</span><span
         class="text-overlay1 grid w-9 place-items-center"><StarIcon class="text-sm" /></span
@@ -266,11 +258,7 @@
     >
       <div class="border-surface0 bg-mantle border-b px-5 pt-5">
         <div class="mb-5 flex items-start gap-3">
-          <img
-            src={asset('pwa-icon-192.png')}
-            alt="iroh.fm"
-            class="size-12 rounded-xl"
-          />
+          <img src={asset("pwa-icon-192.png")} alt="iroh.fm" class="size-12 rounded-xl" />
 
           <div class="min-w-0 flex-1">
             <div class="flex min-w-0 items-center">
@@ -409,7 +397,7 @@
                 class="border-surface1 bg-mantle focus:border-mauve h-10 w-full border px-3 pr-14 font-mono text-xs outline-none"
               /><button
                 type="button"
-                onclick={() => showSecret = !showSecret}
+                onclick={() => (showSecret = !showSecret)}
                 class="text-3xs text-overlay1 hover:text-mauve absolute inset-y-0 right-3 font-mono"
                 >{showSecret ? "HIDE" : "SHOW"}</button
               >
@@ -460,8 +448,8 @@
             {#if protocolVersionMismatch}
               <p class="border-red/25 mt-2 border-t pt-2">
                 <strong>Protocol version mismatch.</strong>
-                The app and server use different protocol versions. Upgrade both to the newest
-                iroh.fm version, then try again.
+                The app and server use different protocol versions. Upgrade both to the newest iroh.fm
+                version, then try again.
               </p>
             {/if}
           </div>{/if}
@@ -474,8 +462,7 @@
             class="bg-mauve text-crust hover:bg-pink flex h-11 w-full items-center justify-center gap-3 font-mono text-xs font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40"
           >
             {#if App.connection.connecting}
-              <span
-                class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
+              <span class="border-crust/25 border-t-crust size-3 animate-spin rounded-full border-2"
               ></span>
 
               {App.connection.connectionStep}
@@ -491,11 +478,14 @@
 
 {#snippet QrScanner(/** @type {{ dismiss: (value: string | null) => void }} */ { dismiss })}
   {let error = $state("")}
-  {const scan = $derived(createQrScanner(dismiss, (reason) => error = friendlyError(reason, "Could not start the camera.")))}
+  {const scan = $derived(
+    createQrScanner(
+      dismiss,
+      (reason) => (error = friendlyError(reason, "Could not start the camera.")),
+    ),
+  )}
 
-  <div
-    class="border-surface0 bg-mantle flex items-center justify-between border-b px-4 py-3"
-  >
+  <div class="border-surface0 bg-mantle flex items-center justify-between border-b px-4 py-3">
     <div>
       <h2 id="qr-title" class="text-sm font-semibold">Scan server ticket</h2>
       <p class="text-3xs text-overlay1 mt-0.5">Point the camera at a ticket QR code</p>

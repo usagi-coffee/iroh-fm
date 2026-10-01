@@ -19,7 +19,7 @@
       },
       {
         "groupName": "lib",
-        "elementNamePattern": ["$lib/**"]
+        "elementNamePattern": ["#lib", "#lib/**"]
       },
       {
         "groupName": "relative",

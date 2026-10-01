@@ -4,10 +4,10 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
 
+  import { App } from "#lib/runes/App.svelte.js";
+
   import TrackList from "../../TrackList.svelte";
   import AlbumGrid from "../albums/AlbumGrid.svelte";
-
-  import { App } from "#lib/runes/App.svelte.js";
 
   const params = $derived(new SvelteURLSearchParams(page.url.search));
   const query = $derived(params.get("query") ?? "");
@@ -26,10 +26,11 @@
   function updateQuery(value) {
     if (value) params.set("query", value);
     else params.delete("query");
-    void goto(
-      `${page.url.pathname}${params.size ? `?${params}` : ""}${page.url.hash}`,
-      { shallow: true, replace: true, state: page.state },
-    );
+    void goto(`${page.url.pathname}${params.size ? `?${params}` : ""}${page.url.hash}`, {
+      shallow: true,
+      replace: true,
+      state: page.state,
+    });
   }
 </script>
 

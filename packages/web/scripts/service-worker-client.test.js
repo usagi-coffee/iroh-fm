@@ -21,7 +21,10 @@ test("Desktop continues from its loaded page when service worker registration st
   };
   const context = vm.createContext({
     navigator,
-    location: { hostname: "usagi-coffee.github.io", href: "https://usagi-coffee.github.io/iroh-fm/" },
+    location: {
+      hostname: "usagi-coffee.github.io",
+      href: "https://usagi-coffee.github.io/iroh-fm/",
+    },
     dev: false,
     resolve: () => "/iroh-fm/",
     __BUILD_VERSION__: "test-build",

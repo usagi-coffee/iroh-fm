@@ -1,6 +1,6 @@
 # iroh.fm web player
 
-The web player is a fully static, client-rendered Svelte SPA. It has no HTTP API or server-side runtime. The browser loads an application-specific iroh WebAssembly client from the sibling `@iroh-fm/client` workspace and connects to an iroh-fm server using its endpoint ticket.
+The web player is a fully static, client-rendered SvelteKit 3 SPA, built with Svelte 5 and Vite 8. It has no HTTP API or server-side runtime. The browser loads an application-specific iroh WebAssembly client from the sibling `@iroh-fm/client` workspace and connects to an iroh-fm server using its endpoint ticket.
 
 Browser iroh connections are end-to-end encrypted but relay-only. Start `iroh-fm` with a reachable relay and use the ticket it prints.
 
@@ -9,6 +9,7 @@ The connection screen also accepts an optional client secret. This keeps the bro
 ## Prerequisites
 
 - Bun
+- Node.js 22.17 or newer
 - Rust with the `wasm32-unknown-unknown` target
 - `wasm-bindgen-cli` 0.2.125
 - `wasm-opt` from Binaryen
@@ -28,6 +29,8 @@ bun run dev
 ```
 
 `dev` first builds `crates/web-wasm`, generates bindings in `packages/client/src/wasm`, and starts Vite.
+
+SvelteKit configuration lives in `vite.config.js`. Library imports use the `#lib` subpath declared in `package.json`. The app and service worker have separate TypeScript configurations extending `$app/tsconfig` and `$app/tsconfig/service-worker`; keep TypeScript on 6.x while SvelteKit and `svelte-check` require it.
 
 ## Static build
 

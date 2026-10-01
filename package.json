@@ -14,13 +14,38 @@
     "lint": "oxlint .; cargo clippy"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
-    "@types/bun": "latest",
-    "oxfmt": "latest",
-    "oxlint": "latest",
-    "prettier-plugin-svelte": "latest"
+    "@types/bun": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "prettier-plugin-svelte": "catalog:"
   },
   "peerDependencies": {
     "typescript": "^6"
+  },
+  "catalog": {
+    "@types/bun": "1.4.2",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "prettier-plugin-svelte": "^4.1.1",
+    "typescript": "^6.0.3"
+  },
+  "catalogs": {
+    "web": {
+      "@iconify-json/ri": "^1.2.10",
+      "@playwright/test": "1.63.0",
+      "@sveltejs/adapter-static": "^4.0.0",
+      "@sveltejs/kit": "^3.0.0",
+      "@sveltejs/vite-plugin-svelte": "^7.3.1",
+      "@tailwindcss/vite": "^4.3.3",
+      "svelte": "https://pkg.pr.new/svelte@18558",
+      "svelte-check": "^4.7.6",
+      "tailwindcss": "^4.3.3",
+      "unplugin-icons": "^24.0.0",
+      "vite": "^8.3.2"
+    },
+    "desktop": {
+      "@tauri-apps/api": "^2.12.1",
+      "@tauri-apps/cli": "^2.12.1"
+    }
   }
 }

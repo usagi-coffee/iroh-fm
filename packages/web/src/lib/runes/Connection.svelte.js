@@ -1,5 +1,3 @@
-import { ClientCore } from "@iroh-fm/client/core";
-
 import { nativeBuildInfo } from "#lib/runtime.js";
 import {
   albumSort,
@@ -8,6 +6,8 @@ import {
   hasConnectionAddress,
   trackSort,
 } from "#lib/utils.js";
+
+import { ClientCore } from "@iroh-fm/client/core";
 
 export class Connection {
   #startupTransport = Promise.withResolvers();

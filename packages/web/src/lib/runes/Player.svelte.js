@@ -1,8 +1,8 @@
 import { tick, untrack } from "svelte";
 
-import { subscribeNativePlayerState } from "@iroh-fm/client/core";
-
 import { friendlyError } from "#lib/utils.js";
+
+import { subscribeNativePlayerState } from "@iroh-fm/client/core";
 
 const NATIVE_STATE_MAX_AGE_MS = 200;
 

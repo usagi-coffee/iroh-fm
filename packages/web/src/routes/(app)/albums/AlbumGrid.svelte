@@ -1,6 +1,15 @@
 <script>
   import { untrack } from "svelte";
 
+  import AlbumActionsModal from "#lib/modals/AlbumActionsModal.svelte";
+  import { modal } from "#lib/modals/index.js";
+  import { App } from "#lib/runes/App.svelte.js";
+  import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
+  import { longPress } from "#lib/ui/long-press.js";
+  import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
+  import VirtualList from "#lib/ui/VirtualList.svelte";
+  import { friendlyError } from "#lib/utils.js";
+
   import AddIcon from "virtual:icons/ri/add-line";
   import CachedIcon from "virtual:icons/ri/check-line";
   import DownloadIcon from "virtual:icons/ri/download-line";
@@ -10,15 +19,6 @@
   import SubtractIcon from "virtual:icons/ri/subtract-line";
 
   import Cover from "../../Cover.svelte";
-
-  import AlbumActionsModal from "#lib/modals/AlbumActionsModal.svelte";
-  import { modal } from "#lib/modals/index.js";
-  import { App } from "#lib/runes/App.svelte.js";
-  import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
-  import { longPress } from "#lib/ui/long-press.js";
-  import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
-  import VirtualList from "#lib/ui/VirtualList.svelte";
-  import { friendlyError } from "#lib/utils.js";
 
   /**
    * @typedef {Object} Props

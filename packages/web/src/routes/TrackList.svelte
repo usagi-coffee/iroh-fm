@@ -4,6 +4,17 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
 
+  import AlbumActionsModal from "#lib/modals/AlbumActionsModal.svelte";
+  import { modal } from "#lib/modals/index.js";
+  import PlaylistPickerModal from "#lib/modals/PlaylistPickerModal.svelte";
+  import SnippetModal from "#lib/modals/Snippet.svelte";
+  import { App } from "#lib/runes/App.svelte.js";
+  import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
+  import { longPress } from "#lib/ui/long-press.js";
+  import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
+  import VirtualList from "#lib/ui/VirtualList.svelte";
+  import { formatBytes, formatTime, friendlyError } from "#lib/utils.js";
+
   import DownIcon from "virtual:icons/ri/arrow-down-line";
   import UpIcon from "virtual:icons/ri/arrow-up-line";
   import RemoveIcon from "virtual:icons/ri/delete-bin-line";
@@ -15,17 +26,6 @@
   import StarIcon from "virtual:icons/ri/star-line";
 
   import Cover from "./Cover.svelte";
-
-  import AlbumActionsModal from "#lib/modals/AlbumActionsModal.svelte";
-  import { modal } from "#lib/modals/index.js";
-  import PlaylistPickerModal from "#lib/modals/PlaylistPickerModal.svelte";
-  import SnippetModal from "#lib/modals/Snippet.svelte";
-  import { App } from "#lib/runes/App.svelte.js";
-  import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
-  import { longPress } from "#lib/ui/long-press.js";
-  import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
-  import VirtualList from "#lib/ui/VirtualList.svelte";
-  import { formatBytes, formatTime, friendlyError } from "#lib/utils.js";
 
   /**
    * @typedef {Object} Props

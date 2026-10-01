@@ -37,7 +37,13 @@ const STATIC_FILES = [
   "/pwa-maskable-192.png",
   "/pwa-maskable-512.png",
 ];
-const SHELL_FILES = [...new Set([...immutable.map(({ path }) => `/${path}`), ...STATIC_FILES, "/"].map(scoped).concat(FALLBACKS))];
+const SHELL_FILES = [
+  ...new Set(
+    [...immutable.map(({ path }) => `/${path}`), ...STATIC_FILES, "/"]
+      .map(scoped)
+      .concat(FALLBACKS),
+  ),
+];
 const ENTRYPOINTS = SHELL_FILES.filter((path) =>
   /\/_app\/immutable\/entry\/(?:start|app)\.[^/]+\.js$/.test(path),
 );

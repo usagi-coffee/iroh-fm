@@ -121,11 +121,14 @@ export async function ensure_service_worker(build) {
   if (build?.platform !== "Desktop") return startup;
   // The hosted page is already loaded, possibly from the active worker's
   // offline shell. Do not hold the native player behind a stalled update check.
-  return withTimeout(startup, "Service worker startup timed out.", DESKTOP_STARTUP_TIMEOUT_MS)
-    .catch((error) => {
-      logError("startup:continuing", error);
-      return noUpdate();
-    });
+  return withTimeout(
+    startup,
+    "Service worker startup timed out.",
+    DESKTOP_STARTUP_TIMEOUT_MS,
+  ).catch((error) => {
+    logError("startup:continuing", error);
+    return noUpdate();
+  });
 }
 
 /** @param {any} build */

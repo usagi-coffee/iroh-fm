@@ -1,10 +1,6 @@
 <script>
   import { resolve } from "$app/paths";
 
-  import CloseIcon from "virtual:icons/ri/close-line";
-  import DeleteIcon from "virtual:icons/ri/delete-bin-line";
-  import CopyIcon from "virtual:icons/ri/file-copy-line";
-
   import ConfirmModal from "#lib/modals/ConfirmModal.svelte";
   import { modal } from "#lib/modals/index.js";
   import { App } from "#lib/runes/App.svelte.js";
@@ -16,6 +12,10 @@
   import { nativeBuildInfo as sharedNativeBuildInfo } from "#lib/runtime.js";
   import { forceServiceWorkerUpdate, subscribeToServiceWorkerStatus } from "#lib/service-worker.js";
   import { formatBytes, friendlyError } from "#lib/utils.js";
+
+  import CloseIcon from "virtual:icons/ri/close-line";
+  import DeleteIcon from "virtual:icons/ri/delete-bin-line";
+  import CopyIcon from "virtual:icons/ri/file-copy-line";
 
   const settings = new Settings();
   let showSecret = $state(false);

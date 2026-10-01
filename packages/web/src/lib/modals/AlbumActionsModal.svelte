@@ -1,15 +1,15 @@
 <script>
-  import DownloadIcon from "virtual:icons/ri/download-line";
-  import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
-  import StarIcon from "virtual:icons/ri/star-line";
-
-  import Cover from "../../routes/Cover.svelte";
-
   import { modal } from "#lib/modals/index.js";
   import PlaylistPickerModal from "#lib/modals/PlaylistPickerModal.svelte";
   import SnippetModal from "#lib/modals/Snippet.svelte";
   import { App } from "#lib/runes/App.svelte.js";
   import { formatBytes, formatTime } from "#lib/utils.js";
+
+  import DownloadIcon from "virtual:icons/ri/download-line";
+  import PlaylistIcon from "virtual:icons/ri/play-list-add-line";
+  import StarIcon from "virtual:icons/ri/star-line";
+
+  import Cover from "../../routes/Cover.svelte";
 
   /**
    * @typedef {Object} Props

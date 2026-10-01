@@ -31,25 +31,28 @@
   },
   "dependencies": {
     "@iroh-fm/client": "workspace:*",
-    "@tauri-apps/api": "^2.11.0",
-    "oxfmt": "^0.59.0",
+    "@tauri-apps/api": "catalog:desktop",
     "wanakana": "^5.3.1"
   },
   "devDependencies": {
-    "@iconify-json/ri": "^1.2.10",
-    "@playwright/test": "1.57.0",
-    "@sveltejs/adapter-static": "^4.0.0-next.0",
-    "@sveltejs/kit": "^3.0.0-next.0",
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "@tailwindcss/vite": "^4.1.14",
-    "@tauri-apps/cli": "^2.11.4",
-    "oxlint": "^1.74.0",
-    "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "https://pkg.pr.new/svelte@18558",
-    "svelte-check": "^4.7.5",
-    "tailwindcss": "^4.1.14",
-    "typescript": "^6.0.3",
-    "unplugin-icons": "^23.0.1",
-    "vite": "^8.0.16"
+    "@iconify-json/ri": "catalog:web",
+    "@playwright/test": "catalog:web",
+    "@sveltejs/adapter-static": "catalog:web",
+    "@sveltejs/kit": "catalog:web",
+    "@sveltejs/vite-plugin-svelte": "catalog:web",
+    "@tailwindcss/vite": "catalog:web",
+    "@tauri-apps/cli": "catalog:desktop",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "prettier-plugin-svelte": "catalog:",
+    "svelte": "catalog:web",
+    "svelte-check": "catalog:web",
+    "tailwindcss": "catalog:web",
+    "typescript": "catalog:",
+    "unplugin-icons": "catalog:web",
+    "vite": "catalog:web"
+  },
+  "engines": {
+    "node": ">=22.17"
   }
 }
