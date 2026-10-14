@@ -1,0 +1,16 @@
+**
+!Containerfile
+!Cargo.toml
+!Cargo.lock
+!crates/
+!crates/*/
+!crates/*/Cargo.toml
+!crates/*/src/
+!crates/*/src/**
+!packages/
+!packages/web/
+!packages/web/src-tauri/
+!packages/web/src-tauri/Cargo.toml
+!packages/web/src-tauri/build.rs
+!packages/web/src-tauri/src/
+!packages/web/src-tauri/src/**
