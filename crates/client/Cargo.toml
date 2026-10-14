@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
-iroh.workspace = true
+iroh = { workspace = true, features = ["default"] }
 iroh-mdns-address-lookup.workspace = true
 protocol = { path = "../protocol" }
 serde.workspace = true

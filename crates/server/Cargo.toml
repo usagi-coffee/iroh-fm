@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 image.workspace = true
-iroh.workspace = true
+iroh = { workspace = true, features = ["default"] }
 iroh-mdns-address-lookup.workspace = true
 iroh-tickets.workspace = true
 lofty.workspace = true

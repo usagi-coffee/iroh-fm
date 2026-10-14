@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 console_error_panic_hook = "0.1"
 futures-util = "0.3"
 getrandom = { version = "0.3", features = ["wasm_js"] }
-iroh = { version = "1.1.0", default-features = false, features = ["tls-ring"] }
-iroh-tickets = "1"
+iroh = { workspace = true, features = ["tls-ring"] }
+iroh-tickets.workspace = true
 js-sys = "0.3"
 protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
