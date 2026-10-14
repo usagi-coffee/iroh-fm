@@ -18,9 +18,9 @@
   const { lyrics, message, title, position, duration, track, exporter, onclose, onretry } =
     $props();
   let follow = $state(true);
-  let furigana = $state(false);
-  let meanings = $state(false);
-  let advance = $state(0);
+  const furigana = $derived(App.lyricsFurigana);
+  const meanings = $derived(App.lyricsMeanings);
+  let advanceMs = $state(0);
   const exportSupported = $derived(
     Boolean(
       App.connection.client &&
@@ -41,7 +41,7 @@
   );
   const hasReadings = $derived(lines.some((line) => line.parts?.some((part) => part.reading)));
   const hasDictionary = $derived(lines.some((line) => line.parts?.some((part) => part.dictionary)));
-  const active = $derived(activeLyricIndex(lines, position + advance));
+  const active = $derived(activeLyricIndex(lines, position + advanceMs / 1000));
   const source = $derived(
     lyricsSourceUrl(lyrics?.source_url) ??
       (lyrics?.status === "Available" ? "https://lrclib.net/" : null),
@@ -110,7 +110,12 @@
       class="flex items-center gap-1 text-xs"
       title="Automatic dictionary readings may differ from the sung pronunciation"
     >
-      <input type="checkbox" bind:checked={furigana} disabled={!hasReadings} class="accent-mauve" />
+      <input
+        type="checkbox"
+        bind:checked={App.lyricsFurigana}
+        disabled={!hasReadings}
+        class="accent-mauve"
+      />
       Furigana
     </label>
     {#if hasDictionary}
@@ -118,25 +123,31 @@
         class="flex items-center gap-1 text-xs"
         title="Short English dictionary senses above furigana, not a lyric translation"
       >
-        <input type="checkbox" bind:checked={meanings} disabled={!furigana} class="accent-mauve" />
+        <input
+          type="checkbox"
+          bind:checked={App.lyricsMeanings}
+          disabled={!furigana || !hasReadings}
+          class="accent-mauve"
+        />
         Meanings <span class="text-overlay1">(dictionary)</span>
       </label>
     {/if}
     {#if lines.length && !estimated}
       <label
         class="flex items-center gap-2 text-xs"
-        title="Timing offset in seconds; positive values advance lyrics"
+        title="Timing offset in milliseconds; positive values advance lyrics"
       >
-        Offset
+        Offset (ms)
         <input
           type="number"
-          min="-10"
-          max="10"
-          step="0.5"
+          min="-10000"
+          max="10000"
+          step="100"
           bind:value={
-            () => advance, (value) => (advance = Math.max(-10, Math.min(10, Number(value) || 0)))
+            () => advanceMs,
+            (value) => (advanceMs = Math.max(-10000, Math.min(10000, Number(value) || 0)))
           }
-          class="border-surface1 bg-base w-16 border px-1"
+          class="border-surface1 bg-base w-20 border px-1"
         />
       </label>
     {/if}

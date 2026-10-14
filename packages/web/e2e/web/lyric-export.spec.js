@@ -68,7 +68,7 @@ test("Export lyrics downloads original audio, UTF-8 sources, timings, ruby and d
   await panel.getByRole("checkbox", { name: "Furigana" }).check();
   await expect(panel.locator("ruby").first().locator("rt")).toHaveText("うみ");
   // The UI advance is deliberately not part of original-audio timestamps.
-  await panel.getByRole("spinbutton", { name: "Offset" }).fill("2");
+  await panel.getByRole("spinbutton", { name: "Offset (ms)" }).fill("2000");
   const pending = page.waitForEvent("download");
   await panel.getByRole("button", { name: "Export lyrics", exact: true }).click();
   const download = await pending;

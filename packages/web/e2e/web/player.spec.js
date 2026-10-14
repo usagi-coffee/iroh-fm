@@ -496,11 +496,17 @@ test("lyrics toggle reserves space above the player and follows forward/backward
   await position.fill("2");
   await expect(panel.locator('[data-lyric-index="4"]')).toHaveAttribute("aria-current", "true");
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(200);
-  await panel.getByRole("spinbutton", { name: "Offset" }).fill("1");
+  const offset = panel.getByRole("spinbutton", { name: "Offset (ms)", exact: true });
+  await expect(offset).toHaveAttribute("step", "100");
+  await offset.fill("1000");
   await expect(panel.locator('[data-lyric-index="6"]')).toHaveAttribute("aria-current", "true");
+  await offset.fill("-1000");
+  await expect(panel.locator('[data-lyric-index="2"]')).toHaveAttribute("aria-current", "true");
   await panel.getByRole("button", { name: "Close lyrics" }).click();
   await expect(panel).toHaveCount(0);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(offset).toHaveValue("0");
 });
 
 test("lyrics follow seeks before the first timestamp and respect manual scrolling", async ({
@@ -618,7 +624,7 @@ for (const viewport of [
     expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
     expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.windowHeight);
     await expect(panel.getByRole("button", { name: "Close lyrics" })).toBeInViewport();
-    await expect(panel.getByRole("spinbutton", { name: "Offset" })).toBeInViewport();
+    await expect(panel.getByRole("spinbutton", { name: "Offset (ms)" })).toBeInViewport();
     await expect(panel.getByRole("link", { name: "LRCLIB" })).toBeInViewport();
     await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
   });
@@ -766,6 +772,116 @@ for (const { plain, width, height } of [false, true].flatMap((plain) => [
     await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
   });
 }
+
+test("remembers global lyric annotation preferences across tracks, panels and restarts", async ({
+  page,
+  context,
+}) => {
+  await page.evaluate(() => {
+    const annotated = {
+      status: "Available",
+      synced_lyrics: "[00:00]海",
+      annotated_lyrics: {
+        version: "preferences-test-v1",
+        plain: [],
+        synced: [
+          {
+            start: 7,
+            end: 8,
+            reading: "うみ",
+            dictionary: {
+              lemma: "海",
+              meanings: [
+                {
+                  entry_id: "1195800",
+                  reading: "うみ",
+                  senses: [{ glosses: ["sea"], labels: [] }],
+                },
+              ],
+              truncated: false,
+            },
+          },
+        ],
+      },
+    };
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": annotated,
+        "track-2": {
+          ...annotated,
+          annotated_lyrics: {
+            ...annotated.annotated_lyrics,
+            synced: [{ start: 7, end: 8, reading: "うみ" }],
+          },
+        },
+        "track-3": { status: "Available", synced_lyrics: "[00:00]No annotations" },
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  const furigana = panel.getByRole("checkbox", { name: "Furigana" });
+  const meanings = panel.getByRole("checkbox", { name: "Meanings (dictionary)" });
+  await expect(furigana).not.toBeChecked();
+  await expect(meanings).not.toBeChecked();
+  await furigana.check();
+  await meanings.check();
+  await expect(panel.locator("[data-lyric-meaning]")).toHaveText("sea");
+
+  await panel.getByRole("button", { name: "Close lyrics" }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect(furigana).toBeChecked();
+  await expect(meanings).toBeChecked();
+  await page.getByRole("link", { name: "ALBUMS", exact: true }).click();
+  await expect(furigana).toBeChecked();
+  await expect(meanings).toBeChecked();
+  await page.getByRole("link", { name: "TRACKS", exact: true }).click();
+
+  await page.getByRole("button", { name: "Next track" }).click();
+  await expect(panel.locator("[data-lyric-reading]")).toHaveText("うみ");
+  await expect(furigana).toBeChecked();
+  await expect(meanings).toHaveCount(0);
+  await page.getByRole("button", { name: "Next track" }).click();
+  await expect(panel).toContainText("No annotations");
+  await expect(furigana).toBeDisabled();
+  await expect(furigana).toBeChecked();
+  await page.getByRole("button", { name: "Previous track" }).click();
+  await page.getByRole("button", { name: "Previous track" }).click();
+  await expect(meanings).toBeChecked();
+  await expect(panel.locator("[data-lyric-meaning]")).toHaveText("sea");
+
+  await furigana.uncheck();
+  await expect(meanings).toBeChecked();
+  await expect(meanings).toBeDisabled();
+  await expect(panel.locator("ruby")).toHaveCount(0);
+
+  // Reload a newly opened app document using the same browser profile.
+  const restarted = await context.newPage();
+  await restarted.goto("/tracks");
+  await restarted.getByRole("button", { name: "Play First Light" }).click();
+  await restarted.getByRole("button", { name: "Pause", exact: true }).click();
+  await restarted.getByRole("button", { name: "Lyrics", exact: true }).click();
+  const restored = restarted.getByRole("region", { name: "Track lyrics", exact: true });
+  const restoredFurigana = restored.getByRole("checkbox", { name: "Furigana" });
+  const restoredMeanings = restored.getByRole("checkbox", { name: "Meanings (dictionary)" });
+  await expect(restoredFurigana).not.toBeChecked();
+  await expect(restoredMeanings).toBeChecked();
+  await expect(restoredMeanings).toBeDisabled();
+  await restoredFurigana.check();
+  await expect(restored.locator("[data-lyric-meaning]")).toHaveText("sea");
+  await restoredMeanings.uncheck();
+  await restarted.reload();
+  await restarted.getByRole("button", { name: "Play First Light" }).click();
+  await restarted.getByRole("button", { name: "Pause", exact: true }).click();
+  await restarted.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect(restoredFurigana).toBeChecked();
+  await expect(restoredMeanings).not.toBeChecked();
+  await expect(restored.locator("[data-lyric-reading]")).toHaveText("うみ");
+  await expect(restored.locator("[data-lyric-meaning]")).toHaveCount(0);
+});
 
 test.describe("optional dictionary meanings above kanji furigana", () => {
   test.use({ hasTouch: true });
