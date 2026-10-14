@@ -113,6 +113,22 @@ impl IrohFmClient {
         serde_json::to_string(&response).map_err(to_js_error)
     }
 
+    /// Return the current lyrics payload as JSON. Polling is left to the UI.
+    #[wasm_bindgen(js_name = getTrackLyrics)]
+    pub async fn get_track_lyrics(&self, track_id: String) -> Result<String, JsError> {
+        match self
+            .rpc(BackendRequest::GetTrackLyrics {
+                track_id: TrackId(track_id),
+            })
+            .await?
+        {
+            BackendResponse::TrackLyrics(lyrics) => {
+                serde_json::to_string(&lyrics).map_err(to_js_error)
+            }
+            response => Err(unexpected_response("track lyrics", &response)),
+        }
+    }
+
     /// Fetch artwork without expanding its byte payload across JSON/JS arrays.
     #[wasm_bindgen(js_name = fetchCover)]
     pub async fn fetch_cover(

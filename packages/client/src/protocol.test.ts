@@ -1,5 +1,5 @@
-import { bootstrap } from "./protocol.js";
-import type { BackendRequest, BackendResponse } from "./types.js";
+import { bootstrap, getTrackLyrics } from "./protocol.js";
+import type { BackendRequest, BackendResponse, LyricsStatus, TrackLyrics } from "./types.js";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
@@ -166,5 +166,46 @@ describe("library bootstrap cache", () => {
     );
 
     expect(result.tracks[0]?.title).toBe("Unstored");
+  });
+});
+
+describe("track lyrics", () => {
+  test.each<LyricsStatus>(["Pending", "Available", "NotFound", "Unavailable", "Instrumental"])(
+    "returns %s immediately with one request and no status polling",
+    async (status) => {
+      const requests: BackendRequest[] = [];
+      const lyrics: TrackLyrics = {
+        track_id: "track-1",
+        status,
+        plain_lyrics: status === "Available" ? "First line\nSecond line" : null,
+        synced_lyrics: status === "Available" ? "[00:01.00]First line" : null,
+        source_url: status === "Available" ? "https://lyrics.example/track-1" : null,
+        retry_after_seconds: status === "Pending" ? 2 : null,
+      };
+      const result = await getTrackLyrics(async (request) => {
+        requests.push(request);
+        return { TrackLyrics: lyrics };
+      }, "track-1");
+
+      expect(requests).toEqual([{ GetTrackLyrics: { track_id: "track-1" } }]);
+      expect(result).toBe(lyrics);
+    },
+  );
+
+  test("propagates backend and transport errors", async () => {
+    await expect(
+      getTrackLyrics(async () => ({ Error: { message: "track not found" } }), "missing"),
+    ).rejects.toThrow("track not found");
+    await expect(
+      getTrackLyrics(async () => {
+        throw new Error("connection closed");
+      }, "track-1"),
+    ).rejects.toThrow("connection closed");
+  });
+
+  test("rejects an unexpected response", async () => {
+    await expect(getTrackLyrics(async () => "Empty", "track-1")).rejects.toThrow(
+      "backend returned an unexpected response for TrackLyrics",
+    );
   });
 });

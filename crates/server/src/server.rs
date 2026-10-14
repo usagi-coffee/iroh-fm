@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 use crate::config::ServerConfig;
 use crate::error::{Error, Result};
 use crate::index::{CoverArtSource, LibraryIndex};
+use crate::lyrics::LyricsService;
 use crate::scanner::{legacy_id, scan_music_dir};
 use protocol::{
     AlbumId, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId, Playlist,
@@ -117,6 +118,7 @@ pub struct MusicServer {
     library: Arc<RwLock<LibraryIndex>>,
     state_db: std::sync::Mutex<Connection>,
     cover_thumbnail_cache: std::sync::Mutex<CoverThumbnailCache>,
+    lyrics: LyricsService,
     _watcher: RecommendedWatcher,
     _watch_task: JoinHandle<()>,
 }
@@ -128,6 +130,7 @@ impl MusicServer {
         let state_db = open_state_db(&config.music_dir)?;
         let (watcher, watch_task) =
             spawn_library_watcher(config.music_dir.clone(), Arc::clone(&library))?;
+        let lyrics = LyricsService::new(&config, Arc::clone(&library))?;
 
         Ok(Self {
             config,
@@ -136,6 +139,7 @@ impl MusicServer {
             cover_thumbnail_cache: std::sync::Mutex::new(CoverThumbnailCache::new(
                 COVER_THUMBNAIL_CACHE_MAX_BYTES,
             )),
+            lyrics,
             _watcher: watcher,
             _watch_task: watch_task,
         })
@@ -226,6 +230,13 @@ impl MusicServer {
                 Self::get_album_tracks(&library, album_id)
             }
             BackendRequest::GetTrack { track_id } => Self::get_track(&library, track_id),
+            BackendRequest::GetTrackLyrics { track_id } => {
+                let track = library
+                    .tracks
+                    .get(&track_id)
+                    .ok_or_else(|| Error::NotFound("track", track_id.0))?;
+                Ok(BackendResponse::TrackLyrics(self.lyrics.get(track)?))
+            }
             BackendRequest::GetCoverArt {
                 cover_art_id,
                 full_quality,
@@ -645,6 +656,7 @@ impl MusicServer {
             .tracks
             .get(&track_id)
             .ok_or_else(|| Error::NotFound("track", track_id.0.clone()))?;
+        self.lyrics.playing(track);
         let full_path = self.config.music_dir.join(&track.relative_path);
         Ok(BackendResponse::Stream(StreamDescriptor {
             track_id: track.id.clone(),
@@ -888,6 +900,7 @@ fn spawn_library_watcher(
 
 fn open_state_db(root: &std::path::Path) -> Result<Connection> {
     let conn = Connection::open(root.join(STATE_DB_FILE))?;
+    conn.busy_timeout(Duration::from_millis(100))?;
     conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
     let table_exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'starred_items')",

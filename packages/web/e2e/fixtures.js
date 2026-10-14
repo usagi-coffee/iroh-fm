@@ -220,6 +220,28 @@ export class FixtureClient {
     return Promise.resolve({});
   }
 
+  async getTrackLyrics(id) {
+    const calls = JSON.parse(localStorage.getItem("iroh-fm-e2e-lyrics-calls") ?? "[]");
+    calls.push(id);
+    localStorage.setItem("iroh-fm-e2e-lyrics-calls", JSON.stringify(calls));
+    const fixtures = JSON.parse(localStorage.getItem("iroh-fm-e2e-lyrics") ?? "{}");
+    const fixture = fixtures[id] ?? { status: "NotFound" };
+    const count = calls.filter((trackId) => trackId === id).length;
+    const response = Array.isArray(fixture)
+      ? fixture[Math.min(count - 1, fixture.length - 1)]
+      : fixture;
+    if (response.delay) await delay(response.delay);
+    if (response.error) throw new Error(response.error);
+    return {
+      track_id: id,
+      plain_lyrics: null,
+      synced_lyrics: null,
+      source_url: null,
+      retry_after_seconds: null,
+      ...response,
+    };
+  }
+
   setStarred() {
     return Promise.resolve();
   }

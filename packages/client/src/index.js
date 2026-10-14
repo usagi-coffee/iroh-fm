@@ -5,6 +5,7 @@ import {
   deletePlaylist as deletePlaylistProtocol,
   encodeRequest,
   getPlaylist as getPlaylistProtocol,
+  getTrackLyrics as getTrackLyricsProtocol,
   reorderPlaylists as reorderPlaylistsProtocol,
   setStarred as setStarredProtocol,
   updatePlaylist as updatePlaylistProtocol,
@@ -501,6 +502,11 @@ export class MusicClient {
   /** @param {string} id */
   getPlaylist(id) {
     return getPlaylistProtocol(this.request.bind(this), id);
+  }
+
+  /** @param {string} trackId */
+  getTrackLyrics(trackId) {
+    return getTrackLyricsProtocol(this.request.bind(this), trackId);
   }
 
   /** @param {string} name @param {string[]} [trackIds] */

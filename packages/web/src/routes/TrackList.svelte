@@ -10,6 +10,7 @@
   import SnippetModal from "#lib/modals/Snippet.svelte";
   import { App } from "#lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
+  import { handlesOwnKeys } from "#lib/ui/keyboard.js";
   import { longPress } from "#lib/ui/long-press.js";
   import { setPlaylistTracksDrag } from "#lib/ui/playlist-drag.js";
   import VirtualList from "#lib/ui/VirtualList.svelte";
@@ -84,18 +85,6 @@
     return () => window.removeEventListener("resize", update);
   }
 
-  /** @param {EventTarget | null} target */
-  function isEditableTarget(target) {
-    return (
-      target instanceof Element &&
-      Boolean(
-        target.closest(
-          "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox']",
-        ),
-      )
-    );
-  }
-
   function globalTrackKeybinds() {
     /** @param {KeyboardEvent} event */
     const keydown = (event) => {
@@ -105,7 +94,7 @@
         event.ctrlKey ||
         event.metaKey ||
         event.altKey ||
-        isEditableTarget(event.target)
+        handlesOwnKeys(event.target)
       )
         return;
 

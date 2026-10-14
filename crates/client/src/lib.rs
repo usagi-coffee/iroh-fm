@@ -13,7 +13,8 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use protocol::IROH_ALPN;
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
-    Playlist, PlaylistId, ResolvedId, SearchQuery, StarredSet, StreamDescriptor, Track, TrackId,
+    LyricsStatus, Playlist, PlaylistId, ResolvedId, SearchQuery, StarredSet, StreamDescriptor,
+    Track, TrackId, TrackLyrics,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -191,6 +192,19 @@ impl Client {
                 self.log_connection_path_if_changed(&conn, "request").await;
                 Ok(response)
             }
+        }
+    }
+
+    /// Fetch the current lyrics status without waiting for background lookup.
+    pub async fn get_track_lyrics(&self, track_id: TrackId) -> Result<TrackLyrics> {
+        match self
+            .request(BackendRequest::GetTrackLyrics { track_id })
+            .await?
+        {
+            BackendResponse::TrackLyrics(lyrics) => Ok(lyrics),
+            _ => Err(Error::InvalidRequest(
+                "backend returned unexpected response for track lyrics".to_string(),
+            )),
         }
     }
 
@@ -402,6 +416,7 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::GetAlbum { .. } => "GetAlbum",
         BackendRequest::GetAlbumTracks { .. } => "GetAlbumTracks",
         BackendRequest::GetTrack { .. } => "GetTrack",
+        BackendRequest::GetTrackLyrics { .. } => "GetTrackLyrics",
         BackendRequest::GetCoverArt { .. } => "GetCoverArt",
         BackendRequest::ResolveId { .. } => "ResolveId",
         BackendRequest::Search { .. } => "Search",
@@ -444,5 +459,72 @@ fn transport_addr_label(addr: &TransportAddr) -> String {
         TransportAddr::Ip(addr) => format!("ip:{addr}"),
         TransportAddr::Custom(addr) => format!("custom:{addr}"),
         other => format!("unknown:{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn track_lyrics_getter_returns_pending_without_polling_and_checks_response() {
+        let server = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .alpns(vec![IROH_ALPN.to_vec()])
+            .bind()
+            .await
+            .unwrap();
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let client = Client {
+            endpoint,
+            addr: server.addr(),
+            conn: Arc::new(Mutex::new(None)),
+            last_path: Arc::new(Mutex::new(None)),
+        };
+        let pending = TrackLyrics {
+            track_id: TrackId("track-1".to_string()),
+            status: LyricsStatus::Pending,
+            plain_lyrics: None,
+            synced_lyrics: None,
+            source_url: None,
+            retry_after_seconds: Some(2),
+        };
+        let response = pending.clone();
+        let serve = tokio::spawn(async move {
+            let connection = server.accept().await.unwrap().await.unwrap();
+            for response in [
+                BackendResponse::TrackLyrics(response),
+                BackendResponse::Empty,
+            ] {
+                let (mut send, mut recv) = connection.accept_bi().await.unwrap();
+                let request: BackendRequest = read_json(&mut recv).await.unwrap();
+                assert!(matches!(
+                    request,
+                    BackendRequest::GetTrackLyrics { track_id } if track_id.0 == "track-1"
+                ));
+                write_json(&mut send, &response).await.unwrap();
+                send.finish().unwrap();
+                send.stopped().await.unwrap();
+            }
+            server.close().await;
+        });
+
+        assert_eq!(
+            client
+                .get_track_lyrics(pending.track_id.clone())
+                .await
+                .unwrap(),
+            pending
+        );
+        assert!(matches!(
+            client.get_track_lyrics(pending.track_id).await,
+            Err(Error::InvalidRequest(message)) if message.contains("unexpected response for track lyrics")
+        ));
+        serve.await.unwrap();
+        client.endpoint.close().await;
     }
 }

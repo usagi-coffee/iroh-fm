@@ -436,6 +436,350 @@ test("centers album navigation on mobile", async ({ page }, testInfo) => {
   await expect.poll(() => albumCenterOffset(playingAlbum)).toBeLessThan(15);
 });
 
+test("lyrics toggle reserves space above the player and follows forward/backward seeks", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": {
+          status: "Available",
+          synced_lyrics: Array.from(
+            { length: 40 },
+            (_, index) =>
+              `[00:${String(Math.floor(index / 2)).padStart(2, "0")}.${index % 2 ? "5" : "0"}]日本語 ${index}`,
+          ).join("\n"),
+          source_url: "https://lrclib.net/",
+        },
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => lyricsCalls(page)).toEqual(["track-1"]);
+  const toggle = page.getByRole("button", { name: "Lyrics", exact: true });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.focus();
+  await page.keyboard.press("Space");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  const viewport = page.getByRole("region", { name: "Scrollable lyrics" });
+  await expect(panel.getByRole("link", { name: "LRCLIB" })).toHaveAttribute(
+    "href",
+    "https://lrclib.net/",
+  );
+  const geometry = await panel.evaluate((element) => {
+    const footer = document.querySelector("footer");
+    const main = document.querySelector("main");
+    const viewport = element.querySelector("[data-lyrics-scroll]");
+    const row = element.querySelector("[data-lyric-index]");
+    return {
+      panelBottom: element.getBoundingClientRect().bottom,
+      panelTop: element.getBoundingClientRect().top,
+      footerTop: footer.getBoundingClientRect().top,
+      mainBottom: main.getBoundingClientRect().bottom,
+      rows: viewport.clientHeight / row.getBoundingClientRect().height,
+    };
+  });
+  expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
+  expect(Math.abs(geometry.mainBottom - geometry.panelTop)).toBeLessThan(1);
+  expect(geometry.rows).toBeGreaterThanOrEqual(3);
+  expect(geometry.rows).toBeLessThanOrEqual(4);
+  await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
+
+  const position = page.getByRole("slider", { name: "Playback position" });
+  await position.fill("15");
+  await expect(panel.locator('[data-lyric-index="30"]')).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+  await position.fill("2");
+  await expect(panel.locator('[data-lyric-index="4"]')).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(200);
+  await panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" }).fill("1");
+  await expect(panel.locator('[data-lyric-index="6"]')).toHaveAttribute("aria-current", "true");
+  await panel.getByRole("button", { name: "Close lyrics" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+});
+
+test("lyrics follow seeks before the first timestamp and respect manual scrolling", async ({
+  page,
+}) => {
+  await prepareTimedLyrics(page);
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  const viewport = page.getByRole("region", { name: "Scrollable lyrics" });
+  const position = page.getByRole("slider", { name: "Playback position" });
+  await position.fill("17");
+  await expect(panel.locator('[data-lyric-index="30"]')).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+  await position.fill("0");
+  await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(0);
+
+  await position.fill("17");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+  await panel.getByRole("checkbox", { name: "Follow playback" }).uncheck();
+  await position.fill("0");
+  await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
+  expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(500);
+  await panel.getByRole("checkbox", { name: "Follow playback" }).check();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
+test("lyrics controls retain native keyboard behavior without invoking library shortcuts", async ({
+  page,
+}) => {
+  await prepareTimedLyrics(page);
+  const toggle = page.getByRole("button", { name: "Lyrics", exact: true });
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  const viewport = page.getByRole("region", { name: "Scrollable lyrics" });
+  const position = page.getByRole("slider", { name: "Playback position" });
+  await position.fill("17");
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator('[data-track-id="track-2"]')).toHaveAttribute("aria-selected", "true");
+  const follow = panel.getByRole("checkbox", { name: "Follow playback" });
+  await follow.focus();
+  await page.keyboard.press("Space");
+  await expect(follow).not.toBeChecked();
+  await viewport.focus();
+  const scroll = await viewport.evaluate((element) => element.scrollTop);
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scroll);
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("x");
+  await expect(position).toHaveValue("17");
+  await expect(page.locator('[data-track-id="track-2"]')).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByPlaceholder("Filter artist, title, album…")).toHaveValue("");
+  await expect(page.locator("footer").getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+  const close = panel.getByRole("button", { name: "Close lyrics" });
+  await close.focus();
+  await page.keyboard.press("Enter");
+  await expect(panel).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(panel).toBeVisible();
+  await close.focus();
+  await page.keyboard.press("Space");
+  await expect(panel).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await expect(page.locator("footer").getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+
+  // Library shortcuts still work when focus returns to the library.
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+  await page.keyboard.press("ArrowUp");
+  await expect(page.locator('[data-track-id="track-1"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+});
+
+for (const viewport of [
+  { width: 393, height: 851, minimumRows: 3 },
+  { width: 851, height: 393, minimumRows: 2 },
+]) {
+  test(`lyrics stay compact and keep the library/player visible at ${viewport.width}x${viewport.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await prepareTimedLyrics(page);
+    const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+    const geometry = await panel.evaluate((element) => {
+      const footer = document.querySelector("footer").getBoundingClientRect();
+      const main = document.querySelector("main");
+      const scroll = element.querySelector("[data-lyrics-scroll]");
+      const row = element.querySelector("[data-lyric-index]").getBoundingClientRect();
+      const panel = element.getBoundingClientRect();
+      return {
+        rows: scroll.clientHeight / row.height,
+        panelHeight: panel.height,
+        panelTop: panel.top,
+        panelBottom: panel.bottom,
+        mainHeight: main.clientHeight,
+        mainBottom: main.getBoundingClientRect().bottom,
+        footerTop: footer.top,
+        footerBottom: footer.bottom,
+        windowHeight: window.innerHeight,
+      };
+    });
+    expect(geometry.rows).toBeGreaterThanOrEqual(viewport.minimumRows);
+    expect(geometry.rows).toBeLessThanOrEqual(4);
+    expect(geometry.panelHeight).toBeLessThanOrEqual(240);
+    expect(geometry.mainHeight).toBeGreaterThanOrEqual(40);
+    expect(Math.abs(geometry.mainBottom - geometry.panelTop)).toBeLessThan(1);
+    expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
+    expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.windowHeight);
+    await expect(panel.getByRole("button", { name: "Close lyrics" })).toBeInViewport();
+    await expect(panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" })).toBeInViewport();
+    await expect(panel.getByRole("link", { name: "LRCLIB" })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
+  });
+}
+
+test("Retry lyrics recovers after a failed request without restarting playback", async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": [
+          { error: "connection interrupted" },
+          { status: "Available", synced_lyrics: "[00:00]Recovered lyrics" },
+        ],
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  await expect(panel).toContainText("Lyrics unavailable.");
+  await expect.poll(() => lyricsCalls(page)).toEqual(["track-1"]);
+  await panel.getByRole("button", { name: "Retry lyrics" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(panel).toContainText("Recovered lyrics");
+  await expect(panel.getByRole("button", { name: "Retry lyrics" })).toHaveCount(0);
+  expect(await lyricsCalls(page)).toEqual(["track-1", "track-1"]);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+  await expect(page.locator("footer").getByTitle("Show currently playing track").first()).toHaveText(
+    "First Light",
+  );
+});
+
+async function prepareTimedLyrics(page) {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": {
+          status: "Available",
+          synced_lyrics: Array.from(
+            { length: 40 },
+            (_, index) =>
+              `[00:${String(2 + Math.floor(index / 2)).padStart(2, "0")}.${index % 2 ? "5" : "0"}]日本語 ${index}`,
+          ).join("\n"),
+          source_url: "https://lrclib.net/",
+        },
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect(page.locator('[data-lyric-index="39"]')).toBeAttached();
+}
+
+test("lyrics discard stale track responses and label plain scrolling as estimated", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": { status: "Available", synced_lyrics: "[00:00]STALE LYRICS", delay: 1200 },
+        "track-2": { status: "Available", plain_lyrics: "海の歌\n日本語のまま\n最後の行" },
+        "track-3": { error: "unknown request GetTrackLyrics" },
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  await expect.poll(() => lyricsCalls(page)).toEqual(["track-1"]);
+  await page.getByRole("button", { name: "Next track" }).click();
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  await expect(panel).toContainText("Lyrics · Nebula Drift");
+  await expect(panel).toContainText(
+    "Estimated scrolling · plain text, duration-based approximation",
+  );
+  await expect(panel).toContainText("日本語のまま");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("slider", { name: "Playback position" }).fill("10");
+  await expect(panel.locator('[data-lyric-index="1"]')).toHaveAttribute("aria-current", "true");
+  await page.waitForTimeout(1300);
+  await expect(panel).not.toContainText("STALE LYRICS");
+  await page.getByRole("button", { name: "Next track" }).click();
+  await expect(panel).toContainText("Lyrics unavailable. The server may not support lyrics");
+  await expect(panel.locator("[data-lyric-index]")).toHaveCount(0);
+  expect(await lyricsCalls(page)).toEqual(["track-1", "track-2", "track-3"]);
+});
+
+for (const [status, message] of [
+  ["NotFound", "No lyrics found for this track."],
+  ["Instrumental", "Instrumental track. No sung lyrics."],
+  ["Unavailable", "Lyrics temporarily unavailable."],
+]) {
+  test(`lyrics show ${status} distinctly`, async ({ page }) => {
+    await page.evaluate((status) => {
+      localStorage.setItem("iroh-fm-e2e-lyrics", JSON.stringify({ "track-1": { status } }));
+    }, status);
+    await page.getByRole("button", { name: "Play First Light" }).click();
+    await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Track lyrics", exact: true })).toContainText(
+      message,
+    );
+  });
+}
+
+test("lyrics poll Pending using the server retry hint, not on every toggle", async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": [
+          { status: "Pending", retry_after_seconds: 7 },
+          { status: "Available", synced_lyrics: "[00:00]Ready lyrics" },
+        ],
+      }),
+    );
+  });
+  await page.clock.install();
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const toggle = page.getByRole("button", { name: "Lyrics", exact: true });
+  await toggle.click();
+  await expect(page.getByRole("region", { name: "Track lyrics", exact: true })).toContainText(
+    "Looking for lyrics…",
+  );
+  await toggle.click();
+  await toggle.click();
+  expect(await lyricsCalls(page)).toEqual(["track-1"]);
+  await page.clock.fastForward(6000);
+  expect(await lyricsCalls(page)).toEqual(["track-1"]);
+  await page.clock.fastForward(1000);
+  await expect(page.getByRole("region", { name: "Track lyrics", exact: true })).toContainText(
+    "Ready lyrics",
+  );
+  expect(await lyricsCalls(page)).toEqual(["track-1", "track-1"]);
+});
+
+test("lyrics requests stop when disconnecting or unmounting the player", async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": { status: "Pending", retry_after_seconds: 5 },
+      }),
+    );
+  });
+  await page.clock.install();
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await expect.poll(() => lyricsCalls(page)).toEqual(["track-1"]);
+  await page.getByRole("link", { name: "Connection settings" }).click();
+  await page.getByLabel("Server endpoint ID").fill("e2e-new-server");
+  await page.getByLabel("Relay URLs").fill("https://relay.example");
+  await page.getByRole("button", { name: "SAVE & RECONNECT" }).click();
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.clock.fastForward(10_000);
+  expect(await lyricsCalls(page)).toEqual(["track-1"]);
+});
+
+async function lyricsCalls(page) {
+  return page.evaluate(() => JSON.parse(localStorage.getItem("iroh-fm-e2e-lyrics-calls") ?? "[]"));
+}
+
 /** @param {import('@playwright/test').Locator} album */
 async function albumCenterOffset(album) {
   return album.evaluate((element) => {

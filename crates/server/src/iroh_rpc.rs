@@ -559,6 +559,7 @@ fn request_name(request: &BackendRequest) -> &'static str {
         BackendRequest::GetAlbum { .. } => "GetAlbum",
         BackendRequest::GetAlbumTracks { .. } => "GetAlbumTracks",
         BackendRequest::GetTrack { .. } => "GetTrack",
+        BackendRequest::GetTrackLyrics { .. } => "GetTrackLyrics",
         BackendRequest::GetCoverArt { .. } => "GetCoverArt",
         BackendRequest::ResolveId { .. } => "ResolveId",
         BackendRequest::Search { .. } => "Search",

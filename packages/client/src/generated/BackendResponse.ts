@@ -9,5 +9,6 @@ import type { ResolvedId } from "./ResolvedId.js";
 import type { StarredSet } from "./StarredSet.js";
 import type { StreamDescriptor } from "./StreamDescriptor.js";
 import type { Track } from "./Track.js";
+import type { TrackLyrics } from "./TrackLyrics.js";
 
-export type BackendResponse = { "Error": { message: string, } } | { "LibrarySummary": LibrarySummary } | { "LibrarySnapshot": LibrarySnapshot } | { "LibraryNotModified": { revision: string, } } | "Empty" | { "Artists": Array<Artist> } | { "Albums": Array<Album> } | { "Starred": StarredSet } | { "Playlists": Array<Playlist> } | { "Playlist": Playlist } | { "Artist": Artist } | { "Album": Album } | { "Tracks": Array<Track> } | { "Track": Track } | { "CoverArt": CoverArtBytes } | { "ResolvedId": ResolvedId } | { "SearchResults": { artists: Array<Artist>, albums: Array<Album>, tracks: Array<Track>, } } | { "Stream": StreamDescriptor };
+export type BackendResponse = { "Error": { message: string, } } | { "LibrarySummary": LibrarySummary } | { "LibrarySnapshot": LibrarySnapshot } | { "LibraryNotModified": { revision: string, } } | "Empty" | { "Artists": Array<Artist> } | { "Albums": Array<Album> } | { "Starred": StarredSet } | { "Playlists": Array<Playlist> } | { "Playlist": Playlist } | { "Artist": Artist } | { "Album": Album } | { "Tracks": Array<Track> } | { "Track": Track } | { "TrackLyrics": TrackLyrics } | { "CoverArt": CoverArtBytes } | { "ResolvedId": ResolvedId } | { "SearchResults": { artists: Array<Artist>, albums: Array<Album>, tracks: Array<Track>, } } | { "Stream": StreamDescriptor };

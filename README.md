@@ -76,6 +76,33 @@ New `ticket=` lines are printed when the server's advertised addresses change, i
 
 `--peer` is repeatable. Leave it out to accept any client that has the server ticket. The web player can generate and retain its own client secret; its endpoint ID is available in Settings for allowlisting.
 
+### Lyrics
+
+The server looks up lyrics through [LRCLIB](https://lrclib.net/) and caches them
+per song in the library's `iroh-fm.db`. Lookups send song metadata, not audio,
+to LRCLIB. Clients receive lyrics from your server rather than contacting
+LRCLIB themselves.
+
+Played songs and explicit lyrics requests take priority over background work.
+Each server process makes at most one request at a time, with at least five
+seconds between requests. Idle library warming is paced at 30 seconds.
+Provider failures trigger shared exponential backoff and respect `Retry-After`;
+the cooldown survives server restarts. Temporary failures are not treated as
+missing lyrics. Missing results are retried after 30 days, and changed song
+metadata invalidates the cached match.
+
+Use `--no-lyrics` to disable fetching while retaining access to cached lyrics,
+or `--warm-lyrics` to opt into gradually fetching lyrics for the rest of the
+library. Background warming is off by default.
+
+The player's lyrics toggle opens a compact scrolling panel above the bottom
+player. Timed lyrics follow playback; plain lyrics use an explicitly approximate
+position based on song duration. Coverage and timing vary, especially for covers
+and alternate recordings. The player includes timing adjustment and a manual
+retry control for temporary failures. Server and clients must be updated together;
+installed Desktop and Android clients need rebuilt native binaries for the new
+lyrics request.
+
 ## Apps
 
 | App     | Get it                                                                                     |

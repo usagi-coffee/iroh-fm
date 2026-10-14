@@ -7,6 +7,7 @@
 
   import { App } from "#lib/runes/App.svelte.js";
   import { Updater } from "#lib/runes/Updater.svelte.js";
+  import { handlesOwnKeys } from "#lib/ui/keyboard.js";
 
   import CloseIcon from "virtual:icons/ri/close-line";
 
@@ -17,18 +18,6 @@
   /** @typedef {import('./$types').LayoutProps} Props */
   /** @type {Props} */
   const { children } = $props();
-
-  /** @param {EventTarget | null} target */
-  function isEditableTarget(target) {
-    return (
-      target instanceof Element &&
-      Boolean(
-        target.closest(
-          "input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox']",
-        ),
-      )
-    );
-  }
 
   function hotkeys() {
     /** @param {KeyboardEvent} event */
@@ -61,9 +50,15 @@
         return;
       }
 
-      if (isEditableTarget(event.target)) return;
+      if (handlesOwnKeys(event.target)) return;
 
       if (event.code === "Space" || event.key === " " || event.key === "Spacebar") {
+        // Player controls keep their native keyboard activation.
+        if (
+          event.target instanceof Element &&
+          event.target.closest("[data-player-container] button")
+        )
+          return;
         if (!event.repeat && App.player.currentTrack) {
           event.preventDefault();
           void App.player.toggle();

@@ -176,6 +176,10 @@ export async function bootstrap(request: Request, starredKey = "", cacheIdentity
   };
 }
 
+export async function getTrackLyrics(request: Request, trackId: string) {
+  return variant(await request({ GetTrackLyrics: { track_id: trackId } }), "TrackLyrics");
+}
+
 export async function getPlaylist(request: Request, playlistId: string) {
   return variant(await request({ GetPlaylist: { playlist_id: playlistId } }), "Playlist");
 }

@@ -82,6 +82,25 @@ pub struct Track {
     pub content_type: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum LyricsStatus {
+    Pending,
+    Available,
+    NotFound,
+    Unavailable,
+    Instrumental,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct TrackLyrics {
+    pub track_id: TrackId,
+    pub status: LyricsStatus,
+    pub plain_lyrics: Option<String>,
+    pub synced_lyrics: Option<String>,
+    pub source_url: Option<String>,
+    pub retry_after_seconds: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SearchQuery {
     pub term: String,
@@ -187,6 +206,9 @@ pub enum BackendRequest {
     GetTrack {
         track_id: TrackId,
     },
+    GetTrackLyrics {
+        track_id: TrackId,
+    },
     GetCoverArt {
         cover_art_id: CoverArtId,
         #[serde(default)]
@@ -240,6 +262,7 @@ pub enum BackendResponse {
     Album(Album),
     Tracks(Vec<Track>),
     Track(Track),
+    TrackLyrics(TrackLyrics),
     CoverArt(CoverArtBytes),
     ResolvedId(ResolvedId),
     SearchResults {
@@ -253,6 +276,85 @@ pub enum BackendResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn track_lyrics_request_keeps_its_wire_shape() {
+        let wire = serde_json::json!({
+            "GetTrackLyrics": { "track_id": "track-1" }
+        });
+        let request = BackendRequest::GetTrackLyrics {
+            track_id: TrackId("track-1".to_string()),
+        };
+        assert_eq!(serde_json::to_value(request).unwrap(), wire);
+        assert!(matches!(
+            serde_json::from_value(wire).unwrap(),
+            BackendRequest::GetTrackLyrics { track_id } if track_id.0 == "track-1"
+        ));
+    }
+
+    #[test]
+    fn available_track_lyrics_preserves_text_and_source() {
+        let lyrics = TrackLyrics {
+            track_id: TrackId("track-1".to_string()),
+            status: LyricsStatus::Available,
+            plain_lyrics: Some("First line\nSecond line".to_string()),
+            synced_lyrics: Some("[00:01.00]First line\n[00:02.00]Second line".to_string()),
+            source_url: Some("https://lyrics.example/track-1".to_string()),
+            retry_after_seconds: None,
+        };
+        let wire = serde_json::json!({
+            "TrackLyrics": {
+                "track_id": "track-1",
+                "status": "Available",
+                "plain_lyrics": "First line\nSecond line",
+                "synced_lyrics": "[00:01.00]First line\n[00:02.00]Second line",
+                "source_url": "https://lyrics.example/track-1",
+                "retry_after_seconds": null
+            }
+        });
+        assert_eq!(
+            serde_json::to_value(BackendResponse::TrackLyrics(lyrics.clone())).unwrap(),
+            wire
+        );
+        let response: BackendResponse = serde_json::from_value(wire).unwrap();
+        assert!(matches!(response, BackendResponse::TrackLyrics(value) if value == lyrics));
+    }
+
+    #[test]
+    fn track_lyrics_statuses_and_nullable_fields_keep_their_wire_shape() {
+        for (status, name, retry_after_seconds) in [
+            (LyricsStatus::Pending, "Pending", Some(2)),
+            (LyricsStatus::Available, "Available", None),
+            (LyricsStatus::NotFound, "NotFound", None),
+            (LyricsStatus::Unavailable, "Unavailable", Some(60)),
+            (LyricsStatus::Instrumental, "Instrumental", None),
+        ] {
+            let lyrics = TrackLyrics {
+                track_id: TrackId("track-1".to_string()),
+                status,
+                plain_lyrics: None,
+                synced_lyrics: None,
+                source_url: None,
+                retry_after_seconds,
+            };
+            let wire = serde_json::json!({
+                "TrackLyrics": {
+                    "track_id": "track-1",
+                    "status": name,
+                    "plain_lyrics": null,
+                    "synced_lyrics": null,
+                    "source_url": null,
+                    "retry_after_seconds": retry_after_seconds
+                }
+            });
+            assert_eq!(
+                serde_json::to_value(BackendResponse::TrackLyrics(lyrics.clone())).unwrap(),
+                wire
+            );
+            let response: BackendResponse = serde_json::from_value(wire).unwrap();
+            assert!(matches!(response, BackendResponse::TrackLyrics(value) if value == lyrics));
+        }
+    }
 
     #[test]
     fn cover_requests_without_quality_flag_default_to_thumbnail() {

@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 pub mod index;
 pub mod iroh_rpc;
+mod lyrics;
 pub mod scanner;
 pub mod server;
 pub mod stream;
@@ -14,8 +15,8 @@ pub use iroh_rpc::{
 };
 pub use protocol::{
     Album, AlbumId, Artist, ArtistId, BackendRequest, BackendResponse, CoverArtBytes, CoverArtId,
-    IROH_ALPN, LibrarySnapshot, Playlist, PlaylistId, ResolvedId, SearchQuery, StreamDescriptor,
-    Track, TrackId,
+    IROH_ALPN, LibrarySnapshot, LyricsStatus, Playlist, PlaylistId, ResolvedId, SearchQuery,
+    StreamDescriptor, Track, TrackId, TrackLyrics,
 };
 pub use scanner::scan_music_dir;
 pub use server::MusicServer;

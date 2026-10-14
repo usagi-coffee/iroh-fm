@@ -3,6 +3,7 @@ import {
   createPlaylist as createPlaylistProtocol,
   deletePlaylist as deletePlaylistProtocol,
   getPlaylist as getPlaylistProtocol,
+  getTrackLyrics as getTrackLyricsProtocol,
   protocolResponse,
   reorderPlaylists as reorderPlaylistsProtocol,
   setStarred as setStarredProtocol,
@@ -311,6 +312,11 @@ export class NativeMusicClient {
   /** @param {string} id */
   getPlaylist(id) {
     return getPlaylistProtocol(this.request.bind(this), id);
+  }
+
+  /** @param {string} trackId */
+  getTrackLyrics(trackId) {
+    return getTrackLyricsProtocol(this.request.bind(this), trackId);
   }
 
   /** @param {string} name @param {string[]} [trackIds] */

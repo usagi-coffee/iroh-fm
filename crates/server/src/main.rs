@@ -24,7 +24,7 @@ async fn run() -> server::Result<()> {
         return Ok(());
     }
 
-    let (music_dir, iroh, port) = parse_config(args.into_iter())?;
+    let (config, iroh, port) = parse_config(args.into_iter())?;
     if let Some(secret) = &iroh.secret {
         let _ = iroh::SecretKey::from_str(secret)
             .map_err(|error| server::Error::InvalidRequest(format!("invalid --secret: {error}")))?;
@@ -39,7 +39,6 @@ async fn run() -> server::Result<()> {
         let _ = peer;
     }
 
-    let config = ServerConfig::new(music_dir);
     let server = MusicServer::load(config)?;
     let summary = server.handle(BackendRequest::GetLibrarySummary)?;
     let handle = spawn_iroh_server_with_port(server, &iroh, port).await?;
@@ -106,15 +105,19 @@ fn endpoint_ticket(mut address: EndpointAddr, relay: Option<&RelayUrl>) -> Endpo
 
 fn parse_config(
     args: impl Iterator<Item = String>,
-) -> server::Result<(std::path::PathBuf, IrohConfig, Option<u16>)> {
-    let mut music_dir = None;
+) -> server::Result<(ServerConfig, IrohConfig, Option<u16>)> {
+    let mut music_dir: Option<std::path::PathBuf> = None;
     let mut iroh = IrohConfig::default();
     let mut port = None;
+    let mut lyrics_enabled = true;
+    let mut lyrics_warm = false;
     let mut args = args.peekable();
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--music-dir" => music_dir = args.next().map(Into::into),
+            "--no-lyrics" => lyrics_enabled = false,
+            "--warm-lyrics" => lyrics_warm = true,
             "--secret" => iroh.secret = Some(args.next().ok_or_else(missing_value)?),
             "--relay" => iroh.relay = Some(args.next().ok_or_else(missing_value)?),
             "--port" => {
@@ -138,7 +141,10 @@ fn parse_config(
     let music_dir = music_dir.ok_or_else(|| {
         server::Error::InvalidRequest("expected --music-dir /path/to/music".to_string())
     })?;
-    Ok((music_dir, iroh, port))
+    let mut config = ServerConfig::new(music_dir);
+    config.lyrics_enabled = lyrics_enabled;
+    config.lyrics_warm = lyrics_enabled && lyrics_warm;
+    Ok((config, iroh, port))
 }
 
 fn parse_udp_port(value: &str) -> server::Result<u16> {
@@ -157,7 +163,10 @@ fn missing_value() -> server::Error {
 fn print_usage() {
     println!("usage:");
     println!(
-        "  server --music-dir /path/to/music [--secret <secret-key>] [--relay <relay-url>] [--port <udp-port>] [--peer <endpoint-id> ...]"
+        "  server --music-dir /path/to/music [--secret <secret-key>] [--relay <relay-url>] [--port <udp-port>] [--peer <endpoint-id> ...] [--no-lyrics] [--warm-lyrics]"
+    );
+    println!(
+        "lyrics: demand enabled by default; --no-lyrics disables LRCLIB access; --warm-lyrics enables idle library fetching"
     );
 }
 
@@ -212,5 +221,32 @@ mod tests {
         .expect_err("port zero must be rejected");
 
         assert!(error.to_string().contains("1 to 65535"));
+    }
+
+    #[test]
+    fn lyrics_privacy_and_warming_flags_have_conservative_defaults() {
+        let parse = |flags: &[&str]| {
+            parse_config(
+                ["--music-dir", "/music"]
+                    .into_iter()
+                    .chain(flags.iter().copied())
+                    .map(str::to_string),
+            )
+            .unwrap()
+            .0
+        };
+        let defaults = parse(&[]);
+        assert!(defaults.lyrics_enabled);
+        assert!(!defaults.lyrics_warm);
+        assert!(parse(&["--warm-lyrics"]).lyrics_warm);
+        for flags in [
+            &["--no-lyrics"][..],
+            &["--no-lyrics", "--warm-lyrics"][..],
+            &["--warm-lyrics", "--no-lyrics"][..],
+        ] {
+            let config = parse(flags);
+            assert!(!config.lyrics_enabled);
+            assert!(!config.lyrics_warm);
+        }
     }
 }

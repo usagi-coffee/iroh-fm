@@ -755,6 +755,7 @@ impl Default for ScanCache {
 impl ScanCache {
     fn open(root: &Path) -> Result<Self> {
         let conn = Connection::open(root.join(CACHE_DB_FILE))?;
+        conn.busy_timeout(std::time::Duration::from_millis(100))?;
         let cache = Self { conn };
         cache.migrate()?;
         Ok(cache)
