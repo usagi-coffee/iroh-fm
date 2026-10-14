@@ -993,6 +993,8 @@ test.describe("optional dictionary meanings above kanji furigana", () => {
           const scroll = panel.querySelector("[data-lyrics-scroll]");
           return {
             above: meaning.top < reading.top && reading.top < base.top,
+            stacked: meaning.bottom <= reading.top + 0.5,
+            meaningTiny: meaning.height < reading.height * 0.8,
             meaningSmall: meaning.height < base.height,
             readingSmall: reading.height < base.height,
             viewport: scroll.clientHeight,
@@ -1000,6 +1002,8 @@ test.describe("optional dictionary meanings above kanji furigana", () => {
           };
         });
       expect(layout.above).toBe(true);
+      expect(layout.stacked).toBe(true);
+      expect(layout.meaningTiny).toBe(true);
       expect(layout.meaningSmall).toBe(true);
       expect(layout.readingSmall).toBe(true);
       expect(layout.viewport).toBeGreaterThan(40);

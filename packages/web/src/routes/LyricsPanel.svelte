@@ -129,7 +129,7 @@
           disabled={!furigana || !hasReadings}
           class="accent-mauve"
         />
-        Meanings <span class="text-overlay1">(dictionary)</span>
+        Meanings
       </label>
     {/if}
     {#if lines.length && !estimated}
@@ -151,12 +151,36 @@
         />
       </label>
     {/if}
-    <button
-      type="button"
-      onclick={onclose}
-      aria-label="Close lyrics"
-      class="hover:text-mauve ml-auto text-xs">Close</button
-    >
+    <p class="text-overlay1 ml-auto flex flex-wrap justify-end gap-x-1 text-right text-xs">
+      {#if source}
+        <span
+          >Lyrics <a
+            href={source}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-mauve underline">LRCLIB</a
+          ></span
+        >
+      {/if}
+      {#if hasDictionary}
+        {#if source}<span>·</span>{/if}
+        <span title="Automatic dictionary senses, not lyric translation"
+          >Dictionary <a
+            href="https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-mauve underline">JMdict / EDRDG</a
+          ></span
+        >
+        <span>·</span>
+        <a
+          href="https://www.edrdg.org/edrdg/licence.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-mauve underline">CC BY-SA 4.0</a
+        >
+      {/if}
+    </p>
   </div>
   {#if exporter.message}
     <p role="status" class="text-overlay1 shrink-0 px-4 pb-2 text-xs">{exporter.message}</p>
@@ -204,9 +228,11 @@
                 {#if part.reading}
                   <ruby lang="ja" title={meanings ? lyricDictionaryDescription(part) : undefined}
                     >{part.text}<rp>(</rp><rt
-                      >{#if meanings && lyricGloss(part)}<span data-lyric-meaning lang="en"
-                          >{lyricGloss(part)}</span
-                        >{/if}<span data-lyric-reading>{part.reading}</span></rt
+                      ><span class="lyric-annotations"
+                        >{#if meanings && lyricGloss(part)}<span data-lyric-meaning lang="en"
+                            >{lyricGloss(part)}</span
+                          >{/if}<span data-lyric-reading>{part.reading}</span></span
+                      ></rt
                     ><rp>)</rp></ruby
                   >
                 {:else}{part.text}{/if}
@@ -219,46 +245,17 @@
       </div>
     {/if}
   </div>
-  {#if source || exportSupported}
-    <div class="text-overlay1 flex shrink-0 items-center justify-between gap-2 px-4 py-1 text-xs">
-      <p>
-        {#if source}
-          Lyrics provided by <a
-            href={source}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-mauve underline">LRCLIB</a
-          >
-        {/if}
-      </p>
-      {#if exportSupported}
-        <button
-          type="button"
-          onclick={exportLyrics}
-          disabled={!exportAvailable || exporter.running}
-          title="Download lyrics, automatic readings and meanings, and complete original audio in a ZIP. This song's export may finish after playback changes. Up to 512 MiB audio; audio and ZIP are held in memory."
-          class="hover:text-mauve text-xs disabled:opacity-50"
-          >{exporter.running ? "Exporting…" : "Export lyrics"}</button
-        >
-      {/if}
+  {#if exportSupported}
+    <div class="text-overlay1 flex shrink-0 justify-end px-4 py-1 text-xs">
+      <button
+        type="button"
+        onclick={exportLyrics}
+        disabled={!exportAvailable || exporter.running}
+        title="Download lyrics, automatic readings and meanings, and complete original audio in a ZIP. This song's export may finish after playback changes. Up to 512 MiB audio; audio and ZIP are held in memory."
+        class="hover:text-mauve text-xs disabled:opacity-50"
+        >{exporter.running ? "Exporting…" : "Export lyrics"}</button
+      >
     </div>
-  {/if}
-  {#if furigana && meanings && hasDictionary}
-    <p class="text-overlay1 shrink-0 px-4 py-1 text-xs">
-      Automatic dictionary senses, not lyric translation · <a
-        href="https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-mauve underline">JMdict / EDRDG</a
-      >
-      ·
-      <a
-        href="https://www.edrdg.org/edrdg/licence.html"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-mauve underline">CC BY-SA 4.0</a
-      >
-    </p>
   {/if}
 </section>
 
@@ -272,15 +269,18 @@
     line-height: 1;
     font-weight: normal;
   }
-  rt span {
-    display: block;
+  .lyric-annotations {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    vertical-align: bottom;
   }
   [data-lyric-meaning] {
     max-width: 9em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.9em;
-    line-height: 1.2;
+    font-size: 0.7em;
+    line-height: 1;
   }
 </style>
