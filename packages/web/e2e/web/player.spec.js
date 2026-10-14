@@ -546,7 +546,9 @@ test("lyrics controls retain native keyboard behavior without invoking library s
   await viewport.focus();
   const scroll = await viewport.evaluate((element) => element.scrollTop);
   await page.keyboard.press("ArrowDown");
-  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scroll);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scroll);
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Space");
@@ -554,7 +556,9 @@ test("lyrics controls retain native keyboard behavior without invoking library s
   await expect(position).toHaveValue("17");
   await expect(page.locator('[data-track-id="track-2"]')).toHaveAttribute("aria-selected", "true");
   await expect(page.getByPlaceholder("Filter artist, title, album…")).toHaveValue("");
-  await expect(page.locator("footer").getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+  await expect(
+    page.locator("footer").getByRole("button", { name: "Play", exact: true }),
+  ).toBeEnabled();
   const close = panel.getByRole("button", { name: "Close lyrics" });
   await close.focus();
   await page.keyboard.press("Enter");
@@ -566,7 +570,9 @@ test("lyrics controls retain native keyboard behavior without invoking library s
   await page.keyboard.press("Space");
   await expect(panel).toHaveCount(0);
   await expect(toggle).toBeFocused();
-  await expect(page.locator("footer").getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+  await expect(
+    page.locator("footer").getByRole("button", { name: "Play", exact: true }),
+  ).toBeEnabled();
 
   // Library shortcuts still work when focus returns to the library.
   await page.locator("body").click({ position: { x: 1, y: 1 } });
@@ -612,13 +618,17 @@ for (const viewport of [
     expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
     expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.windowHeight);
     await expect(panel.getByRole("button", { name: "Close lyrics" })).toBeInViewport();
-    await expect(panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" })).toBeInViewport();
+    await expect(
+      panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" }),
+    ).toBeInViewport();
     await expect(panel.getByRole("link", { name: "LRCLIB" })).toBeInViewport();
     await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
   });
 }
 
-test("Retry lyrics recovers after a failed request without restarting playback", async ({ page }) => {
+test("Retry lyrics recovers after a failed request without restarting playback", async ({
+  page,
+}) => {
   await page.evaluate(() => {
     localStorage.setItem(
       "iroh-fm-e2e-lyrics",
@@ -641,9 +651,9 @@ test("Retry lyrics recovers after a failed request without restarting playback",
   await expect(panel.getByRole("button", { name: "Retry lyrics" })).toHaveCount(0);
   expect(await lyricsCalls(page)).toEqual(["track-1", "track-1"]);
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
-  await expect(page.locator("footer").getByTitle("Show currently playing track").first()).toHaveText(
-    "First Light",
-  );
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("First Light");
 });
 
 async function prepareTimedLyrics(page) {
@@ -669,6 +679,181 @@ async function prepareTimedLyrics(page) {
   await page.getByRole("button", { name: "Lyrics", exact: true }).click();
   await expect(page.locator('[data-lyric-index="39"]')).toBeAttached();
 }
+
+for (const { plain, width, height } of [false, true].flatMap((plain) => [
+  { plain, width: 393, height: 851 },
+  { plain, width: 851, height: 393 },
+])) {
+  test(`automatic furigana toggles word ruby and follows ${plain ? "estimated" : "timed"} lines at ${width}x${height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.evaluate((plain) => {
+      const source = Array.from(
+        { length: 40 },
+        (_, index) =>
+          `${plain ? "" : `[00:${String(Math.floor(index / 2)).padStart(2, "0")}.${index % 2 ? "5" : "0"}]`}海！ hello 𠮷𠮷𠮷 日本語 ${index}`,
+      ).join("\r\n");
+      const spans = [...source.matchAll(/海|日本語/g)].map((match) => ({
+        start: match.index,
+        end: match.index + match[0].length,
+        reading: match[0] === "海" ? "うみ" : "にほんご",
+      }));
+      localStorage.setItem(
+        "iroh-fm-e2e-lyrics",
+        JSON.stringify({
+          "track-1": {
+            status: "Available",
+            [plain ? "plain_lyrics" : "synced_lyrics"]: source,
+            annotated_lyrics: {
+              version: "test-v1",
+              plain: plain ? spans : [],
+              synced: plain ? [] : spans,
+            },
+          },
+        }),
+      );
+    }, plain);
+    await page.getByRole("button", { name: "Play First Light" }).click();
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+    const toggle = panel.getByRole("checkbox", { name: "Furigana (automatic)" });
+    await expect(toggle).not.toBeChecked();
+    await expect(panel.locator("ruby")).toHaveCount(0);
+    await expect(panel.locator('[data-lyric-index="0"]')).toHaveText("海！ hello 𠮷𠮷𠮷 日本語 0");
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    await expect(toggle).toBeChecked();
+    await expect(panel.locator("ruby")).toHaveCount(80);
+    const ruby = panel.locator("ruby").first();
+    await expect(ruby).toHaveAttribute("lang", "ja");
+    await expect(ruby.locator("rt")).toHaveText("うみ");
+    const layout = await ruby.evaluate((element) => {
+      const reading = element.querySelector("rt").getBoundingClientRect();
+      const base = document.createRange();
+      base.selectNode(element.firstChild);
+      const rect = base.getBoundingClientRect();
+      const panel = document.querySelector("#player-lyrics");
+      const scroll = panel.querySelector("[data-lyrics-scroll]");
+      const footer = document.querySelector("footer");
+      return {
+        // Font line boxes overlap in native ruby even when the glyphs don't.
+        above: reading.top < rect.top && reading.bottom < rect.bottom,
+        size: reading.height < rect.height,
+        height: panel.clientHeight,
+        rows: scroll.clientHeight / element.closest("p").clientHeight,
+        anchored:
+          Math.abs(panel.getBoundingClientRect().bottom - footer.getBoundingClientRect().top) < 1,
+      };
+    });
+    expect(layout.above).toBe(true);
+    expect(layout.size).toBe(true);
+    expect(layout.height).toBeLessThanOrEqual(240);
+    expect(layout.rows).toBeGreaterThanOrEqual(2);
+    expect(layout.anchored).toBe(true);
+    if (plain) await expect(panel).toContainText("Estimated scrolling");
+    const position = page.getByRole("slider", { name: "Playback position" });
+    await position.fill("16");
+    const current = panel.locator('[aria-current="true"]').last();
+    await expect(current).toBeInViewport();
+    const scroll = panel.locator("[data-lyrics-scroll]");
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(400);
+    await toggle.uncheck();
+    await expect(panel.locator("ruby")).toHaveCount(0);
+    await expect(current).toBeInViewport();
+    await position.fill("0");
+    await expect(panel.locator('[data-lyric-index="0"]')).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeLessThan(50);
+    await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
+  });
+}
+
+test("lazy furigana upgrades arrive during the same playback without hiding cached lyrics", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    const original = {
+      status: "Available",
+      synced_lyrics: "[00:00]海の歌",
+      retry_after_seconds: 5,
+    };
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": [
+          original,
+          {
+            ...original,
+            retry_after_seconds: null,
+            annotated_lyrics: {
+              version: "test-v1",
+              plain: [],
+              synced: [{ start: 7, end: 8, reading: "うみ" }],
+            },
+          },
+        ],
+      }),
+    );
+  });
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  await expect(panel.locator('[data-lyric-index="0"]')).toHaveText("海の歌");
+  const toggle = panel.getByRole("checkbox", { name: "Furigana (automatic)" });
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toBeEnabled({ timeout: 10_000 });
+  await toggle.check();
+  await expect(panel.locator("rt")).toHaveText("うみ");
+  expect(await lyricsCalls(page)).toEqual(["track-1", "track-1"]);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
+});
+
+test("annotation retry exhaustion keeps original lyrics and allows a manual same-track upgrade", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": { status: "Available", synced_lyrics: "[00:00]海", retry_after_seconds: 5 },
+      }),
+    );
+  });
+  await page.clock.install();
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+  for (let attempt = 1; attempt < 8; attempt++) {
+    await page.clock.fastForward(5000);
+    await expect.poll(async () => (await lyricsCalls(page)).length).toBe(attempt + 1);
+  }
+  await expect(panel).toContainText("Automatic retries paused");
+  await expect(panel.locator('[data-lyric-index="0"]')).toHaveText("海");
+  await page.clock.fastForward(60_000);
+  expect((await lyricsCalls(page)).length).toBe(8);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "iroh-fm-e2e-lyrics",
+      JSON.stringify({
+        "track-1": {
+          status: "Available",
+          synced_lyrics: "[00:00]海",
+          annotated_lyrics: {
+            version: "test-v1",
+            plain: [],
+            synced: [{ start: 7, end: 8, reading: "うみ" }],
+          },
+        },
+      }),
+    );
+  });
+  await panel.getByRole("button", { name: "Retry lyrics" }).click();
+  await panel.getByRole("checkbox", { name: "Furigana (automatic)" }).check();
+  await expect(panel.locator("rt")).toHaveText("うみ");
+  await expect(panel.getByRole("button", { name: "Retry lyrics" })).toHaveCount(0);
+});
 
 test("lyrics discard stale track responses and label plain scrolling as estimated", async ({
   page,

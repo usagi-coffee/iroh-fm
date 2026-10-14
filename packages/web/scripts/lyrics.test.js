@@ -69,6 +69,118 @@ test("source links reject executable and relative URLs", () => {
   assert.equal(lyricsSourceUrl("/lyrics"), null);
 });
 
+test("ruby source mapping preserves LRC timing across tags, CRLF, BOM and repeated timestamps", () => {
+  const source =
+    "\uFEFF[ar:歌手]\r\n[00:03.4][00:05.040] 😀日本語 <00:03.5>海！ \r\n[00:01:250]𠮷野家\r\n[offset:-500]";
+  const spans = ["歌手", "日本語", "海", "𠮷野家"].map((word, index) => ({
+    start: source.indexOf(word),
+    end: source.indexOf(word) + word.length,
+    reading: ["かしゅ", "にほんご", "うみ", "よしのや"][index],
+  }));
+  const original = parseLrc(source);
+  const annotated = parseLrc(source, spans);
+  assert.deepEqual(
+    annotated.map(({ time, text }) => ({ time, text })),
+    original,
+  );
+  for (const line of annotated) {
+    assert.equal(line.parts.map((part) => part.text).join(""), line.text);
+    assert(!line.parts.some((part) => part.reading === "かしゅ"));
+  }
+  assert.deepEqual(annotated[0].parts, [{ text: "𠮷野家", reading: "よしのや" }]);
+  assert.deepEqual(
+    annotated[1].parts.filter((part) => part.reading),
+    [
+      { text: "日本語", reading: "にほんご" },
+      { text: "海", reading: "うみ" },
+    ],
+  );
+  assert.deepEqual(annotated[1].parts, annotated[2].parts);
+});
+
+test("large lyric sources inspect annotations once, not for every line or tag range", () => {
+  const count = 40_000;
+  for (const synced of [true, false]) {
+    const row = synced ? "[00:01]日<00:01.5>本\n" : "日本\n";
+    const source = row.repeat(count);
+    let inspections = 0;
+    const spans = Array.from({ length: count }, (_, index) => ({
+      get start() {
+        // Bound work rather than elapsed time, including on slow test machines.
+        assert(++inspections <= count * 20, "annotations were repeatedly scanned");
+        return index * row.length + row.indexOf("本");
+      },
+      end: index * row.length + row.indexOf("本") + 1,
+      reading: "ほん",
+    }));
+    const lines = synced ? parseLrc(source, spans) : estimateLyrics(source, 60, spans);
+    assert.equal(lines.length, count);
+    for (const line of lines) {
+      assert.equal(line.text, "日本");
+      assert.deepEqual(line.parts, [
+        { text: "日", reading: null },
+        { text: "本", reading: "ほん" },
+      ]);
+    }
+  }
+});
+
+test("unordered, overlapping and malformed spans retain original annotation precedence", () => {
+  const source = "\uFEFF[00:01][00:02] 日本語 <00:01.5>海 \r\n[00:03]𠮷野家";
+  const start = source.indexOf("日本語");
+  const spans = [
+    { start: start + 1, end: start + 3, reading: "ほんご" },
+    { start, end: start + 3, reading: "にほんご" },
+    { start: start + 1, end: start + 2, reading: "duplicate" },
+    { start: start + 0.5, end: start + 1, reading: "fractional" },
+    { start: start + 3, end: source.indexOf("海") + 1, reading: "crossing" },
+    { start: source.indexOf("海"), end: source.indexOf("海") + 1, reading: "" },
+    { start: -1, end: 1, reading: "negative" },
+    { start: source.indexOf("𠮷"), end: source.length + 1, reading: "outside" },
+    { start, end: start, reading: "empty" },
+  ];
+  const lines = parseLrc(source, spans);
+  assert.deepEqual(lines[0].parts, [
+    { text: "日", reading: null },
+    { text: "本語", reading: "ほんご" },
+    { text: " ", reading: null },
+    { text: "海", reading: null },
+  ]);
+  assert.deepEqual(lines[0].parts, lines[1].parts);
+  assert.deepEqual(lines[2].parts, [{ text: "𠮷野家", reading: null }]);
+  assert.deepEqual(parseLrc(source), lines.map(({ time, text }) => ({ time, text })));
+});
+
+test("plain ruby maps original rows while estimated timing and unknown text stay unchanged", () => {
+  const source = " 海！ 😀 \r\n\r\n 𠮷𠮷𠮷 hello 日本語 \n海";
+  const spans = [
+    { start: 1, end: 2, reading: "うみ" },
+    { start: source.indexOf("日本語"), end: source.indexOf("日本語") + 3, reading: "にほんご" },
+    { start: source.lastIndexOf("海"), end: source.lastIndexOf("海") + 1, reading: "うみ" },
+  ];
+  const original = estimateLyrics(source, 30);
+  const annotated = estimateLyrics(source, 30, spans);
+  assert.deepEqual(
+    annotated.map(({ time, text }) => ({ time, text })),
+    original,
+  );
+  for (const line of annotated)
+    assert.equal(line.parts.map((part) => part.text).join(""), line.text);
+  assert.equal(annotated[1].parts[0].text, "𠮷𠮷𠮷 hello ");
+  assert.equal(annotated[1].parts[0].reading, null);
+});
+
+test("malformed or tag-crossing spans never remove original display text", () => {
+  const source = "[00:01]日<00:01.5>本語";
+  const result = parseLrc(source, [
+    { start: -1, end: 1, reading: "bad" },
+    { start: 7, end: source.length, reading: "にほんご" },
+  ]);
+  assert.equal(result[0].text, "日本語");
+  assert.equal(result[0].parts.map((part) => part.text).join(""), "日本語");
+  assert(!result[0].parts.some((part) => part.reading));
+});
+
 const response = (status, retry_after_seconds = null) => ({
   track_id: "one",
   status,
@@ -82,6 +194,38 @@ const settle = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+test("available original lyrics remain visible while same-track annotations are polled", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const original = { ...response("Available", 5), plain_lyrics: "海" };
+  const annotated = {
+    ...original,
+    retry_after_seconds: null,
+    annotated_lyrics: {
+      version: "test-v1",
+      plain: [{ start: 0, end: 1, reading: "うみ" }],
+      synced: [],
+    },
+  };
+  let calls = 0;
+  const updates = [];
+  const stop = requestLyrics(
+    {
+      getTrackLyrics: async () => (++calls === 1 ? original : annotated),
+    },
+    "one",
+    (result) => updates.push(result),
+  );
+  await settle();
+  assert.equal(updates[0], original);
+  t.mock.timers.tick(5000);
+  await settle();
+  assert.equal(updates[1], annotated);
+  t.mock.timers.tick(50_000);
+  await settle();
+  assert.equal(calls, 2);
+  stop();
+});
 
 test("pending hints have a conservative minimum, finite budget, and cleanup", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -179,4 +323,53 @@ test("discard canceled responses, stop on older-server errors and time out hung 
   t.mock.timers.tick(15_000);
   await settle();
   assert.equal(updates.length, 2);
+});
+
+test("obsolete annotations upgrade on the same track and refresh failures retain lyrics", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const old = {
+    ...response("Available", 5),
+    plain_lyrics: "海",
+    annotated_lyrics: {
+      version: "old",
+      plain: [{ start: 0, end: 1, reading: "うみ" }],
+      synced: [],
+    },
+  };
+  const fresh = {
+    ...old,
+    retry_after_seconds: null,
+    annotated_lyrics: { ...old.annotated_lyrics, version: "new" },
+  };
+  const updates = [];
+  let calls = 0;
+  let stop = requestLyrics(
+    { getTrackLyrics: async () => (++calls === 1 ? old : fresh) },
+    "one",
+    (...args) => updates.push(args),
+  );
+  await settle();
+  t.mock.timers.tick(5000);
+  await settle();
+  assert.equal(calls, 2);
+  assert.equal(updates.at(-1)[0], fresh);
+  stop();
+
+  calls = 0;
+  stop = requestLyrics(
+    {
+      getTrackLyrics: async () => {
+        if (++calls === 1) return old;
+        throw new Error("connection lost");
+      },
+    },
+    "one",
+    (...args) => updates.push(args),
+  );
+  await settle();
+  t.mock.timers.tick(5000);
+  await settle();
+  assert.equal(updates.at(-1)[0], old);
+  assert.match(updates.at(-1)[1], /Automatic retries paused/);
+  stop();
 });

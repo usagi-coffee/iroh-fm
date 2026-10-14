@@ -22,5 +22,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/iroh-fm /usr/local/bin/iroh-fm
+COPY crates/server/IPADIC-COPYING /usr/share/licenses/iroh-fm/IPADIC-COPYING
 ENTRYPOINT ["/usr/local/bin/iroh-fm"]
 CMD ["--music-dir", "/music"]

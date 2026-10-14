@@ -91,12 +91,34 @@ pub enum LyricsStatus {
     Instrumental,
 }
 
+/// Automatic word-level ruby. Offsets are UTF-16 code units into the unchanged
+/// plain/LRC source, matching JavaScript string indices, with an exclusive end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LyricReading {
+    pub start: u32,
+    pub end: u32,
+    pub reading: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AnnotatedLyrics {
+    // Identifies dictionary, tokenizer and annotation rules for cache upgrades.
+    pub version: String,
+    pub plain: Vec<LyricReading>,
+    pub synced: Vec<LyricReading>,
+}
+
+/// On Available lyrics, a positive retry_after_seconds hint means automatic
+/// annotations are still being prepared. Show original text while polling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct TrackLyrics {
     pub track_id: TrackId,
     pub status: LyricsStatus,
     pub plain_lyrics: Option<String>,
     pub synced_lyrics: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub annotated_lyrics: Option<AnnotatedLyrics>,
     pub source_url: Option<String>,
     pub retry_after_seconds: Option<u32>,
 }
@@ -299,6 +321,7 @@ mod tests {
             status: LyricsStatus::Available,
             plain_lyrics: Some("First line\nSecond line".to_string()),
             synced_lyrics: Some("[00:01.00]First line\n[00:02.00]Second line".to_string()),
+            annotated_lyrics: None,
             source_url: Some("https://lyrics.example/track-1".to_string()),
             retry_after_seconds: None,
         };
@@ -334,6 +357,7 @@ mod tests {
                 status,
                 plain_lyrics: None,
                 synced_lyrics: None,
+                annotated_lyrics: None,
                 source_url: None,
                 retry_after_seconds,
             };
@@ -354,6 +378,57 @@ mod tests {
             let response: BackendResponse = serde_json::from_value(wire).unwrap();
             assert!(matches!(response, BackendResponse::TrackLyrics(value) if value == lyrics));
         }
+    }
+
+    #[test]
+    fn annotations_are_additive_and_roundtrip_exact_sources() {
+        let wire = serde_json::json!({
+            "track_id": "track-1", "status": "Available",
+            "plain_lyrics": "😀海！", "synced_lyrics": "[00:01.20]😀海！",
+            "source_url": null, "retry_after_seconds": null,
+            "annotated_lyrics": {
+                "version": "test-v1",
+                "plain": [{"start": 2, "end": 3, "reading": "うみ"}],
+                "synced": [{"start": 12, "end": 13, "reading": "うみ"}]
+            }
+        });
+        let lyrics: TrackLyrics = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(lyrics).unwrap(), wire);
+        // Older consumers ignore the additive field; the original source and
+        // status still deserialize independently of annotation support.
+        #[derive(Deserialize)]
+        struct OlderLyrics {
+            plain_lyrics: String,
+            synced_lyrics: String,
+            status: LyricsStatus,
+        }
+        let old: OlderLyrics = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(old.plain_lyrics, "😀海！");
+        assert_eq!(old.synced_lyrics, "[00:01.20]😀海！");
+        assert_eq!(old.status, LyricsStatus::Available);
+        let mut old_wire = wire;
+        old_wire.as_object_mut().unwrap().remove("annotated_lyrics");
+        assert!(
+            serde_json::from_value::<TrackLyrics>(old_wire)
+                .unwrap()
+                .annotated_lyrics
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn available_annotation_pending_hint_roundtrips_without_hiding_source() {
+        let wire = serde_json::json!({
+            "track_id": "track-1", "status": "Available",
+            "plain_lyrics": "海", "synced_lyrics": null,
+            "source_url": null, "retry_after_seconds": 5
+        });
+        let lyrics: TrackLyrics = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(lyrics.status, LyricsStatus::Available);
+        assert_eq!(lyrics.plain_lyrics.as_deref(), Some("海"));
+        assert_eq!(lyrics.retry_after_seconds, Some(5));
+        assert!(lyrics.annotated_lyrics.is_none());
+        assert_eq!(serde_json::to_value(lyrics).unwrap(), wire);
     }
 
     #[test]

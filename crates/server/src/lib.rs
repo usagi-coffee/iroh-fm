@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+mod furigana;
 pub mod index;
 pub mod iroh_rpc;
 mod lyrics;

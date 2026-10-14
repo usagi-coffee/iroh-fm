@@ -9,6 +9,7 @@ iroh = { workspace = true, features = ["default"] }
 iroh-mdns-address-lookup.workspace = true
 iroh-tickets.workspace = true
 lofty.workspace = true
+lindera = { version = "=6.2.0", default-features = false, features = ["embed-ipadic"] }
 md5.workspace = true
 notify.workspace = true
 protocol = { path = "../protocol" }

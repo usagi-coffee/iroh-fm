@@ -11,6 +11,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use crate::furigana::{annotate, needs_annotation};
 use crate::{Error, LibraryIndex, Result, ServerConfig};
 
 const REQUEST_GAP: Duration = Duration::from_secs(5);
@@ -159,6 +160,9 @@ impl Cache {
             return Ok(None);
         }
         let mut result: TrackLyrics = serde_json::from_str(&json)?;
+        if needs_annotation(&result) {
+            result.annotated_lyrics = None;
+        }
         result.retry_after_seconds =
             expiry.map(|expiry| expiry.saturating_sub(now).min(u32::MAX as u64) as u32);
         Ok(Some(result))
@@ -186,6 +190,29 @@ impl Cache {
                     metadata.fingerprint(),
                     serde_json::to_string(result)?,
                     expiry.map(|n| n.min(i64::MAX as u64) as i64)
+                ],
+            )?;
+        Ok(())
+    }
+
+    /// Annotation writes never replace a newly fetched source or changed metadata.
+    /// This also keeps provider expiry and throttle state entirely independent.
+    fn put_annotations(&self, metadata: &Metadata, result: &TrackLyrics) -> Result<()> {
+        self.db
+            .lock()
+            .expect("lyrics cache lock poisoned")
+            .execute(
+                "UPDATE track_lyrics SET result_json = ?1
+             WHERE track_id = ?2 AND fingerprint = ?3
+               AND json_extract(result_json, '$.status') = 'Available'
+               AND json_extract(result_json, '$.plain_lyrics') IS ?4
+               AND json_extract(result_json, '$.synced_lyrics') IS ?5",
+                params![
+                    serde_json::to_string(result)?,
+                    metadata.id.0,
+                    metadata.fingerprint(),
+                    result.plain_lyrics,
+                    result.synced_lyrics
                 ],
             )?;
         Ok(())
@@ -222,12 +249,27 @@ impl Cache {
 struct Shared {
     schedule: Mutex<Schedule>,
     notify: Notify,
+    annotations: Mutex<Schedule>,
+    annotate_notify: Notify,
     cache: Cache,
+}
+
+impl Shared {
+    fn enqueue_annotation(&self, metadata: Metadata) -> bool {
+        let scheduled = self
+            .annotations
+            .lock()
+            .expect("annotation schedule lock poisoned")
+            .enqueue(metadata);
+        self.annotate_notify.notify_one();
+        scheduled
+    }
 }
 
 pub(crate) struct LyricsService {
     shared: Arc<Shared>,
     worker: JoinHandle<()>,
+    annotation_worker: JoinHandle<()>,
 }
 
 impl LyricsService {
@@ -244,6 +286,8 @@ impl LyricsService {
         let shared = Arc::new(Shared {
             schedule: Mutex::new(Schedule::default()),
             notify: Notify::new(),
+            annotations: Mutex::new(Schedule::default()),
+            annotate_notify: Notify::new(),
             cache: Cache::open(&config.music_dir.join("iroh-fm.db"))?,
         });
         let client = reqwest::Client::builder()
@@ -262,12 +306,24 @@ impl LyricsService {
         let worker = tokio::spawn(async move {
             run_worker(worker_shared, library, client, base_url, request_gap).await;
         });
-        Ok(Self { shared, worker })
+        let annotation_shared = Arc::clone(&shared);
+        let annotation_worker = tokio::spawn(run_annotation_worker(annotation_shared));
+        Ok(Self {
+            shared,
+            worker,
+            annotation_worker,
+        })
     }
 
     pub(crate) fn get(&self, track: &Track) -> Result<TrackLyrics> {
         let metadata = Metadata::from_track(track);
-        if let Some(result) = self.shared.cache.get(&metadata, unix_now())? {
+        if let Some(mut result) = self.shared.cache.get(&metadata, unix_now())? {
+            if needs_annotation(&result) {
+                self.shared.enqueue_annotation(metadata);
+                // Available is immediately usable; the hint lets the same-track
+                // UI discover the background upgrade without replay/reconnect.
+                result.retry_after_seconds = Some(5);
+            }
             return Ok(result);
         }
         if !metadata.usable() {
@@ -314,6 +370,47 @@ impl LyricsService {
 impl Drop for LyricsService {
     fn drop(&mut self) {
         self.worker.abort();
+        self.annotation_worker.abort();
+    }
+}
+
+async fn run_annotation_worker(shared: Arc<Shared>) {
+    loop {
+        let job = shared
+            .annotations
+            .lock()
+            .expect("annotation schedule lock poisoned")
+            .take();
+        let Some(job) = job else {
+            shared.annotate_notify.notified().await;
+            continue;
+        };
+        let worker_shared = Arc::clone(&shared);
+        let work = tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+            let cached = worker_shared
+                .cache
+                .get(&job.metadata, unix_now())
+                .map_err(|e| e.to_string())?;
+            if let Some(lyrics) = cached.filter(needs_annotation) {
+                let result = annotate(lyrics)?;
+                worker_shared
+                    .cache
+                    .put_annotations(&job.metadata, &result)
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })
+        .await;
+        match work {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("[lyrics] annotation failed: {error}"),
+            Err(error) => eprintln!("[lyrics] annotation worker failed: {error}"),
+        }
+        shared
+            .annotations
+            .lock()
+            .expect("annotation schedule lock poisoned")
+            .finish(false);
     }
 }
 
@@ -323,6 +420,7 @@ fn empty(id: &TrackId, status: LyricsStatus, retry: Option<u32>) -> TrackLyrics 
         status,
         plain_lyrics: None,
         synced_lyrics: None,
+        annotated_lyrics: None,
         source_url: None,
         retry_after_seconds: retry,
     }
@@ -464,11 +562,14 @@ async fn run_worker(
             )),
             Outcome::Fallback => None,
         };
-        if unchanged
-            && let Some(result) = result
-            && let Err(error) = shared.cache.put(&job.metadata, &result, unix_now())
-        {
-            eprintln!("[lyrics] cache write failed: {error}");
+        if unchanged && let Some(result) = result {
+            match shared.cache.put(&job.metadata, &result, unix_now()) {
+                Err(error) => eprintln!("[lyrics] cache write failed: {error}"),
+                Ok(()) if needs_annotation(&result) => {
+                    shared.enqueue_annotation(job.metadata.clone());
+                }
+                Ok(()) => {}
+            }
         }
         shared
             .schedule
@@ -550,6 +651,7 @@ fn lyrics_result(metadata: &Metadata, record: Record) -> Option<TrackLyrics> {
         status,
         plain_lyrics: plain,
         synced_lyrics: synced,
+        annotated_lyrics: None,
         source_url: Some(format!("https://lrclib.net/lyrics/{}", record.id)),
         retry_after_seconds: None,
     })
@@ -969,6 +1071,156 @@ mod tests {
                 .status,
             LyricsStatus::Instrumental
         );
+    }
+
+    #[tokio::test]
+    async fn lazy_annotations_upgrade_old_cache_without_refetch_or_provider_wait() {
+        let dir = TestDir::new();
+        let song = track("曲");
+        let metadata = Metadata::from_track(&song);
+        let mut original = lyrics_result(&metadata, record("曲")).unwrap();
+        original.plain_lyrics = Some(" 海の歌！ hello 𠮷𠮷𠮷\r\n日本語 ".into());
+        original.synced_lyrics = Some("\u{feff}[ar:歌手]\r\n[offset:-500]\r\n[00:01.20][00:02.30] 海の歌！\r\n[00:03]<00:03.1>日本語".into());
+        let cache = Cache::open(&dir.0.join("iroh-fm.db")).unwrap();
+        cache.put(&metadata, &original, unix_now()).unwrap();
+        // A provider cooldown must never delay purely local cache upgrades.
+        cache.save_throttle(unix_now() + 3600, 3).unwrap();
+        drop(cache);
+        let mut mock = Mock::start(vec![]).await;
+        let library = index(std::slice::from_ref(&song));
+        let service = LyricsService::start(
+            &dir.config(),
+            library.clone(),
+            mock.url.clone(),
+            REQUEST_GAP,
+        )
+        .unwrap();
+        let first = service.get(&song).unwrap();
+        assert_eq!(first.status, LyricsStatus::Available);
+        assert_eq!(first.plain_lyrics, original.plain_lyrics);
+        assert_eq!(first.retry_after_seconds, Some(5));
+        assert!(first.annotated_lyrics.is_none());
+        let annotated = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let result = service.get(&song).unwrap();
+                if result.annotated_lyrics.is_some() {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(annotated.plain_lyrics, original.plain_lyrics);
+        assert_eq!(annotated.synced_lyrics, original.synced_lyrics);
+        assert_eq!(annotated.retry_after_seconds, None);
+        assert!(
+            !annotated
+                .annotated_lyrics
+                .as_ref()
+                .unwrap()
+                .synced
+                .is_empty()
+        );
+        mock.quiet(Duration::from_millis(20)).await;
+        drop(service);
+        let cache = Cache::open(&dir.0.join("iroh-fm.db")).unwrap();
+        assert_eq!(
+            cache.get(&metadata, unix_now()).unwrap().unwrap(),
+            annotated
+        );
+        assert_eq!(cache.throttle().unwrap().1, 3);
+
+        // A rule/dictionary version upgrade invalidates just annotation data.
+        let mut obsolete = annotated.clone();
+        obsolete.annotated_lyrics.as_mut().unwrap().version = "old-rules".into();
+        cache.put(&metadata, &obsolete, unix_now()).unwrap();
+        assert!(
+            cache
+                .get(&metadata, unix_now())
+                .unwrap()
+                .unwrap()
+                .annotated_lyrics
+                .is_none()
+        );
+        drop(cache);
+        let service =
+            LyricsService::start(&dir.config(), library, mock.url.clone(), REQUEST_GAP).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let result = service.get(&song).unwrap();
+                if result.annotated_lyrics.is_some() {
+                    assert_eq!(result, annotated);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        mock.quiet(Duration::from_millis(20)).await;
+    }
+
+    #[test]
+    fn annotation_write_cannot_overwrite_replaced_source_or_metadata() {
+        let dir = TestDir::new();
+        let cache = Cache::open(&dir.0.join("iroh-fm.db")).unwrap();
+        let metadata = Metadata::from_track(&track("曲"));
+        let original = lyrics_result(&metadata, record("曲")).unwrap();
+        let annotated = annotate(original.clone()).unwrap();
+        let mut replacement = original.clone();
+        replacement.plain_lyrics = Some("different source".into());
+        cache.put(&metadata, &replacement, 100).unwrap();
+        cache.put_annotations(&metadata, &annotated).unwrap();
+        assert_eq!(cache.get(&metadata, 100).unwrap().unwrap(), replacement);
+        let changed = Metadata {
+            title: "Other".into(),
+            ..metadata.clone()
+        };
+        cache.put(&changed, &original, 100).unwrap();
+        cache.put_annotations(&metadata, &annotated).unwrap();
+        assert!(
+            cache
+                .get(&changed, 100)
+                .unwrap()
+                .unwrap()
+                .annotated_lyrics
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn newly_fetched_lyrics_are_annotated_and_persisted_without_another_request() {
+        let dir = TestDir::new();
+        let song = track("曲");
+        let mut mock = Mock::start(vec![Reply::new(200, body("曲"))]).await;
+        let service = LyricsService::start(
+            &dir.config(),
+            index(std::slice::from_ref(&song)),
+            mock.url.clone(),
+            REQUEST_GAP,
+        )
+        .unwrap();
+        assert_eq!(service.get(&song).unwrap().status, LyricsStatus::Pending);
+        mock.next().await;
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let result = service.get(&song).unwrap();
+                if result.annotated_lyrics.is_some() {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.status, LyricsStatus::Available);
+        assert_eq!(
+            result.synced_lyrics.as_deref(),
+            Some("[00:01.00]一行目\n[00:02.00]二行目")
+        );
+        assert!(!result.annotated_lyrics.unwrap().synced.is_empty());
+        mock.quiet(Duration::from_millis(20)).await;
     }
 
     #[test]

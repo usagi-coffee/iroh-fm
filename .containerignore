@@ -5,6 +5,7 @@
 !crates/
 !crates/*/
 !crates/*/Cargo.toml
+!crates/server/IPADIC-COPYING
 !crates/*/src/
 !crates/*/src/**
 !packages/

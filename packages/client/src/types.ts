@@ -1,5 +1,6 @@
 export type { Album } from "./generated/Album.js";
 export type { AlbumId } from "./generated/AlbumId.js";
+export type { AnnotatedLyrics } from "./generated/AnnotatedLyrics.js";
 export type { Artist } from "./generated/Artist.js";
 export type { ArtistId } from "./generated/ArtistId.js";
 export type { BackendRequest } from "./generated/BackendRequest.js";
@@ -10,6 +11,7 @@ export type { ConnectionInfo } from "./generated/ConnectionInfo.js";
 export type { LibrarySnapshot } from "./generated/LibrarySnapshot.js";
 export type { LibrarySummary } from "./generated/LibrarySummary.js";
 export type { LyricsStatus } from "./generated/LyricsStatus.js";
+export type { LyricReading } from "./generated/LyricReading.js";
 export type { Playlist } from "./generated/Playlist.js";
 export type { PlaylistId } from "./generated/PlaylistId.js";
 export type { ResolvedId } from "./generated/ResolvedId.js";

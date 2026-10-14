@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
 import { ClientCore } from "./core.js";
 import { MusicClient } from "./index.js";
 import { NativeMusicClient } from "./native.js";
 import type { BackendRequest, TrackLyrics } from "./types.js";
+
+import { describe, expect, test } from "bun:test";
 
 const lyrics: TrackLyrics = {
   track_id: "track-1",
@@ -11,6 +12,18 @@ const lyrics: TrackLyrics = {
   synced_lyrics: null,
   source_url: null,
   retry_after_seconds: 2,
+};
+
+const annotated: TrackLyrics = {
+  ...lyrics,
+  status: "Available",
+  plain_lyrics: "日本語",
+  retry_after_seconds: null,
+  annotated_lyrics: {
+    version: "test-v1",
+    plain: [{ start: 0, end: 3, reading: "にほんご" }],
+    synced: [],
+  },
 };
 
 describe("lyrics host API", () => {
@@ -47,5 +60,19 @@ describe("lyrics host API", () => {
 
     expect(await client.getTrackLyrics("track-1")).toBe(lyrics);
     expect(requests).toEqual([{ GetTrackLyrics: { track_id: "track-1" } }]);
+  });
+
+  test("optional annotations survive browser and native JSON bridges unchanged", async () => {
+    const browser = new MusicClient({
+      request: async () => JSON.stringify({ TrackLyrics: annotated }),
+    });
+    const native = new NativeMusicClient({
+      handle: 1,
+      endpointId: "client-a",
+      remoteId: "server-a",
+    });
+    native.request = async () => ({ TrackLyrics: annotated });
+    expect(await browser.getTrackLyrics("track-1")).toEqual(annotated);
+    expect(await native.getTrackLyrics("track-1")).toEqual(annotated);
   });
 });

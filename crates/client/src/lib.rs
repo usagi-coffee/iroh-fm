@@ -490,14 +490,32 @@ mod tests {
             status: LyricsStatus::Pending,
             plain_lyrics: None,
             synced_lyrics: None,
+            annotated_lyrics: None,
             source_url: None,
             retry_after_seconds: Some(2),
         };
         let response = pending.clone();
+        let available = TrackLyrics {
+            status: protocol::LyricsStatus::Available,
+            plain_lyrics: Some("海".into()),
+            annotated_lyrics: Some(protocol::AnnotatedLyrics {
+                version: "test-v1".into(),
+                plain: vec![protocol::LyricReading {
+                    start: 0,
+                    end: 1,
+                    reading: "うみ".into(),
+                }],
+                synced: vec![],
+            }),
+            retry_after_seconds: None,
+            ..pending.clone()
+        };
+        let annotated_response = available.clone();
         let serve = tokio::spawn(async move {
             let connection = server.accept().await.unwrap().await.unwrap();
             for response in [
                 BackendResponse::TrackLyrics(response),
+                BackendResponse::TrackLyrics(annotated_response),
                 BackendResponse::Empty,
             ] {
                 let (mut send, mut recv) = connection.accept_bi().await.unwrap();
@@ -519,6 +537,13 @@ mod tests {
                 .await
                 .unwrap(),
             pending
+        );
+        assert_eq!(
+            client
+                .get_track_lyrics(pending.track_id.clone())
+                .await
+                .unwrap(),
+            available
         );
         assert!(matches!(
             client.get_track_lyrics(pending.track_id).await,

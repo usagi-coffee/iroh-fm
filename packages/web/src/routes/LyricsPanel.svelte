@@ -6,10 +6,15 @@
    * onclose: () => void, onretry?: () => void }} */
   const { lyrics, message, title, position, duration, onclose, onretry } = $props();
   let follow = $state(true);
+  let furigana = $state(false);
   let advance = $state(0);
-  const synced = $derived(parseLrc(lyrics?.synced_lyrics));
+  const annotations = $derived(lyrics?.annotated_lyrics);
+  const synced = $derived(parseLrc(lyrics?.synced_lyrics, annotations?.synced));
   const estimated = $derived(synced.length === 0 && Boolean(lyrics?.plain_lyrics?.trim()));
-  const lines = $derived(synced.length ? synced : estimateLyrics(lyrics?.plain_lyrics, duration));
+  const lines = $derived(
+    synced.length ? synced : estimateLyrics(lyrics?.plain_lyrics, duration, annotations?.plain),
+  );
+  const hasReadings = $derived(lines.some((line) => line.parts?.some((part) => part.reading)));
   const active = $derived(activeLyricIndex(lines, position + advance));
   const source = $derived(
     lyricsSourceUrl(lyrics?.source_url) ??
@@ -31,6 +36,8 @@
 
   /** @param {HTMLElement} element @param {number} index */
   function followLine(element, index) {
+    // Recenter when ruby changes line heights as well as on seeks.
+    void furigana;
     if (!follow || index !== Math.max(0, active)) return;
     const viewport = element.closest("[data-lyrics-scroll]");
     if (!(viewport instanceof HTMLElement)) return;
@@ -55,6 +62,13 @@
     <h2 class="min-w-0 flex-1 truncate text-sm font-semibold" {title}>Lyrics · {title}</h2>
     <label class="flex items-center gap-2 text-xs">
       <input type="checkbox" bind:checked={follow} class="accent-mauve" /> Follow playback
+    </label>
+    <label
+      class="flex items-center gap-1 text-xs"
+      title="Automatic dictionary readings may differ from the sung pronunciation"
+    >
+      <input type="checkbox" bind:checked={furigana} disabled={!hasReadings} class="accent-mauve" />
+      Furigana <span class="text-overlay1">(automatic)</span>
     </label>
     <button
       type="button"
@@ -118,7 +132,15 @@
               : 'text-overlay1'}"
             {@attach (element) => followLine(element, index)}
           >
-            {line.text || "♪"}
+            {#if furigana && line.parts?.length}
+              {#each line.parts as part}
+                {#if part.reading}
+                  <ruby lang="ja">{part.text}<rp>(</rp><rt>{part.reading}</rt><rp>)</rp></ruby>
+                {:else}{part.text}{/if}
+              {/each}
+            {:else}
+              {line.text || "♪"}
+            {/if}
           </p>
         {/each}
       </div>
@@ -135,3 +157,15 @@
     </p>
   {/if}
 </section>
+
+<style>
+  ruby {
+    ruby-position: over;
+    ruby-align: center;
+  }
+  rt {
+    font-size: 0.65em;
+    line-height: 1;
+    font-weight: normal;
+  }
+</style>

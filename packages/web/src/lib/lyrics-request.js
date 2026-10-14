@@ -12,6 +12,8 @@
 export function requestLyrics(client, trackId, update) {
   let active = true;
   let attempts = 0;
+  /** @type {TrackLyrics | null} */
+  let available = null;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let retryTimer;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -34,13 +36,18 @@ export function requestLyrics(client, trackId, update) {
         !["Pending", "Available", "NotFound", "Unavailable", "Instrumental"].includes(result.status)
       )
         throw new Error("Unsupported lyrics response");
-      const retryable = result.status === "Pending" || result.status === "Unavailable";
+      const annotationPending =
+        result.status === "Available" &&
+        Number(result.retry_after_seconds) > 0;
+      if (result.status === "Available") available = result;
+      const retryable =
+        result.status === "Pending" || result.status === "Unavailable" || annotationPending;
       update(
         result,
         retryable && attempts >= 8 ? "Automatic retries paused. Try again later." : "",
       );
       if (retryable && attempts < 8) {
-        const minimum = result.status === "Pending" ? 5 : 30;
+        const minimum = result.status === "Unavailable" ? 30 : 5;
         const hint = Number(result.retry_after_seconds);
         const seconds = Math.max(minimum, Number.isFinite(hint) && hint > 0 ? hint : minimum);
         // Do not overflow the browser timer and accidentally create a rapid loop.
@@ -51,8 +58,10 @@ export function requestLyrics(client, trackId, update) {
       clearTimeout(timeoutTimer);
       if (active)
         update(
-          null,
-          "Lyrics unavailable. The server may not support lyrics, or the connection failed.",
+          available,
+          available
+            ? "Automatic retries paused. Could not refresh furigana. Try again later."
+            : "Lyrics unavailable. The server may not support lyrics, or the connection failed.",
         );
     }
   }
