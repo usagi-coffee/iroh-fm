@@ -93,11 +93,40 @@ pub enum LyricsStatus {
 
 /// Automatic word-level ruby. Offsets are UTF-16 code units into the unchanged
 /// plain/LRC source, matching JavaScript string indices, with an exclusive end.
+/// Optional dictionary senses are not a contextual lyric translation. Older
+/// servers omit dictionary; an empty meanings list explicitly means no match.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct LyricReading {
     pub start: u32,
     pub end: u32,
     pub reading: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dictionary: Option<LyricDictionary>,
+}
+
+/// Base-form JMdict lookup. truncated indicates additional entries, senses or
+/// gloss text were omitted to bound payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LyricDictionary {
+    pub lemma: String,
+    pub meanings: Vec<LyricMeaning>,
+    pub truncated: bool,
+}
+
+/// One dictionary entry with its base-form reading, which can differ from the
+/// surface ruby.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LyricMeaning {
+    pub entry_id: String,
+    pub reading: String,
+    pub senses: Vec<LyricSense>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LyricSense {
+    pub glosses: Vec<String>,
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -413,6 +442,47 @@ mod tests {
                 .unwrap()
                 .annotated_lyrics
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn dictionary_meanings_are_additive_to_old_ruby_and_roundtrip_multiple_senses() {
+        let old = serde_json::json!({ "start": 2, "end": 4, "reading": "たべ" });
+        let reading: LyricReading = serde_json::from_value(old.clone()).unwrap();
+        assert!(reading.dictionary.is_none());
+        assert_eq!(serde_json::to_value(&reading).unwrap(), old);
+        let mut wire = old.clone();
+        wire["dictionary"] = serde_json::json!({
+            "lemma": "食べる", "truncated": false,
+            "meanings": [{
+                "entry_id": "1358280", "reading": "たべる",
+                "senses": [
+                    { "glosses": ["to eat"], "labels": ["Ichidan verb"] },
+                    { "glosses": ["to live on", "to subsist on"], "labels": [] }
+                ]
+            }]
+        });
+        let enriched: LyricReading = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(enriched).unwrap(), wire);
+        #[derive(Serialize, Deserialize)]
+        struct OlderReading {
+            start: u32,
+            end: u32,
+            reading: String,
+        }
+        let older: OlderReading = serde_json::from_value(wire).unwrap();
+        assert_eq!(serde_json::to_value(older).unwrap(), old);
+        let mut missing = old;
+        missing["dictionary"] = serde_json::json!({
+            "lemma": "unknown", "meanings": [], "truncated": false
+        });
+        assert!(
+            serde_json::from_value::<LyricReading>(missing)
+                .unwrap()
+                .dictionary
+                .unwrap()
+                .meanings
+                .is_empty()
         );
     }
 

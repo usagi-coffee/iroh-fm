@@ -10,6 +10,7 @@ iroh-mdns-address-lookup.workspace = true
 iroh-tickets.workspace = true
 lofty.workspace = true
 lindera = { version = "=6.2.0", default-features = false, features = ["embed-ipadic"] }
+fst = "0.4.7"
 md5.workspace = true
 notify.workspace = true
 protocol = { path = "../protocol" }
@@ -21,6 +22,15 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 httpdate = "1"
+
+[build-dependencies]
+flate2 = "1"
+fst = "0.4.7"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tar = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

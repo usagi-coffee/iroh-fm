@@ -21,7 +21,24 @@ const annotated: TrackLyrics = {
   retry_after_seconds: null,
   annotated_lyrics: {
     version: "test-v1",
-    plain: [{ start: 0, end: 3, reading: "にほんご" }],
+    plain: [
+      {
+        start: 0,
+        end: 3,
+        reading: "にほんご",
+        dictionary: {
+          lemma: "日本語",
+          meanings: [
+            {
+              entry_id: "1464530",
+              reading: "にほんご",
+              senses: [{ glosses: ["Japanese language"], labels: ["noun"] }],
+            },
+          ],
+          truncated: false,
+        },
+      },
+    ],
     synced: [],
   },
 };

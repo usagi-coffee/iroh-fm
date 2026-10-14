@@ -28,6 +28,7 @@ export default defineConfig({
       testMatch: [
         "connection.spec.js",
         "web/player.spec.js",
+        "web/lyric-export.spec.js",
         "web/cache.spec.js",
         "web/auth.spec.js",
         "web/playlists.spec.js",
@@ -40,7 +41,12 @@ export default defineConfig({
     },
     {
       name: "desktop",
-      testMatch: ["connection.spec.js", "web/player.spec.js", "desktop/cache.spec.js"],
+      testMatch: [
+        "connection.spec.js",
+        "web/player.spec.js",
+        "web/lyric-export.spec.js",
+        "desktop/cache.spec.js",
+      ],
       use: {
         ...browser,
         baseURL: "http://127.0.0.1:4174",

@@ -23,5 +23,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/iroh-fm /usr/local/bin/iroh-fm
 COPY crates/server/IPADIC-COPYING /usr/share/licenses/iroh-fm/IPADIC-COPYING
+COPY crates/server/JMDICT-NOTICE crates/server/CC-BY-SA-4.0 crates/server/JMDICT.md /usr/share/licenses/iroh-fm/
 ENTRYPOINT ["/usr/local/bin/iroh-fm"]
 CMD ["--music-dir", "/music"]

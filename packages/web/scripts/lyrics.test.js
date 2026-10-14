@@ -1,5 +1,12 @@
 import { requestLyrics } from "../src/lib/lyrics-request.js";
-import { activeLyricIndex, estimateLyrics, lyricsSourceUrl, parseLrc } from "../src/lib/lyrics.js";
+import {
+  activeLyricIndex,
+  estimateLyrics,
+  lyricGloss,
+  lyricDictionaryDescription,
+  lyricsSourceUrl,
+  parseLrc,
+} from "../src/lib/lyrics.js";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -112,6 +119,7 @@ test("large lyric sources inspect annotations once, not for every line or tag ra
       },
       end: index * row.length + row.indexOf("本") + 1,
       reading: "ほん",
+      dictionary: { lemma: "本", meanings: [], truncated: false },
     }));
     const lines = synced ? parseLrc(source, spans) : estimateLyrics(source, 60, spans);
     assert.equal(lines.length, count);
@@ -119,10 +127,60 @@ test("large lyric sources inspect annotations once, not for every line or tag ra
       assert.equal(line.text, "日本");
       assert.deepEqual(line.parts, [
         { text: "日", reading: null },
-        { text: "本", reading: "ほん" },
+        {
+          text: "本",
+          reading: "ほん",
+          dictionary: { lemma: "本", meanings: [], truncated: false },
+        },
       ]);
     }
   }
+});
+
+test("dictionary senses map unchanged source ranges, preserve timings and remain honestly labeled", () => {
+  const dictionary = {
+    lemma: "食べる",
+    truncated: true,
+    meanings: [
+      {
+        entry_id: "1358280",
+        reading: "たべる",
+        senses: [
+          { glosses: ["to eat"], labels: ["Ichidan verb"] },
+          { glosses: ["to subsist on"], labels: [] },
+        ],
+      },
+    ],
+  };
+  for (const synced of [false, true]) {
+    const source = `\uFEFF${synced ? "[00:01][00:02]" : ""} 😀食べた！ \r\n`;
+    const start = source.indexOf("食べ");
+    const spans = [{ start, end: start + 2, reading: "たべ", dictionary }];
+    const original = synced ? parseLrc(source) : estimateLyrics(source, 60);
+    const lines = synced ? parseLrc(source, spans) : estimateLyrics(source, 60, spans);
+    assert.deepEqual(
+      lines.map(({ time, text }) => ({ time, text })),
+      original,
+    );
+    const part = lines[0].parts.find((p) => p.reading);
+    assert.equal(part.text, "食べ");
+    assert.equal(part.dictionary, dictionary);
+    assert.equal(lyricGloss(part), "to eat / …");
+    assert.match(lyricDictionaryDescription(part), /not a lyric translation/);
+    assert.match(lyricDictionaryDescription(part), /2\. to subsist on/);
+    assert.match(lyricDictionaryDescription(part), /More senses omitted/);
+    assert.equal(lines[0].parts.map((p) => p.text).join(""), lines[0].text);
+    if (synced) assert.equal(lines[0].parts, lines[1].parts);
+  }
+  assert.equal(lyricGloss({ text: "海", reading: "うみ" }), null);
+  assert.match(lyricDictionaryDescription({ text: "海", reading: "うみ" }), /unavailable/);
+  const noMatch = {
+    text: "未知",
+    reading: "みち",
+    dictionary: { lemma: "未知", meanings: [], truncated: false },
+  };
+  assert.equal(lyricGloss(noMatch), null);
+  assert.match(lyricDictionaryDescription(noMatch), /No JMdict match/);
 });
 
 test("unordered, overlapping and malformed spans retain original annotation precedence", () => {
@@ -148,7 +206,10 @@ test("unordered, overlapping and malformed spans retain original annotation prec
   ]);
   assert.deepEqual(lines[0].parts, lines[1].parts);
   assert.deepEqual(lines[2].parts, [{ text: "𠮷野家", reading: null }]);
-  assert.deepEqual(parseLrc(source), lines.map(({ time, text }) => ({ time, text })));
+  assert.deepEqual(
+    parseLrc(source),
+    lines.map(({ time, text }) => ({ time, text })),
+  );
 });
 
 test("plain ruby maps original rows while estimated timing and unknown text stay unchanged", () => {

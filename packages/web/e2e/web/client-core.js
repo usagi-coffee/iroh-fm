@@ -4,6 +4,17 @@ class WebMusicClient extends FixtureClient {
   native = false;
   nativePlayback = false;
 
+  async exportTrackBlob(id, onProgress = () => {}, { maxBytes = 512 * 1024 * 1024 } = {}) {
+    const blob = silentWav();
+    if (blob.size > maxBytes) throw new Error("Original audio is too large to export.");
+    onProgress(0, blob.size);
+    await delay(Number(localStorage.getItem("iroh-fm-e2e-export-delay")) || 0);
+    const error = localStorage.getItem("iroh-fm-e2e-export-error");
+    if (error) throw new Error(error);
+    onProgress(blob.size, blob.size);
+    return blob;
+  }
+
   async trackSource(id, onProgress = () => {}) {
     const blob = silentWav();
     this.receivedBytes += blob.size;

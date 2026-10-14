@@ -1,5 +1,5 @@
 /** @typedef {import('@iroh-fm/client/types').LyricReading} LyricReading */
-/** @typedef {{ text: string, reading: string | null }} LyricPart */
+/** @typedef {{ text: string, reading: string | null, dictionary?: import('@iroh-fm/client/types').LyricDictionary }} LyricPart */
 /** @typedef {{ time: number, text: string, parts?: LyricPart[] }} LyricLine */
 /** @typedef {LyricReading & { order: number }} IndexedReading */
 
@@ -13,7 +13,7 @@ function indexReadings(source, readings) {
   /** @type {IndexedReading[]} */
   const index = [];
   for (const [order, span] of readings.entries()) {
-    const { start, end, reading } = span;
+    const { start, end, reading, dictionary } = span;
     if (
       Number.isInteger(start) &&
       Number.isInteger(end) &&
@@ -22,7 +22,7 @@ function indexReadings(source, readings) {
       start < end &&
       reading
     )
-      index.push({ start, end, reading, order });
+      index.push({ start, end, reading, ...(dictionary ? { dictionary } : {}), order });
   }
   return index.sort((a, b) => a.start - b.start || a.order - b.order);
 }
@@ -80,7 +80,11 @@ function rowParts(row, offset, readings, synced) {
       const left = span.start - offset;
       const right = span.end - offset;
       if (left > position) parts.push({ text: row.slice(position, left), reading: null });
-      parts.push({ text: row.slice(left, right), reading: span.reading });
+      parts.push({
+        text: row.slice(left, right),
+        reading: span.reading,
+        ...(span.dictionary ? { dictionary: span.dictionary } : {}),
+      });
       position = right;
     }
     if (position < end) parts.push({ text: row.slice(position, end), reading: null });
@@ -192,4 +196,41 @@ export function lyricsSourceUrl(value) {
   } catch {
     return null;
   }
+}
+
+/**
+ * A short dictionary gloss, never a claimed contextual translation. Full
+ * bounded senses remain available in the title/accessibility description.
+ * @param {LyricPart} part
+ */
+export function lyricGloss(part) {
+  const dictionary = part.dictionary;
+  if (!dictionary) return null;
+  const first = dictionary.meanings[0]?.senses[0]?.glosses[0];
+  if (!first) return null;
+  const more =
+    dictionary.truncated ||
+    dictionary.meanings.length > 1 ||
+    dictionary.meanings[0].senses.length > 1 ||
+    dictionary.meanings[0].senses[0].glosses.length > 1;
+  return `${first}${more ? " / …" : ""}`;
+}
+
+/** @param {LyricPart} part */
+export function lyricDictionaryDescription(part) {
+  const dictionary = part.dictionary;
+  if (!dictionary) return "Dictionary meanings unavailable for this word.";
+  if (!dictionary.meanings.length) return `No JMdict match for ${dictionary.lemma}.`;
+  const senses = dictionary.meanings
+    .map(
+      (meaning) =>
+        `${meaning.reading}: ${meaning.senses
+          .map(
+            (sense, index) =>
+              `${index + 1}. ${sense.glosses.join("; ")}${sense.labels.length ? ` (${sense.labels.join(", ")})` : ""}`,
+          )
+          .join(" · ")}`,
+    )
+    .join(" | ");
+  return `Dictionary meanings for ${dictionary.lemma}, not a lyric translation. ${senses}${dictionary.truncated ? " · More senses omitted." : ""}`;
 }

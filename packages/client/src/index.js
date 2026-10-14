@@ -10,6 +10,7 @@ import {
   setStarred as setStarredProtocol,
   updatePlaylist as updatePlaylistProtocol,
 } from "./protocol.js";
+import { exportMaxBytes, trackDownload, validateTrackSize } from "./track-export.js";
 
 let modulePromise;
 const COVER_CACHE_NAME = "iroh-fm-cover-art-v2";
@@ -465,6 +466,27 @@ export class MusicClient {
     return blob ? this.persistTrackBlob(id, blob) : false;
   }
 
+  /**
+   * Return the complete original audio without changing playback or its queue.
+   * @param {string} id
+   * @param {(received: number, total: number) => void} [onProgress]
+   * @param {{maxBytes?: number}} [options]
+   * @returns {Promise<Blob>}
+   */
+  async exportTrackBlob(id, onProgress = () => {}, options = {}) {
+    const maxBytes = exportMaxBytes(options);
+    const cached = await this.cachedTrack(id, { maxBytes });
+    if (cached) {
+      validateTrackSize(cached.blob.size, maxBytes);
+      onProgress(cached.blob.size, cached.blob.size);
+      return cached.blob;
+    }
+    // Native playback cache IDs do not guarantee byte access through openTrack:
+    // Desktop's export stream opens a server connection, not its playback cache.
+    if (this.offlineOnly) throw new Error("track is not available offline");
+    return this.downloadTrackBlob(id, onProgress, { maxBytes });
+  }
+
   /** @param {number} bytes */
   setMemoryCacheSize(bytes) {
     const size = normalizeMemoryCacheBytes(
@@ -690,6 +712,7 @@ export class MusicClient {
           onProgress(received, total);
           this.notifyTrackProgress(id, received, total);
         };
+        validateTrackSize(fileSize);
         reportProgress(0, fileSize);
         if (this.inner.supportsProgressivePlayback !== false && canUseMediaSource(contentType)) {
           return new ProgressiveTrackSource(
@@ -707,6 +730,7 @@ export class MusicClient {
         }).blob();
         return new BlobTrackSource(blob, releaseAudioPriority, this.rememberTrackBlob(id, blob));
       } catch (error) {
+        if (!stream.locked) await stream.cancel(error).catch(() => {});
         releaseAudioPriority();
         throw error;
       }
@@ -801,8 +825,8 @@ export class MusicClient {
     for (const listener of state.listeners) listener(received, total);
   }
 
-  /** @param {string} id */
-  async cachedTrack(id) {
+  /** @param {string} id @param {{maxBytes?: number}} [options] */
+  async cachedTrack(id, { maxBytes = Number.MAX_SAFE_INTEGER } = {}) {
     const existing = this.activeTrackRequests.get(id);
     if (existing) {
       try {
@@ -815,7 +839,7 @@ export class MusicClient {
 
     const memory = this.memoryTrackCache.get(id);
     if (memory) return { blob: memory, persistent: false };
-    const blob = await this.readPersistentTrackBlob(id);
+    const blob = await this.readPersistentTrackBlob(id, maxBytes);
     if (blob) this.memoryTrackCache.set(id, blob);
     return blob ? { blob, persistent: true } : null;
   }
@@ -835,18 +859,41 @@ export class MusicClient {
     }
   }
 
-  /** @param {string} id */
-  async readPersistentTrackBlob(id) {
+  /** @param {string} id @param {number} [maxBytes] */
+  async readPersistentTrackBlob(id, maxBytes = Number.MAX_SAFE_INTEGER) {
     if (!("caches" in globalThis)) return null;
     try {
       const cache = await globalThis.caches.open(TRACK_CACHE_NAME);
       const request = trackCacheRequest(this.remoteId, id);
       const response = await cache.match(request);
       if (!response) return null;
-      const blob = await response.blob();
-      if (blob.size > 0) return blob;
-      await cache.delete(request);
-    } catch {
+      const declaredLength = Number(response.headers.get("content-length"));
+      if (
+        !Number.isSafeInteger(declaredLength) ||
+        declaredLength <= 0 ||
+        response.status !== 200 ||
+        response.headers.has("content-range") ||
+        !response.body
+      ) {
+        await cache.delete(request);
+        return null;
+      }
+      if (declaredLength > maxBytes)
+        throw new RangeError("original track exceeds export size limit");
+      try {
+        const blob = await new Response(
+          trackDownload(response.body, declaredLength, () => {}, maxBytes),
+        ).blob();
+        return blob.slice(
+          0,
+          blob.size,
+          response.headers.get("content-type") || "application/octet-stream",
+        );
+      } catch {
+        await cache.delete(request);
+      }
+    } catch (error) {
+      if (error instanceof RangeError) throw error;
       // Cache Storage can be unavailable in private browsing contexts.
     }
     return null;
@@ -889,8 +936,9 @@ export class MusicClient {
   /**
    * @param {string} id
    * @param {(received: number, total: number) => void} [onProgress]
+   * @param {{maxBytes?: number}} [options]
    */
-  async downloadTrackBlob(id, onProgress = () => {}) {
+  async downloadTrackBlob(id, onProgress = () => {}, { maxBytes = Number.MAX_SAFE_INTEGER } = {}) {
     this.audioOpenRequests += 1;
     this.coverFetchPaused = true;
     this.inner.prioritizeAudio();
@@ -909,10 +957,15 @@ export class MusicClient {
 
       this.activeAudioSources += 1;
       try {
+        validateTrackSize(fileSize, maxBytes);
         onProgress(0, fileSize);
-        return await new Response(trackDownload(stream, fileSize, onProgress), {
-          headers: { "content-type": contentType },
-        }).blob();
+        const blob = await new Response(
+          trackDownload(stream, fileSize, onProgress, maxBytes),
+        ).blob();
+        return blob.slice(0, blob.size, contentType);
+      } catch (error) {
+        if (!stream.locked) await stream.cancel(error).catch(() => {});
+        throw error;
       } finally {
         this.activeAudioSources = Math.max(0, this.activeAudioSources - 1);
         queueMicrotask(() => this.drainCoverFetchQueue());
@@ -997,20 +1050,24 @@ class ProgressiveTrackSource {
   /** @param {HTMLMediaElement} mediaElement */
   async start(mediaElement) {
     if (this.disposed) throw new DOMException("Track was cancelled", "AbortError");
-    await this.waitUntilOpen();
-    if (this.disposed) throw new DOMException("Track was cancelled", "AbortError");
+    try {
+      await this.waitUntilOpen();
+      if (this.disposed) throw new DOMException("Track was cancelled", "AbortError");
 
-    const sourceBuffer = this.mediaSource.addSourceBuffer(this.contentType);
-    const first = await this.reader.read();
-    if (first.done) {
-      this.onProgress(this.fileSize, this.fileSize);
-      this.done = this.completeCache();
-      this.finishMediaSource();
-      return;
+      const sourceBuffer = this.mediaSource.addSourceBuffer(this.contentType);
+      const first = await this.reader.read();
+      if (first.done) {
+        this.done = this.completeCache();
+        this.finishMediaSource();
+        return;
+      }
+      this.reportChunk(first.value);
+      await appendMediaBuffer(sourceBuffer, first.value, mediaElement, () => this.disposed);
+      this.done = this.pump(sourceBuffer, mediaElement);
+    } catch (error) {
+      if (!this.disposed) await this.failTransfer(error);
+      throw error;
     }
-    this.reportChunk(first.value);
-    await appendMediaBuffer(sourceBuffer, first.value, mediaElement, () => this.disposed);
-    this.done = this.pump(sourceBuffer, mediaElement);
   }
 
   /**
@@ -1028,34 +1085,52 @@ class ProgressiveTrackSource {
         await appendMediaBuffer(sourceBuffer, chunk.value, mediaElement, () => this.disposed);
       }
       if (!this.disposed) {
-        this.onProgress(this.fileSize, this.fileSize);
         const cacheReady = this.completeCache();
         this.finishMediaSource();
         return await cacheReady;
       }
       return false;
     } catch (error) {
-      if (!this.disposed) throw error;
-      return false;
+      if (this.disposed) return false;
+      await this.failTransfer(error);
+      throw error;
     }
   }
 
   /** @param {Uint8Array} chunk */
   reportChunk(chunk) {
+    if (chunk.byteLength > this.fileSize - this.received)
+      throw new Error("original track transfer exceeds declared size");
     this.received += chunk.byteLength;
     this.chunks.push(chunk);
-    this.onProgress(this.received, this.fileSize);
+    // Exact byte count alone is not completion: EOF may still fail or overrun.
+    if (this.received < this.fileSize) this.onProgress(this.received, this.fileSize);
   }
 
   completeCache() {
     const chunks = this.chunks;
     this.chunks = [];
+    validateTrackSize(this.fileSize);
+    if (this.received !== this.fileSize) throw new Error("original track transfer is incomplete");
+    this.reader.releaseLock();
+    this.onProgress(this.received, this.fileSize);
     return this.onComplete(
       new Blob(
         chunks.map((chunk) => Uint8Array.from(chunk).buffer),
         { type: this.contentType },
       ),
     );
+  }
+
+  /** @param {unknown} error */
+  async failTransfer(error) {
+    this.chunks = [];
+    this.finishMediaSource("network");
+    this.releaseAudioPriority();
+    await this.reader.cancel(error).catch(() => {});
+    this.reader.releaseLock();
+    // Leave disposal to the player so its done rejection handler can show the
+    // error and the attached media URL stays valid until playback is replaced.
   }
 
   /** @returns {Promise<void>} */
@@ -1080,10 +1155,11 @@ class ProgressiveTrackSource {
     return new Promise(executor);
   }
 
-  finishMediaSource() {
+  /** @param {"network" | "decode"} [error] */
+  finishMediaSource(error) {
     if (this.mediaSource.readyState === "open") {
       try {
-        this.mediaSource.endOfStream();
+        this.mediaSource.endOfStream(error);
       } catch {
         // The element may have been detached while the final chunk arrived.
       }
@@ -1100,32 +1176,6 @@ class ProgressiveTrackSource {
     this.finishMediaSource();
     URL.revokeObjectURL(this.url);
   }
-}
-
-/**
- * @param {ReadableStream<Uint8Array>} stream
- * @param {number} total
- * @param {(received: number, total: number) => void} onProgress
- */
-function trackDownload(stream, total, onProgress) {
-  const reader = stream.getReader();
-  let received = 0;
-  return new ReadableStream({
-    async pull(controller) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        onProgress(total, total);
-        controller.close();
-        return;
-      }
-      received += chunk.value.byteLength;
-      onProgress(received, total);
-      controller.enqueue(chunk.value);
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
 }
 
 /** @param {string} contentType */

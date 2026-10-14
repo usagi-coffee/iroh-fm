@@ -1081,6 +1081,17 @@ mod tests {
         let mut original = lyrics_result(&metadata, record("曲")).unwrap();
         original.plain_lyrics = Some(" 海の歌！ hello 𠮷𠮷𠮷\r\n日本語 ".into());
         original.synced_lyrics = Some("\u{feff}[ar:歌手]\r\n[offset:-500]\r\n[00:01.20][00:02.30] 海の歌！\r\n[00:03]<00:03.1>日本語".into());
+        // A real pre-meanings ruby cache upgrades locally without fetching.
+        original.annotated_lyrics = Some(protocol::AnnotatedLyrics {
+            version: "lindera-6.2.0-ipadic-2.7.0-20250920-ruby-v1".into(),
+            plain: vec![protocol::LyricReading {
+                start: 1,
+                end: 2,
+                reading: "うみ".into(),
+                dictionary: None,
+            }],
+            synced: vec![],
+        });
         let cache = Cache::open(&dir.0.join("iroh-fm.db")).unwrap();
         cache.put(&metadata, &original, unix_now()).unwrap();
         // A provider cooldown must never delay purely local cache upgrades.
@@ -1114,6 +1125,19 @@ mod tests {
         assert_eq!(annotated.plain_lyrics, original.plain_lyrics);
         assert_eq!(annotated.synced_lyrics, original.synced_lyrics);
         assert_eq!(annotated.retry_after_seconds, None);
+        assert!(
+            annotated
+                .annotated_lyrics
+                .as_ref()
+                .unwrap()
+                .plain
+                .iter()
+                .any(|span| {
+                    span.dictionary
+                        .as_ref()
+                        .is_some_and(|d| d.lemma == "海" && !d.meanings.is_empty())
+                })
+        );
         assert!(
             !annotated
                 .annotated_lyrics

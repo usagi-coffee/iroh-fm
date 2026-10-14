@@ -27,6 +27,11 @@ async fn run() -> server::Result<()> {
         print!("{}", include_str!("../IPADIC-COPYING"));
         return Ok(());
     }
+    if args == ["--jmdict-license"] {
+        print!("{}", include_str!("../JMDICT-NOTICE"));
+        print!("\n{}", include_str!("../CC-BY-SA-4.0"));
+        return Ok(());
+    }
 
     let (config, iroh, port) = parse_config(args.into_iter())?;
     if let Some(secret) = &iroh.secret {
@@ -160,6 +165,7 @@ fn missing_value() -> server::Error {
 fn print_usage() {
     println!("usage:");
     println!("  server --ipadic-license");
+    println!("  server --jmdict-license");
     println!(
         "  server --music-dir /path/to/music [--secret <secret-key>] [--relay <relay-url>] [--port <udp-port>] [--peer <endpoint-id> ...]"
     );

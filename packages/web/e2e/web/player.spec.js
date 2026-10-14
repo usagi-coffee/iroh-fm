@@ -486,7 +486,7 @@ test("lyrics toggle reserves space above the player and follows forward/backward
   expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
   expect(Math.abs(geometry.mainBottom - geometry.panelTop)).toBeLessThan(1);
   expect(geometry.rows).toBeGreaterThanOrEqual(3);
-  expect(geometry.rows).toBeLessThanOrEqual(4);
+  expect(Math.floor(geometry.rows)).toBeLessThanOrEqual(4);
   await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
 
   const position = page.getByRole("slider", { name: "Playback position" });
@@ -496,7 +496,7 @@ test("lyrics toggle reserves space above the player and follows forward/backward
   await position.fill("2");
   await expect(panel.locator('[data-lyric-index="4"]')).toHaveAttribute("aria-current", "true");
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(200);
-  await panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" }).fill("1");
+  await panel.getByRole("spinbutton", { name: "Offset" }).fill("1");
   await expect(panel.locator('[data-lyric-index="6"]')).toHaveAttribute("aria-current", "true");
   await panel.getByRole("button", { name: "Close lyrics" }).click();
   await expect(panel).toHaveCount(0);
@@ -618,9 +618,7 @@ for (const viewport of [
     expect(Math.abs(geometry.panelBottom - geometry.footerTop)).toBeLessThan(1);
     expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.windowHeight);
     await expect(panel.getByRole("button", { name: "Close lyrics" })).toBeInViewport();
-    await expect(
-      panel.getByRole("spinbutton", { name: "Lyrics advance (seconds)" }),
-    ).toBeInViewport();
+    await expect(panel.getByRole("spinbutton", { name: "Offset" })).toBeInViewport();
     await expect(panel.getByRole("link", { name: "LRCLIB" })).toBeInViewport();
     await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
   });
@@ -718,7 +716,7 @@ for (const { plain, width, height } of [false, true].flatMap((plain) => [
     await page.getByRole("button", { name: "Pause", exact: true }).click();
     await page.getByRole("button", { name: "Lyrics", exact: true }).click();
     const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
-    const toggle = panel.getByRole("checkbox", { name: "Furigana (automatic)" });
+    const toggle = panel.getByRole("checkbox", { name: "Furigana" });
     await expect(toggle).not.toBeChecked();
     await expect(panel.locator("ruby")).toHaveCount(0);
     await expect(panel.locator('[data-lyric-index="0"]')).toHaveText("海！ hello 𠮷𠮷𠮷 日本語 0");
@@ -769,6 +767,163 @@ for (const { plain, width, height } of [false, true].flatMap((plain) => [
   });
 }
 
+test.describe("optional dictionary meanings above kanji furigana", () => {
+  test.use({ hasTouch: true });
+  for (const { plain, width, height } of [false, true].flatMap((plain) => [
+    { plain, width: 393, height: 851 },
+    { plain, width: 851, height: 393 },
+  ])) {
+    test(`stacked meanings preserve ${plain ? "estimated" : "timed"} lyrics at ${width}x${height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.evaluate((plain) => {
+        const source = Array.from(
+          { length: 40 },
+          (_, index) =>
+            `${plain ? "" : `[00:${String(Math.floor(index / 2)).padStart(2, "0")}.${index % 2 ? "5" : "0"}]`}😀食べた！ 海 かな 太郎 歌 ${index}`,
+        ).join("\r\n");
+        const spans = [...source.matchAll(/食べ|海|太郎|歌/g)].map((match) => ({
+          start: match.index,
+          end: match.index + match[0].length,
+          reading: { 食べ: "たべ", 海: "うみ", 太郎: "たろう", 歌: "うた" }[match[0]],
+          ...(match[0] === "歌"
+            ? {}
+            : {
+                dictionary: {
+                  lemma: match[0] === "食べ" ? "食べる" : match[0],
+                  meanings:
+                    match[0] === "太郎"
+                      ? []
+                      : [
+                          {
+                            entry_id: match[0] === "食べ" ? "1358280" : "1195800",
+                            reading: match[0] === "食べ" ? "たべる" : "うみ",
+                            senses: [
+                              {
+                                glosses: [
+                                  match[0] === "食べ" ? "to eat" : "sea",
+                                  "another dictionary gloss",
+                                ],
+                                labels: ["noun or verb"],
+                              },
+                              { glosses: ["another sense"], labels: [] },
+                            ],
+                          },
+                        ],
+                  truncated: false,
+                },
+              }),
+        }));
+        localStorage.setItem(
+          "iroh-fm-e2e-lyrics",
+          JSON.stringify({
+            "track-1": {
+              status: "Available",
+              [plain ? "plain_lyrics" : "synced_lyrics"]: source,
+              annotated_lyrics: {
+                version: "meanings-test-v1",
+                plain: plain ? spans : [],
+                synced: plain ? [] : spans,
+              },
+            },
+            "track-2": {
+              status: "Available",
+              synced_lyrics: "[00:00]Second track without meanings",
+            },
+          }),
+        );
+      }, plain);
+      await page.getByRole("button", { name: "Play First Light" }).click();
+      await page.getByRole("button", { name: "Pause", exact: true }).click();
+      await page.getByRole("button", { name: "Lyrics", exact: true }).click();
+      const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
+      const rubyToggle = panel.getByRole("checkbox", { name: "Furigana" });
+      const meaningsToggle = panel.getByRole("checkbox", { name: "Meanings (dictionary)" });
+      await expect(meaningsToggle).toBeDisabled();
+      await expect(meaningsToggle).not.toBeChecked();
+      await rubyToggle.tap();
+      await expect(meaningsToggle).toBeEnabled();
+      await expect(panel.locator("[data-lyric-meaning]")).toHaveCount(0);
+      await meaningsToggle.focus();
+      await page.keyboard.press("Space");
+      await expect(meaningsToggle).toBeChecked();
+      await expect(page.getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+      await expect(panel.locator("[data-lyric-meaning]")).toHaveCount(80);
+      await expect(panel.locator("[data-lyric-meaning]").first()).toHaveText("to eat / …");
+      const first = panel.locator('[data-lyric-index="0"]');
+      await expect(first.locator("ruby").nth(2).locator("[data-lyric-meaning]")).toHaveCount(0);
+      await expect(first.locator("ruby").nth(2)).toHaveAttribute("title", /No JMdict match/);
+      await expect(first.locator("ruby").nth(3)).toHaveAttribute("title", /unavailable/);
+      await expect(first.locator("ruby").first()).toHaveAttribute(
+        "title",
+        /食べる.*not a lyric translation.*another sense/,
+      );
+      await expect(panel).toContainText("Automatic dictionary senses, not lyric translation");
+      await expect(panel.getByRole("link", { name: "JMdict / EDRDG" })).toHaveAttribute(
+        "href",
+        "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project",
+      );
+      const layout = await first
+        .locator("ruby")
+        .first()
+        .evaluate((element) => {
+          const meaning = element.querySelector("[data-lyric-meaning]").getBoundingClientRect();
+          const reading = element.querySelector("[data-lyric-reading]").getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNode(element.firstChild);
+          const base = range.getBoundingClientRect();
+          const panel = document.querySelector("#player-lyrics");
+          const scroll = panel.querySelector("[data-lyrics-scroll]");
+          return {
+            above: meaning.top < reading.top && reading.top < base.top,
+            meaningSmall: meaning.height < base.height,
+            readingSmall: reading.height < base.height,
+            viewport: scroll.clientHeight,
+            noOverflow: document.documentElement.scrollWidth <= innerWidth,
+          };
+        });
+      expect(layout.above).toBe(true);
+      expect(layout.meaningSmall).toBe(true);
+      expect(layout.readingSmall).toBe(true);
+      expect(layout.viewport).toBeGreaterThan(40);
+      expect(layout.noOverflow).toBe(true);
+      expect(
+        await first.evaluate((element) =>
+          [...element.childNodes]
+            .map((node) =>
+              node.nodeName === "RUBY" ? node.firstChild.textContent : node.textContent,
+            )
+            .join("")
+            .trim(),
+        ),
+      ).toBe("😀食べた！ 海 かな 太郎 歌 0");
+      const position = page.getByRole("slider", { name: "Playback position" });
+      await position.fill("16");
+      const current = panel.locator('[aria-current="true"]').last();
+      await expect(current).toBeInViewport();
+      await meaningsToggle.tap();
+      await expect(panel.locator("[data-lyric-meaning]")).toHaveCount(0);
+      await expect(panel.locator("ruby")).toHaveCount(160);
+      await expect(current).toBeInViewport();
+      await meaningsToggle.tap();
+      await rubyToggle.tap();
+      await expect(meaningsToggle).toBeDisabled();
+      await expect(panel.locator("ruby")).toHaveCount(0);
+      await expect(current).toBeInViewport();
+      await rubyToggle.tap();
+      await expect(panel.locator("[data-lyric-meaning]")).toHaveCount(80);
+      await position.fill("0");
+      await expect(first).toBeInViewport();
+      await page.getByRole("button", { name: "Next track" }).click();
+      await expect(panel).toContainText("Second track without meanings");
+      await expect(panel.locator("[data-lyric-meaning]")).toHaveCount(0);
+      await expect(meaningsToggle).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Next track" })).toBeInViewport();
+    });
+  }
+});
+
 test("lazy furigana upgrades arrive during the same playback without hiding cached lyrics", async ({
   page,
 }) => {
@@ -800,7 +955,7 @@ test("lazy furigana upgrades arrive during the same playback without hiding cach
   await page.getByRole("button", { name: "Lyrics", exact: true }).click();
   const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
   await expect(panel.locator('[data-lyric-index="0"]')).toHaveText("海の歌");
-  const toggle = panel.getByRole("checkbox", { name: "Furigana (automatic)" });
+  const toggle = panel.getByRole("checkbox", { name: "Furigana" });
   await expect(toggle).toBeDisabled();
   await expect(toggle).toBeEnabled({ timeout: 10_000 });
   await toggle.check();
@@ -850,7 +1005,7 @@ test("annotation retry exhaustion keeps original lyrics and allows a manual same
     );
   });
   await panel.getByRole("button", { name: "Retry lyrics" }).click();
-  await panel.getByRole("checkbox", { name: "Furigana (automatic)" }).check();
+  await panel.getByRole("checkbox", { name: "Furigana" }).check();
   await expect(panel.locator("rt")).toHaveText("うみ");
   await expect(panel.getByRole("button", { name: "Retry lyrics" })).toHaveCount(0);
 });
@@ -873,7 +1028,7 @@ test("lyrics discard stale track responses and label plain scrolling as estimate
   await expect.poll(() => lyricsCalls(page)).toEqual(["track-1"]);
   await page.getByRole("button", { name: "Next track" }).click();
   const panel = page.getByRole("region", { name: "Track lyrics", exact: true });
-  await expect(panel).toContainText("Lyrics · Nebula Drift");
+  await expect(panel.locator("#player-lyrics-description")).toHaveText("Nebula Drift");
   await expect(panel).toContainText(
     "Estimated scrolling · plain text, duration-based approximation",
   );

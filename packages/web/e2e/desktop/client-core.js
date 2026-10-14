@@ -1,4 +1,12 @@
-import { album, coverMedia, delay, NativeFixtureClient, TRACK_BYTES, tracks } from "../fixtures.js";
+import {
+  album,
+  coverMedia,
+  delay,
+  NativeFixtureClient,
+  silentWav,
+  TRACK_BYTES,
+  tracks,
+} from "../fixtures.js";
 
 import { MusicClient } from "@iroh-fm/client";
 
@@ -45,6 +53,16 @@ class DesktopInner extends NativeFixtureClient {
 
   fetchCover() {
     return Promise.resolve(coverMedia());
+  }
+
+  async openTrack() {
+    const blob = silentWav();
+    return {
+      contentType: blob.type,
+      fileSize: blob.size,
+      takeStream: () => blob.stream(),
+      free() {},
+    };
   }
 
   cachedTrackIds() {

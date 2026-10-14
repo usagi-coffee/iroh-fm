@@ -1,0 +1,28 @@
+JMdict Japanese-English dictionary data
+
+Copyright James William Breen and the Electronic Dictionary Research and
+Development Group (EDRDG). Used in conformance with the EDRDG licence.
+https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
+https://www.edrdg.org/edrdg/licence.html
+
+Source: the English-only JMdict snapshot converted to JSON by
+scriptin/jmdict-simplified, release 3.6.2+20261012204142.
+https://github.com/scriptin/jmdict-simplified/releases/tag/3.6.2%2B20261012204142
+
+Modifications by iroh-fm: an embedded English-sense spelling index
+for kanji-containing lyric words, respecting spelling/reading restrictions.
+Returned entry, sense and gloss counts are bounded; long text can be shortened.
+These derived dictionary data, including distributed dictionary extracts, are
+licensed under Creative Commons Attribution-ShareAlike 4.0 International.
+The application source code retains its own licence.
+
+Licence: https://creativecommons.org/licenses/by-sa/4.0/
+Full legal code: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+See the accompanying CC-BY-SA-4.0 file.
+
+The data is provided without warranty of accuracy or suitability. Dictionary
+senses are not contextual lyric translations or claims about sung meanings.
+Neither EDRDG nor the source converter endorses this application.
+
+Dictionary documentation and update procedure: JMDICT.md.
+iroh-fm --jmdict-license prints this notice and the full legal code.

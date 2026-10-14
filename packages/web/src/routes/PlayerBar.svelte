@@ -1,8 +1,10 @@
 <script>
   import { requestLyrics } from "#lib/lyrics-request.js";
   import { App } from "#lib/runes/App.svelte.js";
+  import { LyricExport } from "#lib/runes/LyricExport.svelte.js";
   import { formatTime } from "#lib/utils.js";
 
+  import LyricsIcon from "virtual:icons/ri/closed-captioning-line";
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import RepeatIcon from "virtual:icons/ri/repeat-line";
@@ -18,6 +20,7 @@
   const duration = $derived(App.player.duration || track?.duration_seconds || 0);
   const downloading = $derived(Boolean(track?.downloading && !track.cached && !track.memoryCached));
   let lyricsVisible = $state(false);
+  const lyricExport = new LyricExport();
   /** @type {import('#lib/lyrics-request.js').TrackLyrics | null} */
   let lyrics = $state.raw(null);
   let lyricsMessage = $state("");
@@ -62,6 +65,8 @@
     {#key `${App.connection.client?.remoteId ?? ""}:${track?.id ?? ""}`}
       <LyricsPanel
         {lyrics}
+        {track}
+        exporter={lyricExport}
         message={lyricsMessage}
         title={track?.title ?? "Nothing playing"}
         position={App.player.currentTime}
@@ -181,10 +186,12 @@
           {@attach attachLyricsToggle}
           onclick={() => (lyricsVisible = !lyricsVisible)}
           aria-label="Lyrics"
+          title="Lyrics"
           aria-pressed={lyricsVisible}
           aria-controls="player-lyrics"
-          class="hover:text-mauve text-xs {lyricsVisible ? 'text-mauve' : 'text-overlay1'}"
-          >Lyrics</button
+          class="hover:text-mauve grid size-8 place-items-center {lyricsVisible
+            ? 'text-mauve'
+            : 'text-overlay1'}"><LyricsIcon class="text-base" aria-hidden="true" /></button
         >
         <span class="text-3xs text-overlay0 desktop:block hidden font-mono"
           >{formatTime(App.player.currentTime)} / {formatTime(duration)}</span

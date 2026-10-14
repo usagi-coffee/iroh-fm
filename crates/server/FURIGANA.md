@@ -1,5 +1,9 @@
 # Japanese lyrics readings
 
+Optional English dictionary senses are documented in [JMDICT.md](JMDICT.md).
+They extend the same blocking annotation worker and versioned cache without
+changing ruby coverage, original lyric text, timings or UTF-16 offsets.
+
 Lindera 6.2.0 is pinned with `default-features = false` and `embed-ipadic`.
 Its IPADIC 2.7.0-20250920 dictionary provides word-level katakana readings,
 converted to hiragana only for known tokens containing kanji. There are no

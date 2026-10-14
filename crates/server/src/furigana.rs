@@ -7,8 +7,17 @@ use lindera::{dictionary::load_dictionary, mode::Mode, segmenter::Segmenter};
 use protocol::{AnnotatedLyrics, LyricReading, LyricsStatus, TrackLyrics};
 
 // Bump when the dictionary, segmentation, conversion or offset rules change.
-pub(crate) const VERSION: &str = "lindera-6.2.0-ipadic-2.7.0-20250920-ruby-v1";
+pub(crate) const VERSION: &str = concat!(
+    "lindera-6.2.0-ipadic-2.7.0-20250920-jmdict-",
+    env!("JMDICT_RELEASE"),
+    "-",
+    env!("JMDICT_SHA256"),
+    "-ruby-meanings-v2"
+);
 static SEGMENTER: OnceLock<Result<Segmenter, String>> = OnceLock::new();
+// Meaning payloads are optional beyond this per-source budget; ruby still covers
+// the entire unchanged lyric source. None is distinct from an explicit no match.
+const MEANING_BUDGET: usize = 128 * 1024;
 
 pub(crate) fn needs_annotation(lyrics: &TrackLyrics) -> bool {
     lyrics.status == LyricsStatus::Available
@@ -30,7 +39,7 @@ fn contains_kanji(text: &str) -> bool {
 
 /// IPADIC's reading field, not pronunciation: retain orthographic kana.
 /// Reject unknown/non-kana readings rather than generating a fallback.
-fn hiragana(reading: &str) -> Option<String> {
+pub(crate) fn hiragana(reading: &str) -> Option<String> {
     if reading.is_empty() || !reading.chars().all(|c| {
         matches!(c, '\u{30a1}'..='\u{30f6}' | '\u{3041}'..='\u{3096}' | 'ー' | '・' | '\u{3099}' | '\u{309a}')
     }) {
@@ -68,6 +77,7 @@ fn readings(source: &str) -> Result<Vec<LyricReading>, String> {
     let mut result = Vec::new();
     let mut previous_byte = 0;
     let mut previous_utf16 = 0;
+    let mut meaning_bytes = 0;
     for mut token in tokens {
         let start = token.byte_start;
         let end = token.byte_end;
@@ -80,12 +90,37 @@ fn readings(source: &str) -> Result<Vec<LyricReading>, String> {
         let Some(reading) = token.get_detail(7).and_then(hiragana) else {
             continue;
         };
+        let lemma = token
+            .get_detail(6)
+            .filter(|s| !s.is_empty() && *s != "*")
+            .unwrap_or(&source[start..end])
+            .to_owned();
+        // Re-tokenizing an inflected word's lemma can choose a different
+        // homograph (空い/あい -> 空く/すく). Only filter by a reading already
+        // known for this exact surface; otherwise retain dictionary ambiguity.
+        let base_reading = (lemma == source[start..end]).then_some(reading.as_str());
+        let dictionary = if meaning_bytes < MEANING_BUDGET {
+            let dictionary = crate::jmdict::lookup(&lemma, base_reading);
+            let size = serde_json::to_vec(&dictionary)
+                .map_err(|e| e.to_string())?
+                .len();
+            if meaning_bytes + size <= MEANING_BUDGET {
+                meaning_bytes += size;
+                Some(dictionary)
+            } else {
+                meaning_bytes = MEANING_BUDGET;
+                None
+            }
+        } else {
+            None
+        };
         let utf16_start = previous_utf16 + source[previous_byte..start].encode_utf16().count();
         let utf16_end = utf16_start + source[start..end].encode_utf16().count();
         result.push(LyricReading {
             start: utf16_start as u32,
             end: utf16_end as u32,
             reading,
+            dictionary,
         });
         previous_byte = end;
         previous_utf16 = utf16_end;
@@ -139,5 +174,61 @@ mod tests {
         assert!(!words.iter().any(|(text, _)| text.contains('𠮷')));
         assert!(words.iter().all(|(text, _)| contains_kanji(text)));
         assert!(readings("Hello! カタカナ かな 😀").unwrap().is_empty());
+    }
+
+    #[test]
+    fn inflected_kanji_uses_base_form_without_changing_surface_ruby_or_offsets() {
+        let source = "😀[00:01.20] 食べた！ 歌った\r\n海";
+        let spans = readings(source).unwrap();
+        let eat = spans
+            .iter()
+            .find(|s| s.dictionary.as_ref().is_some_and(|d| d.lemma == "食べる"))
+            .unwrap();
+        let units: Vec<_> = source.encode_utf16().collect();
+        assert_eq!(
+            String::from_utf16(&units[eat.start as usize..eat.end as usize]).unwrap(),
+            "食べ"
+        );
+        assert_eq!(eat.reading, "たべ");
+        let dictionary = eat.dictionary.as_ref().unwrap();
+        assert_eq!(dictionary.meanings[0].reading, "たべる");
+        assert_eq!(dictionary.meanings[0].senses[0].glosses[0], "to eat");
+        assert!(spans.iter().all(|s| s.dictionary.is_some()));
+    }
+
+    #[test]
+    fn inflected_homographs_retain_ambiguity_instead_of_retokenizing_the_lemma() {
+        for (source, lemma, surface_reading, original_base_reading) in [
+            ("空いた", "空く", "あい", "あく"),
+            ("汚した", "汚す", "よごし", "よごす"),
+        ] {
+            let spans = readings(source).unwrap();
+            let word = spans
+                .iter()
+                .find(|span| span.dictionary.as_ref().is_some_and(|d| d.lemma == lemma))
+                .unwrap();
+            assert_eq!(word.reading, surface_reading);
+            let dictionary = word.dictionary.as_ref().unwrap();
+            assert_eq!(dictionary, &crate::jmdict::lookup(lemma, None));
+            assert!(
+                dictionary
+                    .meanings
+                    .iter()
+                    .any(|m| m.reading == original_base_reading)
+            );
+        }
+    }
+
+    #[test]
+    fn long_sources_bound_meanings_without_losing_furigana() {
+        let spans = readings(&"海 ".repeat(2000)).unwrap();
+        assert_eq!(spans.len(), 2000);
+        let bytes: usize = spans
+            .iter()
+            .filter_map(|s| s.dictionary.as_ref())
+            .map(|d| serde_json::to_vec(d).unwrap().len())
+            .sum();
+        assert!(bytes <= MEANING_BUDGET);
+        assert!(spans.last().unwrap().dictionary.is_none());
     }
 }

@@ -504,6 +504,18 @@ mod tests {
                     start: 0,
                     end: 1,
                     reading: "うみ".into(),
+                    dictionary: Some(protocol::LyricDictionary {
+                        lemma: "海".into(),
+                        meanings: vec![protocol::LyricMeaning {
+                            entry_id: "1195800".into(),
+                            reading: "うみ".into(),
+                            senses: vec![protocol::LyricSense {
+                                glosses: vec!["sea".into(), "ocean".into()],
+                                labels: vec!["noun".into()],
+                            }],
+                        }],
+                        truncated: false,
+                    }),
                 }],
                 synced: vec![],
             }),

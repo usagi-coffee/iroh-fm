@@ -3,6 +3,9 @@ pub mod error;
 mod furigana;
 pub mod index;
 pub mod iroh_rpc;
+mod jmdict;
+#[cfg(test)]
+mod jmdict_build;
 mod lyrics;
 pub mod scanner;
 pub mod server;

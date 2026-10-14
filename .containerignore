@@ -6,6 +6,11 @@
 !crates/*/
 !crates/*/Cargo.toml
 !crates/server/IPADIC-COPYING
+!crates/server/build.rs
+!crates/server/jmdict-source.json
+!crates/server/JMDICT-NOTICE
+!crates/server/CC-BY-SA-4.0
+!crates/server/JMDICT.md
 !crates/*/src/
 !crates/*/src/**
 !packages/
