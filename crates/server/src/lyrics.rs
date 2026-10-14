@@ -14,7 +14,6 @@ use tokio::time::Instant;
 use crate::{Error, LibraryIndex, Result, ServerConfig};
 
 const REQUEST_GAP: Duration = Duration::from_secs(5);
-const WARM_GAP: Duration = Duration::from_secs(30);
 const NEGATIVE_TTL: u64 = 30 * 24 * 60 * 60;
 const MAX_QUEUE: usize = 256;
 const MAX_BODY: usize = 1024 * 1024;
@@ -64,22 +63,19 @@ impl Metadata {
 struct Job {
     metadata: Metadata,
     search: bool,
-    demand: bool,
 }
 
 #[derive(Default)]
 struct Schedule {
     demand: VecDeque<Job>,
-    background: Option<Job>,
     active: Option<Job>,
 }
 
 impl Schedule {
     fn enqueue(&mut self, metadata: Metadata) -> bool {
-        if let Some(active) = &mut self.active
+        if let Some(active) = &self.active
             && active.metadata == metadata
         {
-            active.demand = true;
             return true;
         }
         if let Some(job) = self
@@ -93,31 +89,19 @@ impl Schedule {
             }
             return true;
         }
-        // Reserve room for the in-flight lookup's search fallback, including
-        // background work that may be promoted while its request is running.
+        // Reserve room for the in-flight lookup's search fallback.
         if self.demand.len() + usize::from(self.active.is_some()) >= MAX_QUEUE {
             return false;
         }
-        let job = match self.background.take() {
-            Some(mut job) if job.metadata == metadata => {
-                job.demand = true;
-                job
-            }
-            other => {
-                self.background = other;
-                Job {
-                    metadata,
-                    search: false,
-                    demand: true,
-                }
-            }
-        };
-        self.demand.push_back(job);
+        self.demand.push_back(Job {
+            metadata,
+            search: false,
+        });
         true
     }
 
     fn take(&mut self) -> Option<Job> {
-        let job = self.demand.pop_front().or_else(|| self.background.take())?;
+        let job = self.demand.pop_front()?;
         self.active = Some(job.clone());
         Some(job)
     }
@@ -127,11 +111,7 @@ impl Schedule {
             && fallback
         {
             job.search = true;
-            if job.demand {
-                self.demand.push_back(job);
-            } else if !job.demand {
-                self.background = Some(job);
-            }
+            self.demand.push_back(job);
         }
     }
 }
@@ -247,19 +227,12 @@ struct Shared {
 
 pub(crate) struct LyricsService {
     shared: Arc<Shared>,
-    enabled: bool,
-    worker: Option<JoinHandle<()>>,
+    worker: JoinHandle<()>,
 }
 
 impl LyricsService {
     pub(crate) fn new(config: &ServerConfig, library: Arc<RwLock<LibraryIndex>>) -> Result<Self> {
-        Self::start(
-            config,
-            library,
-            "https://lrclib.net".into(),
-            REQUEST_GAP,
-            WARM_GAP,
-        )
+        Self::start(config, library, "https://lrclib.net".into(), REQUEST_GAP)
     }
 
     fn start(
@@ -267,48 +240,29 @@ impl LyricsService {
         library: Arc<RwLock<LibraryIndex>>,
         base_url: String,
         request_gap: Duration,
-        warm_gap: Duration,
     ) -> Result<Self> {
         let shared = Arc::new(Shared {
             schedule: Mutex::new(Schedule::default()),
             notify: Notify::new(),
             cache: Cache::open(&config.music_dir.join("iroh-fm.db"))?,
         });
-        let worker = if config.lyrics_enabled {
-            let client = reqwest::Client::builder()
-                .user_agent(concat!(
-                    "iroh-fm/",
-                    env!("CARGO_PKG_VERSION"),
-                    " (https://github.com/usagi-coffee/iroh-fm)"
-                ))
-                .connect_timeout(Duration::from_secs(3))
-                .timeout(Duration::from_secs(10))
-                .redirect(reqwest::redirect::Policy::none())
-                .retry(reqwest::retry::never())
-                .build()
-                .map_err(|error| Error::InvalidRequest(format!("lyrics HTTP client: {error}")))?;
-            let shared = Arc::clone(&shared);
-            let warm = config.lyrics_warm;
-            Some(tokio::spawn(async move {
-                run_worker(
-                    shared,
-                    library,
-                    client,
-                    base_url,
-                    warm,
-                    request_gap,
-                    warm_gap,
-                )
-                .await;
-            }))
-        } else {
-            None
-        };
-        Ok(Self {
-            shared,
-            enabled: config.lyrics_enabled,
-            worker,
-        })
+        let client = reqwest::Client::builder()
+            .user_agent(concat!(
+                "iroh-fm/",
+                env!("CARGO_PKG_VERSION"),
+                " (https://github.com/usagi-coffee/iroh-fm)"
+            ))
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .build()
+            .map_err(|error| Error::InvalidRequest(format!("lyrics HTTP client: {error}")))?;
+        let worker_shared = Arc::clone(&shared);
+        let worker = tokio::spawn(async move {
+            run_worker(worker_shared, library, client, base_url, request_gap).await;
+        });
+        Ok(Self { shared, worker })
     }
 
     pub(crate) fn get(&self, track: &Track) -> Result<TrackLyrics> {
@@ -316,7 +270,7 @@ impl LyricsService {
         if let Some(result) = self.shared.cache.get(&metadata, unix_now())? {
             return Ok(result);
         }
-        if !self.enabled || !metadata.usable() {
+        if !metadata.usable() {
             return Ok(empty(&metadata.id, LyricsStatus::Unavailable, None));
         }
         let retry_after = self
@@ -339,11 +293,9 @@ impl LyricsService {
     }
 
     pub(crate) fn playing(&self, track: &Track) {
-        if self.enabled {
-            let metadata = Metadata::from_track(track);
-            if metadata.usable() {
-                self.enqueue(metadata);
-            }
+        let metadata = Metadata::from_track(track);
+        if metadata.usable() {
+            self.enqueue(metadata);
         }
     }
 
@@ -361,9 +313,7 @@ impl LyricsService {
 
 impl Drop for LyricsService {
     fn drop(&mut self) {
-        if let Some(task) = self.worker.take() {
-            task.abort();
-        }
+        self.worker.abort();
     }
 }
 
@@ -423,9 +373,7 @@ async fn run_worker(
     library: Arc<RwLock<LibraryIndex>>,
     client: reqwest::Client,
     base_url: String,
-    warm: bool,
     request_gap: Duration,
-    warm_gap: Duration,
 ) {
     let (deadline, failures) = match shared.cache.throttle() {
         Ok(value) => value,
@@ -435,11 +383,7 @@ async fn run_worker(
         }
     };
     let mut gate = Gate::restored(deadline, failures);
-    let mut warm_after = Instant::now();
-    let mut cursor: Option<TrackId> = None;
     loop {
-        // Do not select work before the gate: demand arriving during the wait
-        // must outrank background work, including background fallback attempts.
         if Instant::now() < gate.until {
             tokio::time::sleep_until(gate.until).await;
         }
@@ -448,47 +392,8 @@ async fn run_worker(
             .lock()
             .expect("lyrics schedule lock poisoned")
             .take();
-        let job = if let Some(job) = job {
-            job
-        } else if warm && Instant::now() >= warm_after {
-            let next = {
-                let index = library.read().expect("library lock poisoned");
-                match &cursor {
-                    Some(id) => index
-                        .tracks
-                        .range((std::ops::Bound::Excluded(id), std::ops::Bound::Unbounded))
-                        .next()
-                        .map(|(_, track)| Metadata::from_track(track)),
-                    None => index.tracks.values().next().map(Metadata::from_track),
-                }
-            };
-            let Some(metadata) = next else {
-                cursor = None;
-                warm_after = Instant::now() + Duration::from_secs(60);
-                continue;
-            };
-            cursor = Some(metadata.id.clone());
-            let job = Job {
-                metadata,
-                search: false,
-                demand: false,
-            };
-            let mut schedule = shared
-                .schedule
-                .lock()
-                .expect("lyrics schedule lock poisoned");
-            // Demand could have arrived while reading the library.
-            schedule.background = Some(job);
-            schedule.take().expect("background job")
-        } else {
-            if warm {
-                tokio::select! {
-                    _ = shared.notify.notified() => {},
-                    _ = tokio::time::sleep_until(warm_after) => {},
-                }
-            } else {
-                shared.notify.notified().await;
-            }
+        let Some(job) = job else {
+            shared.notify.notified().await;
             continue;
         };
         let current = library
@@ -510,9 +415,6 @@ async fn run_worker(
                 .lock()
                 .expect("lyrics schedule lock poisoned")
                 .finish(false);
-            // Bound cache-only warming work per turn instead of monopolizing a
-            // runtime thread when a large library is already cached.
-            tokio::task::yield_now().await;
             continue;
         }
         // Reserve the timeout plus spacing BEFORE network access. If the
@@ -542,9 +444,6 @@ async fn run_worker(
             eprintln!("[lyrics] cannot persist provider cooldown: {error}");
             // Do not keep making requests if persistence is broken.
             gate.completed(Some(BACKOFF_MAX), request_gap);
-        }
-        if !job.demand {
-            warm_after = Instant::now() + warm_gap;
         }
         let unchanged = library
             .read()
@@ -1117,24 +1016,21 @@ mod tests {
     }
 
     #[test]
-    fn bounded_scheduler_coalesces_and_promotes_background_and_active_work() {
+    fn bounded_scheduler_coalesces_queued_and_active_work() {
         let metadata = Metadata::from_track(&track("A"));
-        let mut scheduler = Schedule {
-            background: Some(Job {
-                metadata: metadata.clone(),
-                search: true,
-                demand: false,
-            }),
-            ..Schedule::default()
-        };
+        let mut scheduler = Schedule::default();
         assert!(scheduler.enqueue(metadata.clone()));
-        assert!(scheduler.background.is_none());
         assert!(scheduler.enqueue(metadata.clone()));
         assert_eq!(scheduler.demand.len(), 1);
         let selected = scheduler.take().unwrap();
-        assert!(selected.demand && selected.search);
+        assert_eq!(selected.metadata, metadata);
+        assert!(!selected.search);
         assert!(scheduler.enqueue(metadata.clone()));
         assert!(scheduler.demand.is_empty());
+        scheduler.finish(true);
+        assert!(scheduler.enqueue(metadata.clone()));
+        assert_eq!(scheduler.demand.len(), 1);
+        assert!(scheduler.take().unwrap().search);
         scheduler.finish(false);
         for n in 0..MAX_QUEUE {
             assert!(scheduler.enqueue(Metadata::from_track(&track(&n.to_string()))));
@@ -1222,31 +1118,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn offline_mock_paces_fallback_and_prioritizes_coalesced_demand_over_warming() {
+    async fn offline_mock_only_fetches_on_demand_and_reuses_cached_playback() {
+        let dir = TestDir::new();
+        let played = track("Played");
+        let requested = track("Requested");
+        let library = index(&[played.clone(), requested.clone(), track("Untouched")]);
+        let mut reply = Reply::new(200, body("Played"));
+        reply.delay = Duration::from_millis(40);
+        let mut mock = Mock::start(vec![reply, Reply::new(200, body("Requested"))]).await;
+        let gap = Duration::from_millis(15);
+        let service =
+            LyricsService::start(&dir.config(), Arc::clone(&library), mock.url.clone(), gap)
+                .unwrap();
+        mock.quiet(Duration::from_millis(60)).await;
+        service.playing(&played);
+        let (first, _) = mock.next().await;
+        assert!(first.contains("track_name=Played&"));
+        for _ in 0..10 {
+            service.playing(&played);
+        }
+        assert_eq!(
+            ready(&service, &played).await.status,
+            LyricsStatus::Available
+        );
+        for _ in 0..10 {
+            service.playing(&played);
+            assert_eq!(
+                service.get(&played).unwrap().status,
+                LyricsStatus::Available
+            );
+        }
+        mock.quiet(Duration::from_millis(60)).await;
+        assert_eq!(
+            service.get(&requested).unwrap().status,
+            LyricsStatus::Pending
+        );
+        let (second, _) = mock.next().await;
+        assert!(second.contains("track_name=Requested&"));
+        assert_eq!(
+            ready(&service, &requested).await.status,
+            LyricsStatus::Available
+        );
+        drop(service);
+        let service = LyricsService::start(&dir.config(), library, mock.url.clone(), gap).unwrap();
+        service.playing(&played);
+        service.playing(&requested);
+        assert_eq!(
+            service.get(&played).unwrap().status,
+            LyricsStatus::Available
+        );
+        assert_eq!(
+            service.get(&requested).unwrap().status,
+            LyricsStatus::Available
+        );
+        // Wait beyond the persisted spacing to catch delayed extra requests.
+        mock.quiet(Duration::from_secs(2)).await;
+    }
+
+    #[tokio::test]
+    async fn offline_mock_paces_fallback_with_coalesced_demand() {
         let dir = TestDir::new();
         let a = track("A (Cover)");
         let b = track("B");
         let c = track("C");
+        let mut reply = Reply::new(404, "{}");
+        reply.delay = Duration::from_millis(40);
         let mut mock = Mock::start(vec![
-            Reply::new(404, "{}"),
+            reply,
             Reply::new(200, body("B")),
             Reply::new(200, body("C")),
             Reply::new(200, "[]"),
         ])
         .await;
-        let mut config = dir.config();
-        config.lyrics_warm = true;
         let gap = Duration::from_millis(35);
         let service = LyricsService::start(
-            &config,
+            &dir.config(),
             index(&[a.clone(), b.clone(), c.clone()]),
             mock.url.clone(),
             gap,
-            gap,
         )
         .unwrap();
+        service.playing(&a);
         let (first, first_at) = mock.next().await;
         assert!(first.contains("/api/get?track_name=A+%28Cover%29"));
+        service.playing(&a);
         for _ in 0..10 {
             assert_eq!(service.get(&b).unwrap().status, LyricsStatus::Pending);
         }
@@ -1266,25 +1221,9 @@ mod tests {
         );
         assert_eq!(ready(&service, &a).await.status, LyricsStatus::NotFound);
         assert_eq!(ready(&service, &c).await.status, LyricsStatus::Available);
-        mock.quiet(Duration::from_millis(50)).await;
-        drop(service);
-        config.lyrics_enabled = false;
-        let service = LyricsService::start(
-            &config,
-            index(&[a.clone(), b.clone(), c.clone()]),
-            mock.url.clone(),
-            gap,
-            gap,
-        )
-        .unwrap();
-        assert_eq!(service.get(&b).unwrap().status, LyricsStatus::Available);
-        assert_eq!(service.get(&a).unwrap().status, LyricsStatus::NotFound);
-        let uncached = track("new");
-        assert_eq!(
-            service.get(&uncached).unwrap().status,
-            LyricsStatus::Unavailable
-        );
-        service.playing(&uncached);
+        service.playing(&a);
+        service.playing(&b);
+        service.playing(&c);
         mock.quiet(Duration::from_millis(50)).await;
     }
 
@@ -1303,7 +1242,6 @@ mod tests {
             Arc::clone(&library),
             mock.url.clone(),
             Duration::from_millis(1),
-            WARM_GAP,
         )
         .unwrap();
         assert_eq!(service.get(&a).unwrap().status, LyricsStatus::Pending);
@@ -1317,14 +1255,9 @@ mod tests {
         assert!(pending.retry_after_seconds.unwrap() >= 119);
         mock.quiet(Duration::from_millis(40)).await;
         drop(service);
-        let service = LyricsService::start(
-            &config,
-            library,
-            mock.url.clone(),
-            Duration::from_millis(1),
-            WARM_GAP,
-        )
-        .unwrap();
+        let service =
+            LyricsService::start(&config, library, mock.url.clone(), Duration::from_millis(1))
+                .unwrap();
         service.playing(&b);
         assert_eq!(service.get(&a).unwrap().status, LyricsStatus::Unavailable);
         mock.quiet(Duration::from_millis(40)).await;
@@ -1346,7 +1279,6 @@ mod tests {
                 index(std::slice::from_ref(&a)),
                 mock.url.clone(),
                 Duration::from_millis(1),
-                WARM_GAP,
             )
             .unwrap();
             service.playing(&a);
@@ -1369,7 +1301,6 @@ mod tests {
             Arc::clone(&library),
             mock.url.clone(),
             Duration::from_millis(1),
-            WARM_GAP,
         )
         .unwrap();
         service.playing(&a);
@@ -1401,7 +1332,6 @@ mod tests {
         let job = Job {
             metadata: Metadata::from_track(&a),
             search: true,
-            demand: true,
         };
         assert!(matches!(
             attempt(&client, &mock.url, &job).await,
