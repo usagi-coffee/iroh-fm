@@ -1,6 +1,7 @@
 //! Demand-driven LRCLIB access. Only the worker performs HTTP; audio never waits
 //! for the cache, a provider timer, or a network request.
 use std::collections::VecDeque;
+use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +21,63 @@ const MAX_QUEUE: usize = 256;
 const MAX_BODY: usize = 1024 * 1024;
 const BACKOFF_BASE: u64 = 60;
 const BACKOFF_MAX: u64 = 60 * 60;
+
+// Debug-quoted metadata keeps control characters on one log line. Never format
+// TrackLyrics, HTTP bodies, or request URLs for diagnostics.
+struct TrackLog<'a>(&'a Metadata);
+
+impl fmt::Display for TrackLog<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "track_id={:?} title={:?} artist={:?}",
+            self.0.id.0, self.0.title, self.0.artist
+        )
+    }
+}
+
+fn cache_state(result: Option<&TrackLyrics>) -> (&'static str, &'static str) {
+    match result {
+        None => ("miss", "unknown"),
+        Some(result) => (
+            match result.status {
+                LyricsStatus::Available => "available",
+                LyricsStatus::Instrumental => "instrumental",
+                LyricsStatus::NotFound => "not_found",
+                LyricsStatus::Unavailable => "transient",
+                LyricsStatus::Pending => "pending",
+            },
+            if needs_annotation(result) {
+                "needed"
+            } else if result.annotated_lyrics.is_some() {
+                "ready"
+            } else {
+                "not_applicable"
+            },
+        ),
+    }
+}
+
+/// Diagnostics only. Bound memory and ignore changing poll retry countdowns.
+#[derive(Default)]
+struct CacheObservations(VecDeque<(Metadata, (&'static str, &'static str))>);
+
+impl CacheObservations {
+    fn changed(&mut self, metadata: &Metadata, state: (&'static str, &'static str)) -> bool {
+        if let Some(entry) = self.0.iter_mut().find(|entry| entry.0.id == metadata.id) {
+            if entry.0 == *metadata && entry.1 == state {
+                return false;
+            }
+            *entry = (metadata.clone(), state);
+        } else {
+            if self.0.len() == MAX_QUEUE {
+                self.0.pop_front();
+            }
+            self.0.push_back((metadata.clone(), state));
+        }
+        true
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Metadata {
@@ -70,10 +128,15 @@ struct Job {
 struct Schedule {
     demand: VecDeque<Job>,
     active: Option<Job>,
+    full_logged: bool,
 }
 
 impl Schedule {
     fn enqueue(&mut self, metadata: Metadata) -> bool {
+        self.enqueue_for(metadata, "lrclib")
+    }
+
+    fn enqueue_for(&mut self, metadata: Metadata, stage: &str) -> bool {
         if let Some(active) = &self.active
             && active.metadata == metadata
         {
@@ -85,6 +148,10 @@ impl Schedule {
             .find(|j| j.metadata.id == metadata.id)
         {
             if job.metadata != metadata {
+                eprintln!(
+                    "[lyrics] {stage} queued reason=metadata_changed {}",
+                    TrackLog(&metadata)
+                );
                 job.metadata = metadata;
                 job.search = false;
             }
@@ -92,8 +159,21 @@ impl Schedule {
         }
         // Reserve room for the in-flight lookup's search fallback.
         if self.demand.len() + usize::from(self.active.is_some()) >= MAX_QUEUE {
+            if !self.full_logged {
+                eprintln!(
+                    "[lyrics] {stage} queue full {} capacity={MAX_QUEUE}",
+                    TrackLog(&metadata)
+                );
+                self.full_logged = true;
+            }
             return false;
         }
+        self.full_logged = false;
+        eprintln!(
+            "[lyrics] {stage} queued {} queue_depth={}",
+            TrackLog(&metadata),
+            self.demand.len() + 1
+        );
         self.demand.push_back(Job {
             metadata,
             search: false,
@@ -197,8 +277,9 @@ impl Cache {
 
     /// Annotation writes never replace a newly fetched source or changed metadata.
     /// This also keeps provider expiry and throttle state entirely independent.
-    fn put_annotations(&self, metadata: &Metadata, result: &TrackLyrics) -> Result<()> {
-        self.db
+    fn put_annotations(&self, metadata: &Metadata, result: &TrackLyrics) -> Result<bool> {
+        let rows = self
+            .db
             .lock()
             .expect("lyrics cache lock poisoned")
             .execute(
@@ -215,7 +296,7 @@ impl Cache {
                     result.synced_lyrics
                 ],
             )?;
-        Ok(())
+        Ok(rows != 0)
     }
 
     fn throttle(&self) -> Result<(u64, u32)> {
@@ -252,15 +333,52 @@ struct Shared {
     annotations: Mutex<Schedule>,
     annotate_notify: Notify,
     cache: Cache,
+    cache_observations: Mutex<CacheObservations>,
 }
 
 impl Shared {
+    fn log_cache_failure(&self, metadata: &Metadata, operation: &'static str, error: &Error) {
+        let changed = self
+            .cache_observations
+            .lock()
+            .expect("lyrics diagnostics lock poisoned")
+            .changed(metadata, (operation, "error"));
+        if changed {
+            eprintln!(
+                "[lyrics] cache failed {} operation={operation} error={error}",
+                TrackLog(metadata)
+            );
+        }
+    }
+
+    fn observe_cache(&self, metadata: &Metadata, result: Option<&TrackLyrics>) {
+        let state = if result.is_none() && !metadata.usable() {
+            ("metadata_unusable", "not_applicable")
+        } else {
+            cache_state(result)
+        };
+        let changed = self
+            .cache_observations
+            .lock()
+            .expect("lyrics diagnostics lock poisoned")
+            .changed(metadata, state);
+        if changed {
+            eprintln!(
+                "[lyrics] cache {} {} status={} annotation={}",
+                if result.is_some() { "hit" } else { "miss" },
+                TrackLog(metadata),
+                state.0,
+                state.1
+            );
+        }
+    }
+
     fn enqueue_annotation(&self, metadata: Metadata) -> bool {
         let scheduled = self
             .annotations
             .lock()
             .expect("annotation schedule lock poisoned")
-            .enqueue(metadata);
+            .enqueue_for(metadata, "annotation");
         self.annotate_notify.notify_one();
         scheduled
     }
@@ -289,6 +407,7 @@ impl LyricsService {
             annotations: Mutex::new(Schedule::default()),
             annotate_notify: Notify::new(),
             cache: Cache::open(&config.music_dir.join("iroh-fm.db"))?,
+            cache_observations: Mutex::new(CacheObservations::default()),
         });
         let client = reqwest::Client::builder()
             .user_agent(concat!(
@@ -308,6 +427,10 @@ impl LyricsService {
         });
         let annotation_shared = Arc::clone(&shared);
         let annotation_worker = tokio::spawn(run_annotation_worker(annotation_shared));
+        eprintln!(
+            "[lyrics] startup provider=lrclib policy=demand_only request_gap_ms={} annotation=local_background",
+            request_gap.as_millis()
+        );
         Ok(Self {
             shared,
             worker,
@@ -317,7 +440,15 @@ impl LyricsService {
 
     pub(crate) fn get(&self, track: &Track) -> Result<TrackLyrics> {
         let metadata = Metadata::from_track(track);
-        if let Some(mut result) = self.shared.cache.get(&metadata, unix_now())? {
+        let cached = self
+            .shared
+            .cache
+            .get(&metadata, unix_now())
+            .inspect_err(|error| {
+                self.shared.log_cache_failure(&metadata, "read", error);
+            })?;
+        if let Some(mut result) = cached {
+            self.shared.observe_cache(&metadata, Some(&result));
             if needs_annotation(&result) {
                 self.shared.enqueue_annotation(metadata);
                 // Available is immediately usable; the hint lets the same-track
@@ -326,13 +457,18 @@ impl LyricsService {
             }
             return Ok(result);
         }
+        self.shared.observe_cache(&metadata, None);
         if !metadata.usable() {
             return Ok(empty(&metadata.id, LyricsStatus::Unavailable, None));
         }
         let retry_after = self
             .shared
             .cache
-            .throttle()?
+            .throttle()
+            .inspect_err(|error| {
+                self.shared
+                    .log_cache_failure(&metadata, "read_provider_gate", error);
+            })?
             .0
             .saturating_sub(unix_now())
             .clamp(5, u32::MAX as u64) as u32;
@@ -385,26 +521,47 @@ async fn run_annotation_worker(shared: Arc<Shared>) {
             shared.annotate_notify.notified().await;
             continue;
         };
+        let track_id = job.metadata.id.clone();
+        let started = Instant::now();
         let worker_shared = Arc::clone(&shared);
         let work = tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
+            eprintln!("[lyrics] annotation start {} engine=local", TrackLog(&job.metadata));
             let cached = worker_shared
                 .cache
                 .get(&job.metadata, unix_now())
                 .map_err(|e| e.to_string())?;
             if let Some(lyrics) = cached.filter(needs_annotation) {
                 let result = annotate(lyrics)?;
-                worker_shared
+                let persisted = worker_shared
                     .cache
                     .put_annotations(&job.metadata, &result)
                     .map_err(|e| e.to_string())?;
+                let (plain_ruby, synced_ruby, meanings) = annotation_counts(&result);
+                eprintln!(
+                    "[lyrics] annotation finish {} plain_ruby={plain_ruby} synced_ruby={synced_ruby} meaning_entries={meanings} persisted={persisted} elapsed_ms={}",
+                    TrackLog(&job.metadata), started.elapsed().as_millis()
+                );
+            } else {
+                eprintln!(
+                    "[lyrics] annotation skipped {} reason=cache_no_longer_needs_annotation elapsed_ms={}",
+                    TrackLog(&job.metadata), started.elapsed().as_millis()
+                );
             }
             Ok(())
         })
         .await;
         match work {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => eprintln!("[lyrics] annotation failed: {error}"),
-            Err(error) => eprintln!("[lyrics] annotation worker failed: {error}"),
+            Ok(Err(error)) => eprintln!(
+                "[lyrics] annotation failed track_id={:?} elapsed_ms={} error={error:?}",
+                track_id.0,
+                started.elapsed().as_millis()
+            ),
+            Err(error) => eprintln!(
+                "[lyrics] annotation worker failed track_id={:?} elapsed_ms={} error={error}",
+                track_id.0,
+                started.elapsed().as_millis()
+            ),
         }
         shared
             .annotations
@@ -412,6 +569,20 @@ async fn run_annotation_worker(shared: Arc<Shared>) {
             .expect("annotation schedule lock poisoned")
             .finish(false);
     }
+}
+
+fn annotation_counts(result: &TrackLyrics) -> (usize, usize, usize) {
+    let Some(annotation) = &result.annotated_lyrics else {
+        return (0, 0, 0);
+    };
+    let meanings = annotation
+        .plain
+        .iter()
+        .chain(&annotation.synced)
+        .filter_map(|reading| reading.dictionary.as_ref())
+        .map(|dictionary| dictionary.meanings.len())
+        .sum();
+    (annotation.plain.len(), annotation.synced.len(), meanings)
 }
 
 fn empty(id: &TrackId, status: LyricsStatus, retry: Option<u32>) -> TrackLyrics {
@@ -481,6 +652,12 @@ async fn run_worker(
         }
     };
     let mut gate = Gate::restored(deadline, failures);
+    if deadline > unix_now() {
+        eprintln!(
+            "[lyrics] lrclib cooldown restored reason=persisted_gate delay_seconds={} retry_at_unix={deadline} failures={failures}",
+            deadline.saturating_sub(unix_now())
+        );
+    }
     loop {
         if Instant::now() < gate.until {
             tokio::time::sleep_until(gate.until).await;
@@ -501,12 +678,20 @@ async fn run_worker(
             .get(&job.metadata.id)
             .map(Metadata::from_track);
         let cached = shared.cache.get(&job.metadata, unix_now());
+        if let Ok(cached) = &cached {
+            shared.observe_cache(&job.metadata, cached.as_ref());
+        }
         if current.as_ref() != Some(&job.metadata)
             || !job.metadata.usable()
             || !matches!(cached, Ok(None))
         {
             if let Err(error) = cached {
-                eprintln!("[lyrics] cache read failed: {error}");
+                shared.log_cache_failure(&job.metadata, "read", &error);
+            } else if current.as_ref() != Some(&job.metadata) || !job.metadata.usable() {
+                eprintln!(
+                    "[lyrics] lrclib skipped {} reason=stale_or_unusable_metadata",
+                    TrackLog(&job.metadata)
+                );
             }
             shared
                 .schedule
@@ -519,13 +704,23 @@ async fn run_worker(
         // process exits mid-request, restart still cannot immediately retry.
         let reserve = unix_now() + 10 + request_gap.as_secs().max(1) + 1;
         if let Err(error) = shared.cache.save_throttle(reserve, gate.failures) {
-            eprintln!("[lyrics] cannot persist provider reservation: {error}");
+            eprintln!(
+                "[lyrics] cannot persist provider reservation {} error={error}",
+                TrackLog(&job.metadata)
+            );
             shared
                 .schedule
                 .lock()
                 .expect("lyrics schedule lock poisoned")
                 .finish(false);
-            gate.completed(Some(0), request_gap);
+            let delay = gate.completed(Some(0), request_gap);
+            log_cooldown(
+                "reservation_write_failed",
+                delay,
+                unix_now() + delay.as_secs(),
+                gate.failures,
+                0,
+            );
             continue;
         }
         let outcome = attempt(&client, &base_url, &job).await;
@@ -535,13 +730,31 @@ async fn run_worker(
         };
         let delay = gate.completed(failure, request_gap);
         let persisted_deadline = unix_now().saturating_add(delay.as_secs()).saturating_add(1);
+        log_cooldown(
+            if failure.is_some() {
+                "upstream_transient"
+            } else {
+                "request_spacing"
+            },
+            delay,
+            persisted_deadline,
+            gate.failures,
+            failure.unwrap_or(0),
+        );
         if let Err(error) = shared
             .cache
             .save_throttle(persisted_deadline, gate.failures)
         {
             eprintln!("[lyrics] cannot persist provider cooldown: {error}");
             // Do not keep making requests if persistence is broken.
-            gate.completed(Some(BACKOFF_MAX), request_gap);
+            let delay = gate.completed(Some(BACKOFF_MAX), request_gap);
+            log_cooldown(
+                "cooldown_write_failed",
+                delay,
+                unix_now() + delay.as_secs(),
+                gate.failures,
+                0,
+            );
         }
         let unchanged = library
             .read()
@@ -552,6 +765,17 @@ async fn run_worker(
             .as_ref()
             == Some(&job.metadata);
         let fallback = unchanged && matches!(outcome, Outcome::Fallback);
+        if fallback {
+            eprintln!(
+                "[lyrics] lrclib fallback queued {} from=exact to=search retry_at_unix={persisted_deadline}",
+                TrackLog(&job.metadata)
+            );
+        } else if !unchanged {
+            eprintln!(
+                "[lyrics] lrclib result discarded {} reason=metadata_changed",
+                TrackLog(&job.metadata)
+            );
+        }
         let result = match outcome {
             Outcome::Found(result) => Some(result),
             Outcome::NotFound => Some(empty(&job.metadata.id, LyricsStatus::NotFound, None)),
@@ -564,11 +788,21 @@ async fn run_worker(
         };
         if unchanged && let Some(result) = result {
             match shared.cache.put(&job.metadata, &result, unix_now()) {
-                Err(error) => eprintln!("[lyrics] cache write failed: {error}"),
-                Ok(()) if needs_annotation(&result) => {
-                    shared.enqueue_annotation(job.metadata.clone());
+                Err(error) => eprintln!(
+                    "[lyrics] cache write failed {} error={error}",
+                    TrackLog(&job.metadata)
+                ),
+                Ok(()) => {
+                    eprintln!(
+                        "[lyrics] cache persisted {} status={} retry_after_seconds={}",
+                        TrackLog(&job.metadata),
+                        cache_state(Some(&result)).0,
+                        result.retry_after_seconds.unwrap_or(0)
+                    );
+                    if needs_annotation(&result) {
+                        shared.enqueue_annotation(job.metadata.clone());
+                    }
                 }
-                Ok(()) => {}
             }
         }
         shared
@@ -579,11 +813,46 @@ async fn run_worker(
     }
 }
 
+fn log_cooldown(reason: &str, delay: Duration, deadline: u64, failures: u32, retry_after: u64) {
+    eprintln!(
+        "[lyrics] lrclib cooldown scope=global reason={reason} delay_ms={} retry_after_seconds={retry_after} retry_at_unix={deadline} failures={failures}",
+        delay.as_millis()
+    );
+}
+
 enum Outcome {
     Found(TrackLyrics),
     Fallback,
     NotFound,
     Transient(u64),
+}
+
+struct AttemptLog<'a> {
+    job: &'a Job,
+    outcome: &'a Outcome,
+    http_status: u16,
+    reason: &'static str,
+    elapsed_ms: u128,
+}
+
+impl fmt::Display for AttemptLog<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (outcome, retry) = match self.outcome {
+            Outcome::Found(result) => (cache_state(Some(result)).0, 0),
+            Outcome::NotFound => ("not_found", 0),
+            Outcome::Fallback => ("fallback", 0),
+            Outcome::Transient(retry) => ("transient", *retry),
+        };
+        write!(
+            f,
+            "[lyrics] lrclib finish {} lookup={} http_status={} outcome={outcome} reason={} retry_after_seconds={retry} elapsed_ms={}",
+            TrackLog(&self.job.metadata),
+            if self.job.search { "search" } else { "exact" },
+            self.http_status,
+            self.reason,
+            self.elapsed_ms
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -704,6 +973,27 @@ fn retry_after(value: Option<&reqwest::header::HeaderValue>, now: SystemTime) ->
 
 async fn attempt(client: &reqwest::Client, base_url: &str, job: &Job) -> Outcome {
     let metadata = &job.metadata;
+    let started = Instant::now();
+    eprintln!(
+        "[lyrics] lrclib start {} lookup={}",
+        TrackLog(metadata),
+        if job.search { "search" } else { "exact" }
+    );
+    // Only classification/status is logged, never reqwest errors containing
+    // request URLs, provider response text, or deserialization source data.
+    let complete = |outcome, http_status, reason| {
+        eprintln!(
+            "{}",
+            AttemptLog {
+                job,
+                outcome: &outcome,
+                http_status,
+                reason,
+                elapsed_ms: started.elapsed().as_millis(),
+            }
+        );
+        outcome
+    };
     let endpoint = if job.search { "search" } else { "get" };
     let title = if job.search {
         title_key(&metadata.title)
@@ -723,24 +1013,45 @@ async fn attempt(client: &reqwest::Client, base_url: &str, job: &Job) -> Outcome
         .query(&query)
         .send()
         .await;
-    let Ok(mut response) = response else {
-        return Outcome::Transient(0);
+    let mut response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            return complete(
+                Outcome::Transient(0),
+                0,
+                if error.is_timeout() {
+                    "timeout"
+                } else if error.is_connect() {
+                    "connect_failed"
+                } else {
+                    "transport_failed"
+                },
+            );
+        }
     };
     let status = response.status();
     if status == reqwest::StatusCode::NOT_FOUND && !job.search {
-        return Outcome::Fallback;
+        return complete(Outcome::Fallback, status.as_u16(), "exact_not_found");
     }
     if !status.is_success() {
-        return Outcome::Transient(retry_after(
-            response.headers().get(reqwest::header::RETRY_AFTER),
-            SystemTime::now(),
-        ));
+        return complete(
+            Outcome::Transient(retry_after(
+                response.headers().get(reqwest::header::RETRY_AFTER),
+                SystemTime::now(),
+            )),
+            status.as_u16(),
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                "rate_limited"
+            } else {
+                "http_status"
+            },
+        );
     }
     if response
         .content_length()
         .is_some_and(|n| n > MAX_BODY as u64)
     {
-        return Outcome::Transient(0);
+        return complete(Outcome::Transient(0), status.as_u16(), "body_too_large");
     }
     let mut bytes = Vec::new();
     loop {
@@ -749,21 +1060,30 @@ async fn attempt(client: &reqwest::Client, base_url: &str, job: &Job) -> Outcome
                 bytes.extend_from_slice(&chunk)
             }
             Ok(None) => break,
-            _ => return Outcome::Transient(0),
+            Ok(Some(_)) => {
+                return complete(Outcome::Transient(0), status.as_u16(), "body_too_large");
+            }
+            Err(_) => return complete(Outcome::Transient(0), status.as_u16(), "body_read_failed"),
         }
     }
     if job.search {
         let Ok(records) = serde_json::from_slice::<Vec<Record>>(&bytes) else {
-            return Outcome::Transient(0);
+            return complete(Outcome::Transient(0), status.as_u16(), "invalid_json");
         };
-        select_search_result(metadata, records)
+        let outcome = select_search_result(metadata, records);
+        let reason = if matches!(outcome, Outcome::NotFound) {
+            "no_match_or_ambiguous"
+        } else {
+            "matched"
+        };
+        complete(outcome, status.as_u16(), reason)
     } else {
         let Ok(record) = serde_json::from_slice::<Record>(&bytes) else {
-            return Outcome::Transient(0);
+            return complete(Outcome::Transient(0), status.as_u16(), "invalid_json");
         };
         match lyrics_result(metadata, record) {
-            Some(result) => Outcome::Found(result),
-            None => Outcome::Fallback,
+            Some(result) => complete(Outcome::Found(result), status.as_u16(), "matched"),
+            None => complete(Outcome::Fallback, status.as_u16(), "no_usable_match"),
         }
     }
 }
@@ -972,6 +1292,142 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    #[test]
+    fn diagnostic_cache_transitions_ignore_polls_and_have_bounded_memory() {
+        let metadata = Metadata::from_track(&track("曲"));
+        let mut observations = CacheObservations::default();
+        let miss = cache_state(None);
+        assert!(observations.changed(&metadata, miss));
+        for _ in 0..100 {
+            assert!(!observations.changed(&metadata, miss));
+        }
+        let mut available = lyrics_result(&metadata, record("曲")).unwrap();
+        assert_eq!(cache_state(Some(&available)), ("available", "needed"));
+        assert!(observations.changed(&metadata, cache_state(Some(&available))));
+        available.annotated_lyrics = Some(protocol::AnnotatedLyrics {
+            version: crate::furigana::VERSION.into(),
+            plain: vec![],
+            synced: vec![],
+        });
+        assert_eq!(cache_state(Some(&available)), ("available", "ready"));
+        assert!(observations.changed(&metadata, cache_state(Some(&available))));
+        for retry in [120, 119, 5] {
+            available.retry_after_seconds = Some(retry);
+            assert!(!observations.changed(&metadata, cache_state(Some(&available))));
+        }
+        let changed = Metadata {
+            duration: Some(181),
+            ..metadata.clone()
+        };
+        assert!(observations.changed(&changed, miss));
+        for n in 0..MAX_QUEUE * 2 {
+            observations.changed(&Metadata::from_track(&track(&n.to_string())), miss);
+        }
+        assert_eq!(observations.0.len(), MAX_QUEUE);
+        assert!(
+            observations.changed(&metadata, miss),
+            "evicted entries can log again"
+        );
+        for (status, expected) in [
+            (LyricsStatus::NotFound, "not_found"),
+            (LyricsStatus::Unavailable, "transient"),
+            (LyricsStatus::Instrumental, "instrumental"),
+        ] {
+            assert_eq!(
+                cache_state(Some(&empty(&metadata.id, status, None))),
+                (expected, "not_applicable")
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_attempt_lines_cover_outcomes_without_source_or_response_content() {
+        let job = Job {
+            metadata: Metadata::from_track(&track("曲")),
+            search: false,
+        };
+        let found = lyrics_result(&job.metadata, record("曲")).unwrap();
+        let line = AttemptLog {
+            job: &job,
+            outcome: &Outcome::Found(found.clone()),
+            http_status: 200,
+            reason: "matched",
+            elapsed_ms: 42,
+        }
+        .to_string();
+        assert_eq!(
+            line,
+            "[lyrics] lrclib finish track_id=\"曲\" title=\"曲\" artist=\"歌手\" lookup=exact http_status=200 outcome=available reason=matched retry_after_seconds=0 elapsed_ms=42"
+        );
+        assert!(!line.contains(found.plain_lyrics.as_ref().unwrap()));
+        assert!(!line.contains("https://"));
+        for (outcome, expected, status, reason, search) in [
+            (Outcome::Fallback, "fallback", 404, "exact_not_found", false),
+            (
+                Outcome::NotFound,
+                "not_found",
+                200,
+                "no_match_or_ambiguous",
+                true,
+            ),
+            (
+                Outcome::Transient(120),
+                "transient",
+                429,
+                "rate_limited",
+                false,
+            ),
+            (
+                Outcome::Found(empty(&job.metadata.id, LyricsStatus::Instrumental, None)),
+                "instrumental",
+                200,
+                "matched",
+                false,
+            ),
+        ] {
+            let job = Job {
+                search,
+                ..job.clone()
+            };
+            let line = AttemptLog {
+                job: &job,
+                outcome: &outcome,
+                http_status: status,
+                reason,
+                elapsed_ms: 7,
+            }
+            .to_string();
+            assert!(line.contains(&format!("outcome={expected} ")));
+            assert!(line.contains(&format!("http_status={status}")));
+            assert!(line.contains(&format!("reason={reason}")));
+            assert!(line.contains(if search {
+                "lookup=search"
+            } else {
+                "lookup=exact"
+            }));
+            if matches!(outcome, Outcome::Transient(_)) {
+                assert!(line.contains("retry_after_seconds=120"));
+            }
+        }
+        let metadata = Metadata::from_track(&track("line\n\"two\""));
+        let line = TrackLog(&metadata).to_string();
+        assert!(!line.contains('\n'));
+        assert!(line.contains(r#"title="line\n\"two\"""#));
+        assert_eq!(annotation_counts(&found), (0, 0, 0));
+    }
+
+    #[test]
+    fn diagnostic_annotation_counts_only_known_ruby_and_dictionary_entries() {
+        let metadata = Metadata::from_track(&track("曲"));
+        let result = annotate(lyrics_result(&metadata, record("曲")).unwrap()).unwrap();
+        let annotation = result.annotated_lyrics.as_ref().unwrap();
+        let (plain, synced, meanings) = annotation_counts(&result);
+        assert_eq!(plain, annotation.plain.len());
+        assert_eq!(synced, annotation.synced.len());
+        assert!(plain > 0);
+        assert!(meanings > 0);
     }
 
     #[test]
