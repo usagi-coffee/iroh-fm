@@ -343,7 +343,7 @@
   {@attach globalTrackKeybinds}
   class="bg-base flex h-full min-h-0 w-full flex-col"
 >
-  <div class="border-surface0 bg-mantle flex h-10 shrink-0 items-center gap-3 border-b px-3">
+  <div class="border-surface0 bg-mantle flex h-10 shrink-0 items-center gap-3 border-b pl-3">
     <SearchIcon class="text-sm" />
     <input
       {@attach focusRequestedFilter}
@@ -376,8 +376,8 @@
       aria-label={label}
       title={label}
       onclick={editTitleFilter}
-      class="hover:bg-surface0 hover:text-mauve flex h-8 min-w-8 shrink-0 items-center justify-center gap-1 px-1 {count
-        ? 'bg-surface0 text-mauve'
+      class="hover:text-mauve flex h-8 min-w-8 shrink-0 items-center justify-end gap-1 pr-2 {count
+        ? 'text-mauve'
         : 'text-overlay1'}"
     >
       <FilterIcon class="text-sm" />

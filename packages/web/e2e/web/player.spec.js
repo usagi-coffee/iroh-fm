@@ -155,6 +155,14 @@ test("hides song titles by local keyword without replacing the search", async ({
   await expect(rows).toHaveCount(1);
   await expect(rows).toContainText("Nebula Drift");
 
+  const rightEdge = (element) => element.getBoundingClientRect().right;
+  const countRight = await filter.getByText("3", { exact: true }).evaluate(rightEdge);
+  const timeRight = await rows.getByText("0:20", { exact: true }).evaluate(rightEdge);
+  expect(countRight).toBeCloseTo(timeRight, 0);
+  await expect(filter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await filter.hover();
+  await expect(filter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+
   await search.fill("");
   await expect(page).toHaveURL(/\/tracks$/);
   await page.reload();
