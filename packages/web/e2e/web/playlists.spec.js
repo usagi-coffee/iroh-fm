@@ -32,6 +32,38 @@ test("touch holds open album and track actions instead of starting a playlist dr
   }
 });
 
+test("shares title exclusions with starred tracks and playlists without removing songs", async ({
+  page,
+}) => {
+  const album = page.getByRole("button", { name: "Play album Test Signals" });
+  await album.click({ button: "right" });
+  await page.getByRole("dialog").getByRole("button", { name: "Star album" }).click();
+  await album.click({ button: "right" });
+  await page.getByRole("button", { name: "Add album to playlist" }).click();
+  await page.getByRole("button", { name: "Create playlist and add tracks" }).click();
+
+  await page.getByRole("link", { name: "Starred", exact: true }).click();
+  await expect(page.getByRole("row")).toHaveCount(3);
+  const filter = page.getByRole("button", { name: /^Filter songs/ });
+  await filter.click();
+  await page.getByLabel("Hide titles containing").fill("drift");
+  await page.getByRole("button", { name: "APPLY" }).click();
+  await expect(page.getByRole("row")).toHaveCount(2);
+
+  await page.getByRole("link", { name: "Playlist", exact: true }).click();
+  await expect(page.getByRole("row")).toHaveCount(2);
+  await page.getByRole("button", { name: "Play First Light" }).click();
+  await page.getByRole("button", { name: "Next track" }).click();
+  await expect(
+    page.locator("footer").getByTitle("Show currently playing track").first(),
+  ).toHaveText("Quiet Harbor");
+
+  await filter.click();
+  await page.getByRole("button", { name: "CLEAR ALL" }).click();
+  await page.getByRole("button", { name: "APPLY" }).click();
+  await expect(page.getByRole("row").nth(1)).toContainText("Nebula Drift");
+});
+
 test("creates, fills, renames, plays, and deletes a playlist", async ({ page }) => {
   await page.getByRole("button", { name: "Create playlist" }).click();
   await expect(page).toHaveURL(/\/playlists\/playlist-1$/);

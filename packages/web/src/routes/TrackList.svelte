@@ -8,6 +8,7 @@
   import { modal } from "#lib/modals/index.js";
   import PlaylistPickerModal from "#lib/modals/PlaylistPickerModal.svelte";
   import SnippetModal from "#lib/modals/Snippet.svelte";
+  import TitleFilterModal from "#lib/modals/TitleFilterModal.svelte";
   import { App } from "#lib/runes/App.svelte.js";
   import { immediateTauriWheelScroll } from "#lib/ui/immediate-wheel-scroll.js";
   import { handlesOwnKeys } from "#lib/ui/keyboard.js";
@@ -20,6 +21,7 @@
   import UpIcon from "virtual:icons/ri/arrow-up-line";
   import RemoveIcon from "virtual:icons/ri/delete-bin-line";
   import DragIcon from "virtual:icons/ri/draggable";
+  import FilterIcon from "virtual:icons/ri/filter-line";
   import PauseIcon from "virtual:icons/ri/pause-fill";
   import PlayIcon from "virtual:icons/ri/play-fill";
   import AddIcon from "virtual:icons/ri/play-list-add-line";
@@ -133,6 +135,11 @@
       App.library.trackFilterFocusPending = false;
     });
     return () => cancelAnimationFrame(frame);
+  }
+
+  async function editTitleFilter() {
+    const filter = await modal(TitleFilterModal, { initialFilter: App.library.titleFilter });
+    if (filter !== null) App.library.titleFilter = filter;
   }
 
   function selectFirstSearchResult() {
@@ -360,6 +367,22 @@
     <span class="text-3xs text-overlay0 shrink-0 font-mono"
       >{tracks.length} / {App.library.summary.track_count}</span
     >
+    {const count = $derived(App.library.filterKeywords.length)}
+    {const label = $derived(count ? `Filter songs (${count} active)` : "Filter songs")}
+    <button
+      type="button"
+      data-native-keyboard
+      aria-haspopup="dialog"
+      aria-label={label}
+      title={label}
+      onclick={editTitleFilter}
+      class="hover:bg-surface0 hover:text-mauve flex h-8 min-w-8 shrink-0 items-center justify-center gap-1 px-1 {count
+        ? 'bg-surface0 text-mauve'
+        : 'text-overlay1'}"
+    >
+      <FilterIcon class="text-sm" />
+      {#if count}<span class="text-3xs font-mono">{count}</span>{/if}
+    </button>
   </div>
 
   <div

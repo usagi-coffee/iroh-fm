@@ -137,6 +137,43 @@ test("filters tracks by title", async ({ page }) => {
   ).toHaveText("Nebula Drift");
 });
 
+test("hides song titles by local keyword without replacing the search", async ({ page }) => {
+  const search = page.getByPlaceholder("Filter artist, title, album…");
+  const filter = page.getByRole("button", { name: /^Filter songs/ });
+  const dialog = page.getByRole("dialog", { name: "Filter songs" });
+  const keywords = dialog.getByRole("textbox", { name: "Hide titles containing" });
+  const rows = page.getByRole("row");
+
+  await search.fill("Aurora");
+  await expect(rows).toHaveCount(2);
+  await filter.press("Enter");
+  await expect(keywords).toBeFocused();
+  await keywords.fill("  irst LI  \nQuiet Harbor\n\n(Drift)\nquiet harbor");
+  await dialog.getByRole("button", { name: "APPLY" }).press("Enter");
+  await expect(filter).toHaveAccessibleName("Filter songs (3 active)");
+  await expect(search).toHaveValue("Aurora");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("Nebula Drift");
+
+  await search.fill("");
+  await expect(page).toHaveURL(/\/tracks$/);
+  await page.reload();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("Nebula Drift");
+
+  await filter.click();
+  await dialog.getByRole("button", { name: "CLEAR ALL" }).click();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(rows).toHaveCount(1);
+
+  await filter.click();
+  await dialog.getByRole("button", { name: "CLEAR ALL" }).click();
+  await dialog.getByRole("button", { name: "APPLY" }).click();
+  await expect(filter).toHaveAccessibleName("Filter songs");
+  await expect(rows).toHaveCount(3);
+});
+
 test("edits client settings through the settings model", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "web", "Native clients use platform-owned settings.");
 

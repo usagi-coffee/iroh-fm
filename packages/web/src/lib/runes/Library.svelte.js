@@ -7,6 +7,8 @@ import { Track } from "#lib/runes/Track.svelte.js";
 import { createTrackListItems } from "#lib/track-list-items.js";
 import { filterTracks, friendlyError, indexTracksForSearch } from "#lib/utils.js";
 
+const TITLE_FILTER_KEY = "iroh-fm-title-filter";
+
 export class Library {
   summary = $state.raw({ artist_count: 0, album_count: 0, track_count: 0 });
   /** @type {import('@iroh-fm/client/types').Album[]} */
@@ -20,9 +22,26 @@ export class Library {
   /** @type {import('@iroh-fm/client/types').Playlist[]} */
   playlists = $state.raw([]);
   offlineOnly = $state(false);
+  #titleFilter = $state(
+    typeof window === "undefined" ? "" : (localStorage.getItem(TITLE_FILTER_KEY) ?? ""),
+  );
+  filterKeywords = $derived([
+    ...new Set(
+      this.#titleFilter
+        .toLowerCase()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  ]);
+  #listedTracks = $derived(
+    this.filterKeywords.length
+      ? this.tracks.filter((track) => this.#allowsTitle(track))
+      : this.tracks,
+  );
   starredTrackIds = $derived(new Set(this.starred.tracks.map((track) => track.id)));
   starredAlbumIds = $derived(new Set(this.starred.albums.map((album) => album.id)));
-  cachedTracks = $derived(this.tracks.filter((track) => track.cached));
+  cachedTracks = $derived(this.#listedTracks.filter((track) => track.cached));
   /** @type {SvelteSet<string>} */
   cachingTrackIds = new SvelteSet();
   /** @type {SvelteSet<string>} */
@@ -71,13 +90,15 @@ export class Library {
     }
     return selected;
   });
-  starredTracks = $derived(this.tracks.filter((track) => this.allStarredTrackIds.has(track.id)));
+  starredTracks = $derived(
+    this.#listedTracks.filter((track) => this.allStarredTrackIds.has(track.id)),
+  );
   cachedStarredTracks = $derived(this.starredTracks.filter((track) => track.cached));
-  availableTracks = $derived(this.offlineOnly ? this.cachedTracks : this.tracks);
+  availableTracks = $derived(this.offlineOnly ? this.cachedTracks : this.#listedTracks);
   availableStarredTracks = $derived(
     this.offlineOnly ? this.cachedStarredTracks : this.starredTracks,
   );
-  trackListItems = $derived(this.createTrackListItems(this.tracks, false));
+  trackListItems = $derived(this.createTrackListItems(this.#listedTracks, false));
   cachedTrackListItems = $derived(this.createTrackListItems(this.cachedTracks, true));
   starredTrackListItems = $derived(this.createTrackListItems(this.starredTracks, false));
   cachedStarredTrackListItems = $derived(this.createTrackListItems(this.cachedStarredTracks, true));
@@ -90,7 +111,12 @@ export class Library {
   offlineAlbums = $derived(
     this.albums.filter((album) => (this.cachedTracksByAlbum.get(album.id)?.length ?? 0) > 0),
   );
-  visibleAlbums = $derived(this.offlineOnly ? this.offlineAlbums : this.albums);
+  visibleAlbums = $derived.by(() => {
+    const albums = this.offlineOnly ? this.offlineAlbums : this.albums;
+    return this.filterKeywords.length
+      ? albums.filter((album) => this.firstAvailableTrackForAlbum(album))
+      : albums;
+  });
   fullyCachedAlbumIds = $derived(
     new Set(
       this.albums
@@ -111,6 +137,24 @@ export class Library {
   /** @param {import('#lib/runes/App.svelte.js').Application} app */
   constructor(app) {
     this.app = app;
+  }
+
+  get titleFilter() {
+    return this.#titleFilter;
+  }
+
+  /** @param {string} value */
+  set titleFilter(value) {
+    this.#titleFilter = value.trim();
+    if (this.#titleFilter) localStorage.setItem(TITLE_FILTER_KEY, this.#titleFilter);
+    else localStorage.removeItem(TITLE_FILTER_KEY);
+  }
+
+  /** @param {Track} track */
+  #allowsTitle(track) {
+    if (!this.filterKeywords.length) return true;
+    const title = track.title.toLowerCase();
+    return !this.filterKeywords.some((keyword) => title.includes(keyword));
   }
 
   /**
@@ -180,7 +224,7 @@ export class Library {
   tracksForPlaylist(playlist) {
     const tracks = playlist.track_ids
       .map((id) => this.tracksById.get(id))
-      .filter((track) => track && (!this.offlineOnly || track.cached));
+      .filter((track) => track && (!this.offlineOnly || track.cached) && this.#allowsTitle(track));
 
     return /** @type {Track[]} */ (tracks);
   }
@@ -368,8 +412,7 @@ export class Library {
 
   /** @param {import('@iroh-fm/client/types').Album} album */
   firstAvailableTrackForAlbum(album) {
-    const ids = new Set(album.track_ids);
-    return this.tracks.find((track) => ids.has(track.id) && (!this.offlineOnly || track.cached));
+    return this.tracksForAlbum(album).find((track) => this.#allowsTitle(track));
   }
 
   /** @param {import('@iroh-fm/client/types').Album} album */
